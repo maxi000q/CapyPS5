@@ -1,0 +1,85 @@
+// SPDX-FileCopyrightText: Copyright 2026 CapyPS5 Project
+// SPDX-FileCopyrightText: Copyright KytyPS5 contributors; based on Kyty, Copyright (c) 2021 InoriRus (MIT)
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include "graphics/shader/recompiler/ir/passes/DeadCodeElimination.h"
+
+#include <algorithm>
+
+namespace Libs::Graphics::ShaderRecompiler::IR {
+
+void RemoveIdentities(const BlockList& blocks) {
+	for (auto* block: blocks) {
+		auto& instructions = block->Instructions();
+		for (auto inst = instructions.begin(); inst != instructions.end();) {
+			if (inst->GetOpcode() != ValueOpcode::Identity) {
+				inst++;
+				continue;
+			}
+			const auto replacement = inst->Arg(0);
+			inst->ReplaceUsesWith(replacement, false);
+			inst = instructions.erase(inst);
+		}
+	}
+}
+
+void EliminateDeadCode(const BlockList& blocks) {
+	bool changed;
+	do {
+		std::vector<Inst*> pending;
+		for (auto* block: blocks) {
+			for (auto& inst: *block) {
+				// Retained resource-planning instructions live outside the block list.
+				inst.live = inst.MayHaveSideEffects() || std::ranges::any_of(inst.Uses(),
+				    [](const Use& use) { return use.user->Parent() == nullptr; });
+				if (inst.live) pending.push_back(&inst);
+			}
+		}
+		while (!pending.empty()) {
+			const auto* inst = pending.back();
+			pending.pop_back();
+			for (size_t arg = 0; arg < inst->NumArgs(); ++arg) {
+				auto* input = inst->Arg(arg).TryInstruction();
+				if (input != nullptr && input->Parent() != nullptr && !input->live) {
+					input->live = true;
+					pending.push_back(input);
+				}
+			}
+		}
+		// Unlink every dead operand before freeing nodes in a dead Phi cycle.
+		for (auto* block: blocks)
+			for (auto& inst: *block)
+				if (!inst.live) inst.Invalidate();
+		for (auto* block: blocks)
+			std::erase_if(block->Instructions(), [](const Inst& inst) { return !inst.live; });
+
+		changed = false;
+		for (auto* block: blocks) {
+			const auto& term = block->terminator;
+			if (term.kind != CFG::TerminatorKind::ConditionalBranch || term.loop_header ||
+			    block->condition.IsImmediate()) continue;
+			for (const bool take_true: {false, true}) {
+				const auto* empty = take_true ? term.false_block : term.true_block;
+				const auto* merge = take_true ? term.true_block : term.false_block;
+				if (empty == nullptr || merge == nullptr || !empty->empty() ||
+				    empty->terminator.loop_header || merge->terminator.loop_header ||
+				    empty->terminator.kind != CFG::TerminatorKind::Branch ||
+				    empty->terminator.true_block != merge ||
+				    std::ranges::any_of(*merge, [](const Inst& inst) {
+					    return inst.GetOpcode() == ValueOpcode::Phi;
+				    })) continue;
+				// Keep the CFG and SSA edges intact; only the empty detour's predicate is dead.
+				for (auto& inst: *block) {
+					if (inst.GetOpcode() == ValueOpcode::Reference &&
+					    inst.Arg(0).Resolve() == block->condition.Resolve())
+						inst.SetArg(0, Value(take_true));
+				}
+				block->condition = Value(take_true);
+				changed = true;
+				break;
+			}
+		}
+	} while (changed);
+}
+
+} // namespace Libs::Graphics::ShaderRecompiler::IR

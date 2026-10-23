@@ -1,0 +1,16 @@
+// SPDX-FileCopyrightText: Copyright 2026 CapyPS5 Project
+// SPDX-FileCopyrightText: Copyright KytyPS5 contributors; based on Kyty, Copyright (c) 2021 InoriRus (MIT)
+// SPDX-License-Identifier: GPL-2.0-only
+
+#define KYTY_VERSION "@KYTY_VERSION@"
+#define KYTY_BUILD_REPOSITORY "@KYTY_BUILD_REPOSITORY@"
+#define KYTY_RELEASE_TAG "@KYTY_RELEASE_TAG@"
+#cmakedefine KYTY_OFFICIAL_BUILD
+#cmakedefine KYTY_FORK_BUILD
+#define KYTY_ENDIAN @KYTY_ENDIAN@
+#define KYTY_PLATFORM @KYTY_PLATFORM@
+#define KYTY_COMPILER KYTY_COMPILER_@KYTY_COMPILER@
+#define KYTY_LINKER KYTY_LINKER_@KYTY_LINKER@
+#define KYTY_BUILD @KYTY_BUILD@
+#cmakedefine KYTY_FINAL
+

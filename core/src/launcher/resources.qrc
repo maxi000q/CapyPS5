@@ -1,0 +1,18 @@
+<!-- SPDX-FileCopyrightText: Copyright 2026 CapyPS5 Project -->
+<!-- SPDX-FileCopyrightText: Copyright KytyPS5 contributors; based on Kyty, Copyright (c) 2021 InoriRus (MIT) -->
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<RCC>
+ <qresource prefix="/icons">
+  <file alias="edit-configuration.svg">icons/edit-configuration.svg</file>
+  <file alias="global-settings.svg">icons/global-settings.svg</file>
+  <file alias="input-mapping.svg">icons/input-mapping.svg</file>
+  <file alias="refresh.svg">icons/refresh.svg</file>
+  <file alias="grid-view.svg">icons/grid-view.svg</file>
+  <file alias="remove-configuration.svg">icons/remove-configuration.svg</file>
+  <file alias="trophy.svg">icons/trophy.svg</file>
+  <file alias="hidden-trophy.png">../../assets/images/hidden-trophy.png</file>
+ </qresource>
+ <qresource prefix="/styles">
+  <file alias="launcher.qss">styles/launcher.qss</file>
+ </qresource>
+</RCC>
