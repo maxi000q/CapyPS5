@@ -149,20 +149,22 @@ jobs:
           VERSION="$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)"
           TAG="${GITHUB_REF_NAME}"
           cat > /tmp/release_notes.md <<'NOTES'
-          **Console Five Pro v0.0.5pro** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
+          **Console Five Pro v0.0.5proplus** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
 
-          ## New in v0.0.5pro — bug fixes from your logs
+          ## New in v0.0.5proplus — present-thread tuning, cache persistence, new options
 
-          - **Fixed the FF7 Rebirth shader crash (exit status 321)**: when a game computes a buffer descriptor on the GPU and the shader compiler cannot track it, the emulator used to close itself (`ResourceTracking` "buffer descriptor is not a valid runtime value"). The shader now binds a safe null descriptor instead — that one access degrades to a zero read / dropped write and the game keeps running.
-          - **Fixed controller input in games that poll pad handle 0** (seen in FF7 Rebirth and Castlevania Dominus Collection logs: `PadCheckHandle failed for handle=0`): real hardware numbers the first pad handle from 0, so handle 0 is now accepted. `scePadOpen` also accepts any local user id and pad type, matching single-user real-console behaviour.
-          - **GPU thread priority boost**: the frame-critical guest GPU thread now requests the same best-effort elevated priority as the emulation thread (v0.0.4pro), for smoother frames on ROMs that allow it.
-          - **Lock-free hot-path logging**: the once-per-key log filter ran a mutex + linear scan on *every* RELEASE_MEM packet and every sampler creation. It is now a fixed-size lock-free hash set — a small, free performance gain in the GPU command path.
+          - **Present-thread priority + 4 ms pacing cap**: the dedicated vblank/present thread is named (CapyPresent) and requests best-effort priority -6 (above the GPU thread's -4), and its pacing sleep is capped at 4 ms instead of the whole remaining wait, so vblank alignment no longer drifts by a whole timer wakeup.
+          - **Pipeline cache persists warm-up better**: besides the 10 s timer, the driver pipeline cache now also flushes once 250 pipelines were built since the last save — a crash during shader warm-up loses at most 250 compilations instead of a full time window.
+          - **New setting — Streaming buffer (64-256 MB)**: the ring that feeds CPU-updated data to the GPU was previously reachable only via setprop. It is now in Settings → Performance and in the per-game sheet; titles that fill 64 MB every frame (Asterix XXL2 class) can trade memory for frame rate.
+          - **Updater ordering fix**: version suffixes now compare correctly (v0.0.5pro < v0.0.5proplus < a plain v0.0.5). Without this fix, devices already on 0.0.5pro would never have been offered this update.
+          - **Perf overlay**: the FPS readout is exponentially smoothed (no more whole-frame jumps twice a second) and the overlay allocates less garbage per sample.
+          - **Cleanup**: 374 lines of commented-out dead code removed across 26 files (disabled debug prints, pre-refactor remnants, a 199-line #if 0 block). See the commit history for all 60+ commits.
 
-          ## Also inherited from v0.0.4pro
+          ## Also inherited from v0.0.5pro / v0.0.4pro
 
+          - FF7 Rebirth shader-crash fix (null-descriptor fallback), pad handle 0 input fix.
           - Console Five Pro rebrand, white icon, Discord community link in Settings.
-          - Fatal crash fix for video/overlay resolve into downscaled render targets.
-          - Elevated emulation-thread priority, tuned background shader compilation, 10 s pipeline-cache flush, quieter offline updater.
+          - Fatal crash fix for video/overlay resolve; elevated emulation-thread priority; lock-free hot-path logging; 10 s pipeline-cache flush.
           - Installs side by side with the original CapyPS5 (package id `org.consolefivepro.emulator`).
 
           ## Requirements
@@ -178,7 +180,7 @@ jobs:
           - Upstream **CapyPS5 v0.0.3** by Ghael-V; this project is an independent rebranded build of it.
           - KytyPS5 and the original Kyty by InoriRus, and the FEX project.
 
-          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.5pro)
+          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.5proplus)
           NOTES
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets."
