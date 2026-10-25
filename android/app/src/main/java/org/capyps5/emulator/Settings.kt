@@ -75,6 +75,19 @@ enum class CoreOption(
         ),
         64L,
     ),
+    ReadAhead(
+        R.string.option_read_ahead,
+        R.string.option_read_ahead_desc,
+        "debug.capy.read_ahead_kb",
+        listOf(
+            64L to R.string.read_ahead_64,
+            128L to R.string.read_ahead_128,
+            256L to R.string.read_ahead_256,
+            512L to R.string.read_ahead_512,
+            1024L to R.string.read_ahead_1024,
+        ),
+        256L,
+    ),
     ;
 
     fun title(context: Context) = context.getString(titleRes)
