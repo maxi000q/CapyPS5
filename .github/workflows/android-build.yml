@@ -104,6 +104,15 @@ jobs:
           done
           ls -la "$JNI"
 
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
       - name: Build APKs (debug + release)
         working-directory: android
         run: ./gradlew assembleDebug assembleRelease --console=plain --no-daemon
