@@ -166,6 +166,7 @@
     <string name="update_checks_desc">Comprueba si hay una versión nueva cada vez que se abre la app</string>
     <string name="update_title">Nueva versión disponible</string>
     <string name="update_versions">Ya está disponible %1$s (tienes la %2$s)</string>
+    <string name="update_size">Tamaño de la descarga: %1$s</string>
     <string name="update_download">Descargar</string>
     <string name="update_install">Instalar</string>
     <string name="update_later">Más tarde</string>

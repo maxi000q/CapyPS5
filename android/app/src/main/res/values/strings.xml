@@ -168,6 +168,7 @@
     <string name="update_checks_desc">Looks for a newer release each time the app starts</string>
     <string name="update_title">New version available</string>
     <string name="update_versions">%1$s is available (you have %2$s)</string>
+    <string name="update_size">Download size: %1$s</string>
     <string name="update_download">Download</string>
     <string name="update_install">Install</string>
     <string name="update_later">Later</string>

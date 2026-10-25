@@ -181,6 +181,13 @@ fun UpdateDialog(release: Release, installed: String, onSkip: () -> Unit, onClos
             style = MaterialTheme.typography.bodyMedium,
             color = Capy.TextSecondary,
         )
+        if (release.apkSize > 0) {
+            Text(
+                stringResource(R.string.update_size, "%.1f MB".format(release.apkSize / 1e6)),
+                style = MaterialTheme.typography.bodySmall,
+                color = Capy.TextSecondary,
+            )
+        }
         if (release.notes.isNotEmpty()) {
             Text(
                 release.notes,
