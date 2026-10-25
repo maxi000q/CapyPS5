@@ -166,6 +166,9 @@
     <!-- Updates -->
     <string name="update_checks">Check for updates</string>
     <string name="update_checks_desc">Looks for a newer release each time the app starts</string>
+    <string name="update_check_now">Check now</string>
+    <string name="update_check_now_desc">Look for a newer release immediately</string>
+    <string name="updates_up_to_date">Console Five Pro is up to date</string>
     <string name="update_title">New version available</string>
     <string name="update_versions">%1$s is available (you have %2$s)</string>
     <string name="update_size">Download size: %1$s</string>

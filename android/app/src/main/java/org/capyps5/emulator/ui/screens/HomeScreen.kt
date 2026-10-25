@@ -112,6 +112,7 @@ fun HomeScreen(
     onLibraryPicked: (String) -> Unit,
     onClearShaderCache: (titleId: String?) -> String,
     onSaveLog: () -> String?,
+    onCheckUpdate: (() -> Unit)? = null,
     overlayActive: Boolean = false,
 ) {
     var tab by remember { mutableIntStateOf(0) }
@@ -240,6 +241,7 @@ fun HomeScreen(
                 driverMessage = driverMessage,
                 onClearShaderCache = { onClearShaderCache(null) },
                 onSaveLog = onSaveLog,
+                onCheckUpdate = onCheckUpdate,
                 onClose = { showSettings = false },
             )
         }

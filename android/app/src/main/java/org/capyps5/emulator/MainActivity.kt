@@ -153,6 +153,7 @@ class MainActivity : CapyActivity() {
                         onLibraryPicked = { settings.addLibraryPath(it) },
                         onClearShaderCache = ::clearShaderCache,
                         onSaveLog = ::saveLog,
+                        onCheckUpdate = ::checkUpdateNow,
                         overlayActive = lastError != null || showWhatsNew || update != null || showSupport,
                     )
                     // One notice at a time: the crash report, what's new, an update, the support card.
@@ -225,6 +226,21 @@ class MainActivity : CapyActivity() {
         process.waitFor()
         file.absolutePath
     }.getOrNull()
+
+    /** Manual check from Settings: shows the update dialog, or a toast when current. */
+    private fun checkUpdateNow() {
+        lifecycleScope.launch {
+            val installed = Updater.installedVersion(this@MainActivity)
+            val found = Updater.checkForUpdate(installed)
+            if (found != null && found.tag != settings.skippedRelease) {
+                update = found
+            } else {
+                android.widget.Toast.makeText(
+                    this@MainActivity, R.string.updates_up_to_date, android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
 
     private fun copyUriToLocal(uri: android.net.Uri): File? = try {
         var name = "eboot.bin"

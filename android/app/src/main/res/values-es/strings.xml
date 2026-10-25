@@ -163,6 +163,9 @@
     <string name="crash_title">El juego se cerró por un error</string>
     <!-- Actualizaciones -->
     <string name="update_checks">Buscar actualizaciones</string>
+    <string name="update_check_now">Buscar ahora</string>
+    <string name="update_check_now_desc">Busca una versión nueva de inmediato</string>
+    <string name="updates_up_to_date">Console Five Pro está actualizado</string>
     <string name="update_checks_desc">Comprueba si hay una versión nueva cada vez que se abre la app</string>
     <string name="update_title">Nueva versión disponible</string>
     <string name="update_versions">Ya está disponible %1$s (tienes la %2$s)</string>

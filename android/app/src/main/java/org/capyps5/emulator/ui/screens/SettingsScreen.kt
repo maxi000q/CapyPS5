@@ -108,6 +108,7 @@ fun SettingsScreen(
     driverMessage: String?,
     onClearShaderCache: () -> String,
     onSaveLog: () -> String?,
+    onCheckUpdate: (() -> Unit)? = null,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -247,7 +248,16 @@ fun SettingsScreen(
                                 ?: context.getString(R.string.log_save_failed)
                         },
                     ),
-                ) + listOfNotNull(message?.let { SettingItem(it) })
+                ) + listOfNotNull(
+                    onCheckUpdate?.let {
+                        SettingItem(
+                            context.getString(R.string.update_check_now),
+                            context.getString(R.string.update_check_now_desc),
+                            onConfirm = it,
+                        )
+                    },
+                    message?.let { SettingItem(it) },
+                )
             },
             SettingsCategory(context.getString(R.string.category_about), Icons.Outlined.Info) {
                 listOf(
