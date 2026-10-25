@@ -115,7 +115,7 @@ jobs:
 
       - name: Build APKs (debug + release)
         working-directory: android
-        run: ./gradlew assembleDebug assembleRelease --console=plain --no-daemon
+        run: ./gradlew assembleDebug assembleRelease --console=plain --no-daemon --stacktrace
 
       - name: Sign release APK
         env:
