@@ -41,6 +41,7 @@ data class PerfSnapshot(
 class PerfMonitor(private val context: Context) {
     private val activityManager = context.getSystemService(ActivityManager::class.java)
     private val batteryManager = context.getSystemService(BatteryManager::class.java)
+    private val batteryChangedFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
     private val pageSizeKb = android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE) / 1024
 
     private val cpuPolicies: List<File> =
@@ -91,7 +92,7 @@ class PerfMonitor(private val context: Context) {
         fpsEma = if (fpsEma <= 0f || fpsRaw <= 0f) fpsRaw else 0.65f * fpsRaw + 0.35f * fpsEma
         val fps = fpsEma
         val memInfo = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
-        val batteryIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val batteryIntent = context.registerReceiver(null, batteryChangedFilter)
         val batteryTemp = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
             ?.takeIf { it != Int.MIN_VALUE }?.div(10f)
         val voltageMv = batteryIntent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0) ?: 0
