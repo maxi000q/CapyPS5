@@ -77,12 +77,13 @@ object Updater {
                 // A release may also ship a debug build; users get the release one.
                 val apk = apks.firstOrNull { !it.optString("name").contains("debug", ignoreCase = true) }
                     ?: apks.firstOrNull() ?: return@mapNotNull null
+                val url = apk.optString("browser_download_url").ifEmpty { return@mapNotNull null }
                 val tag = release.optString("tag_name").ifEmpty { return@mapNotNull null }
                 Release(
                     tag = tag,
                     name = release.optString("name").ifEmpty { tag },
                     notes = release.optString("body").trim(),
-                    apkUrl = apk.optString("browser_download_url"),
+                    apkUrl = url,
                     apkSize = apk.optLong("size"),
                 )
             }
