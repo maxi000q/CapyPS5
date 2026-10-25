@@ -8,7 +8,8 @@
 # Paths default to this machine's setup; override with the environment variables below.
 param(
     [switch]$NoInstall,
-    [string]$Device = $(if ($env:CAPY_DEVICE) { $env:CAPY_DEVICE } else { "282f344c" })
+    # Empty device: adb installs to the single connected device (no -s flag).
+    [string]$Device = $(if ($env:CAPY_DEVICE) { $env:CAPY_DEVICE } else { "" })
 )
 $ErrorActionPreference = "Stop"
 
@@ -25,7 +26,14 @@ $LibCxx = "$Ndk\toolchains\llvm\prebuilt\windows-x86_64\sysroot\usr\lib\aarch64-
 # Ninja must come first: the SDK's cmake/bin ships an older ninja whose log format differs,
 # and alternating between the two discards the build log and forces a full rebuild.
 $env:PATH = "$Ninja;$CMake;$env:PATH"
-if (-not $env:JAVA_HOME) { $env:JAVA_HOME = "C:\Program Files\Android\Android Studio2\jbr" }
+if (-not $env:JAVA_HOME) {
+    # Prefer the JBR of any installed Android Studio; the old hardcoded path was one
+    # machine's setup.
+    $Jbr = Get-ChildItem "$env:ProgramFiles\Android" -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName "jbr" } | Where-Object { Test-Path (Join-Path $_ "bin\java.exe") } |
+        Select-Object -First 1
+    if ($Jbr) { $env:JAVA_HOME = $Jbr } else { $env:JAVA_HOME = "C:\Program Files\Android\Android Studio2\jbr" }
+}
 
 if (-not (Test-Path "$Build\build.ninja")) {
     Write-Host "== Configuring native build"
@@ -72,7 +80,12 @@ $Apk = "$Root\android\app\build\outputs\apk\debug\app-debug.apk"
 Write-Host ("APK: {0} ({1:N1} MB)" -f $Apk, ((Get-Item $Apk).Length / 1MB))
 
 if (-not $NoInstall) {
-    Write-Host "== Installing on $Device"
-    & adb -s $Device install -r $Apk
+    if ($Device) {
+        Write-Host "== Installing on $Device"
+        & adb -s $Device install -r $Apk
+    } else {
+        Write-Host "== Installing on the connected device"
+        & adb install -r $Apk
+    }
     if ($LASTEXITCODE) { throw "adb install failed" }
 }
