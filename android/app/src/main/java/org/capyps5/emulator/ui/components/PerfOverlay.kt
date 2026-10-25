@@ -140,7 +140,10 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.sep() {
 private fun FpsGraph(history: List<Float>, modifier: Modifier) {
     Canvas(modifier) {
         val target = 60f
+        // 60 fps guide at the top edge; a faint 30 fps guide at the half makes
+        // 30 fps titles readable, whose plot otherwise hugs the lower half.
         drawLine(Color(0x33FFFFFF), Offset(0f, 0f), Offset(size.width, 0f), 1f)
+        drawLine(Color(0x1FFFFFFF), Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), 1f)
         if (history.size < 2) return@Canvas
         val step = size.width / (history.size - 1)
         val path = Path()
