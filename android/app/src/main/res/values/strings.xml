@@ -182,9 +182,11 @@
     <string name="trophies_card_next">Still to earn</string>
     <string name="whats_new_title">What\'s new in v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Fixed the fatal shader crash (exit 321) that closed Final Fantasy VII Rebirth and other titles when a game picks a buffer descriptor on the GPU — the shader now falls back safely and the game keeps running.</item>
-        <item>Controller fix: games that poll pad handle 0 (FF7 Rebirth, Castlevania Dominus Collection) now receive input, and scePadOpen accepts any local user and pad type.</item>
-        <item>The GPU thread now also requests elevated priority, matching the emulation thread, for smoother frames where the OS allows it.</item>
-        <item>Hot-path logging made lock-free: less overhead on every command buffer and sampler creation, a small but free performance gain.</item>
+        <item>Present thread tuning: the vblank thread is now named, requests priority above the GPU thread, and paces frames in 4 ms slices instead of one long sleep — smoother frame delivery.</item>
+        <item>The pipeline cache now also flushes after 250 new pipelines, so a crash during shader warm-up loses far less compiled work.</item>
+        <item>New setting — Streaming buffer (64–256 MB): helps titles that fill the ring every frame (Asterix XXL2 class); per-game and global, in Settings → Performance.</item>
+        <item>Updater fix: version suffixes now compare correctly (v0.0.5pro &lt; v0.0.5proplus &lt; a plain v0.0.5) — without it, this update would never have been offered to 0.0.5pro devices.</item>
+        <item>Perf overlay: smoothed FPS readout (no more whole-frame jumps) and less garbage per sample.</item>
+        <item>Cleanup: 374 lines of commented-out dead code removed across 26 files, including a 199-line #if 0 block — see the commit history for all 60+ changes.</item>
     </string-array>
 </resources>
