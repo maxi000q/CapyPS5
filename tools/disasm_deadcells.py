@@ -6,7 +6,10 @@ import capstone
 
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
 
-path = r"C:\Users\LeYJa\Downloads\Dead.Cells.PS5-DUPLEX\Dead.Cells.PS5-DUPLEX\PPSA15552-app0\eboot.bin"
+import sys
+if len(sys.argv) < 2:
+    sys.exit("usage: disasm_deadcells.py <eboot.bin>")
+path = sys.argv[1]
 with open(path, 'rb') as f:
     data = f.read()
 

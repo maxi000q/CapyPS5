@@ -15,7 +15,8 @@ for root, dirs, files in os.walk('core/src/libs'):
                         registered_nids.add(m.group(1))
 
 # Also read libc.prx symbols from Dead Cells
-libc_path = r"C:\Users\LeYJa\Downloads\Dead.Cells.PS5-DUPLEX\Dead.Cells.PS5-DUPLEX\PPSA15552-app0\sce_module\libc.prx"
+import sys
+libc_path = sys.argv[2] if len(sys.argv) > 2 else ""  # optional libc.prx
 libc_symbols = set()
 if os.path.exists(libc_path):
     with open(libc_path, 'rb') as f:
@@ -28,7 +29,9 @@ if os.path.exists(libc_path):
 print(f"CapyPS5 HLE NIDs: {len(registered_nids)}")
 print(f"libc.prx NIDs: {len(libc_symbols)}")
 
-path = r"C:\Users\LeYJa\Downloads\Dead.Cells.PS5-DUPLEX\Dead.Cells.PS5-DUPLEX\PPSA15552-app0\eboot.bin"
+if len(sys.argv) < 2:
+    sys.exit("usage: analyze_deadcells.py <eboot.bin> [libc.prx]")
+path = sys.argv[1]
 with open(path, 'rb') as f:
     data = f.read()
 
