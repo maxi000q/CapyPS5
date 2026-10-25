@@ -261,6 +261,7 @@ private fun PauseMenu(
     onExit: () -> Unit,
 ) {
     var logNote by remember { mutableStateOf<String?>(null) }
+    var confirmingExit by remember { mutableStateOf(false) }
     val entries = listOfNotNull(
         Triple(stringResource(R.string.resume), Icons.Filled.PlayArrow, onResume),
         Triple(stringResource(R.string.settings), Icons.Outlined.Tune, onSettings),
@@ -270,14 +271,19 @@ private fun PauseMenu(
             stringResource(R.string.save_log), Icons.Outlined.Description,
             { logNote = saveLog(context) },
         ),
-        Triple(stringResource(R.string.exit), Icons.AutoMirrored.Outlined.Logout, onExit),
+        Triple(
+            stringResource(R.string.exit), Icons.AutoMirrored.Outlined.Logout,
+            { confirmingExit = true },
+        ),
     )
     var focused by remember { mutableIntStateOf(0) }
     OnNavKey { key ->
         when (key) {
             NavKey.Left -> focused = (focused - 1).mod(entries.size)
             NavKey.Right -> focused = (focused + 1).mod(entries.size)
-            NavKey.Confirm -> entries[focused].third()
+            NavKey.Confirm ->
+                if (confirmingExit) onExit()
+                else entries[focused].third()
             NavKey.Back, NavKey.Menu -> onResume()
             else -> Unit
         }
@@ -304,6 +310,13 @@ private fun PauseMenu(
                     ).joinToString("  ·  "),
                     style = MaterialTheme.typography.bodySmall,
                     color = Capy.TextSecondary,
+                )
+            }
+            if (confirmingExit) {
+                Text(
+                    stringResource(R.string.exit_confirm),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Capy.Bad,
                 )
             }
             logNote?.let {

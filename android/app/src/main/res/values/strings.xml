@@ -169,6 +169,7 @@
     <string name="update_check_now">Check now</string>
     <string name="update_check_now_desc">Look for a newer release immediately</string>
     <string name="updates_up_to_date">Console Five Pro is up to date</string>
+    <string name="exit_confirm">Leave the game? The emulator process ends; unsaved in-game progress is kept by the game itself.</string>
     <string name="update_title">New version available</string>
     <string name="update_versions">%1$s is available (you have %2$s)</string>
     <string name="update_size">Download size: %1$s</string>
