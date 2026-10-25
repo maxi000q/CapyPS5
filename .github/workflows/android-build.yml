@@ -62,8 +62,8 @@ jobs:
             "cmake;3.31.6" \
             "ndk;28.2.13676358"
 
-      - name: Install Ninja
-        run: sudo apt-get -y update && sudo apt-get -y install ninja-build
+      - name: Install Ninja and glslang
+        run: sudo apt-get -y update && sudo apt-get -y install ninja-build glslang-tools
 
       - name: Configure native build
         run: |
