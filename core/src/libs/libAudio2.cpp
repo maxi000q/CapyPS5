@@ -921,9 +921,6 @@ int KYTY_SYSV_ABI AudioOut2PortGetState(AudioOut2PortHandle port, AudioOut2PortS
 	}
 	g_audioout2_state_mutex.Unlock();
 
-	// LOGF("\t port = 0x%016" PRIx64 "\n", port);
-	// LOGF("\t num_channels = %" PRIu8 "\n", state->num_channels);
-
 	return OK;
 }
 

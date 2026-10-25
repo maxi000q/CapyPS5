@@ -1026,7 +1026,6 @@ int KYTY_SYSV_ABI AudioOutOutputs(AudioOutOutputParam* param, uint32_t num) {
 }
 
 int KYTY_SYSV_ABI AudioOutOutput(int handle, const void* ptr) {
-	// EXIT_NOT_IMPLEMENTED(ptr == nullptr);
 
 	Audio::OutputParam params[1];
 

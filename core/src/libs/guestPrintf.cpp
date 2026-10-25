@@ -513,7 +513,7 @@ static int kyty_printf_internal(bool sn, char* sn_s, size_t sn_n, const char* fo
 		if (_is_digit(*format)) {
 			width = _atoi(&format);
 		} else if (*format == '*') {
-			// const int w = va_arg(va, int);
+
 			const int w = VaArg_int(va_list);
 			if (w < 0) {
 				flags |= FLAGS_LEFT; // reverse padding
@@ -532,7 +532,7 @@ static int kyty_printf_internal(bool sn, char* sn_s, size_t sn_n, const char* fo
 			if (_is_digit(*format)) {
 				precision = _atoi(&format);
 			} else if (*format == '*') {
-				// const int prec = (int)va_arg(va, int);
+
 				const int prec = VaArg_int(va_list);
 				if (prec < 0) {
 					// A negative dynamic precision is treated as omitted.
@@ -617,21 +617,19 @@ static int kyty_printf_internal(bool sn, char* sn_s, size_t sn_n, const char* fo
 				if ((*format == 'i') || (*format == 'd')) {
 					// signed
 					if ((flags & FLAGS_LONG_LONG) != 0u || (flags & FLAGS_LONG) != 0u) {
-						// const long long value = va_arg(va, long long);
+
 						auto value = VaArg_long_long(va_list);
 						idx = _ntoa_long_long(out, &buffer, idx, maxlen,
 						                      static_cast<uint64_t>(value > 0 ? value : 0 - value),
 						                      value < 0, base, precision, width, flags);
 					} else if ((flags & FLAGS_LONG) != 0u) {
-						// const long value = va_arg(va, long);
+
 						auto value = VaArg_long(va_list);
 						idx = _ntoa_long(out, &buffer, idx, maxlen,
 						                 static_cast<uint32_t>(value > 0 ? value : 0 - value),
 						                 value < 0, base, precision, width, flags);
 					} else {
-						// const int value = (flags & FLAGS_CHAR)    ? (char)va_arg(va, int)
-						//                 : (flags & FLAGS_SHORT) ? (short int)va_arg(va, int)
-						//                                       : va_arg(va, int);
+
 						int value =
 						    (flags & FLAGS_CHAR) != 0u    ? static_cast<char>(VaArg_int(va_list))
 						    : (flags & FLAGS_SHORT) != 0u ? static_cast<int16_t>(VaArg_int(va_list))

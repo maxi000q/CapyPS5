@@ -51,8 +51,6 @@ struct VaList {
 	void*    reg_save_area;
 };
 
-// typedef float __m128 __attribute__((__vector_size__(16), __aligned__(16)));
-
 struct VaRegSave {
 	uint64_t gp[6];
 	__m128   fp[8];

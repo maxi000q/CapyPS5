@@ -213,14 +213,14 @@ private:
 
 	struct HttpConnection: public HttpTemplate {
 		explicit HttpConnection(const HttpTemplate& tmpl): HttpTemplate(tmpl) {}
-		// int    tmpl_id = 0;
+
 		std::string url;
 		bool        enable_keep_alive = false;
 	};
 
 	struct HttpRequest: public HttpConnection {
 		explicit HttpRequest(HttpConnection& conn): HttpConnection(conn) {}
-		// int      conn_id = 0;
+
 		std::string method;
 		std::string url;
 		uint64_t    content_length = 0;
@@ -498,7 +498,6 @@ Network::Id Network::HttpCreateConnectionWithURL(Id tmpl_id, const char* url,
 		cn.used              = true;
 		cn.enable_keep_alive = enable_keep_alive;
 		cn.url               = std::string(url);
-		// cn.tmpl_id           = tmpl_id.ToInt();
 
 		int index = 0;
 		for (auto& t: m_connections) {
@@ -570,7 +569,7 @@ Network::Id Network::HttpCreateRequestWithURL2(Id conn_id, const char* method, c
 		cn.used   = true;
 		cn.method = std::string(method);
 		cn.url    = std::string(url);
-		// cn.conn_id        = conn_id.ToInt();
+
 		cn.content_length = content_length;
 
 		int index = 0;
@@ -4211,12 +4210,8 @@ int KYTY_SYSV_ABI NpGetNpId(int user_id, NpId* np_id) {
 
 	EXIT_NOT_IMPLEMENTED(np_id == nullptr);
 
-	// int s = snprintf(np_id->handle.data, 16, "Kyty");
-	// EXIT_NOT_IMPLEMENTED(s >= 16);
-	// np_id->handle.term = 0;
 	std::memset(np_id, 0, sizeof(*np_id));
 
-	// return OK;
 	return np_error_signed_out;
 }
 
@@ -4227,12 +4222,8 @@ int KYTY_SYSV_ABI NpGetOnlineId(int user_id, NpOnlineId* online_id) {
 
 	EXIT_NOT_IMPLEMENTED(online_id == nullptr);
 
-	// int s = snprintf(online_id->data, 16, "Kyty");
-	// EXIT_NOT_IMPLEMENTED(s >= 16);
-	// online_id->term = 0;
 	std::memset(online_id, 0, sizeof(*online_id));
 
-	// return OK;
 	return np_error_signed_out;
 }
 
@@ -4243,10 +4234,8 @@ int KYTY_SYSV_ABI NpGetAccountIdA(int user_id, uint64_t* account_id) {
 
 	EXIT_NOT_IMPLEMENTED(account_id == nullptr);
 
-	// *account_id = 0x00000000feedfaceull;
 	*account_id = 0;
 
-	// return OK;
 	return np_error_signed_out;
 }
 
@@ -4259,10 +4248,7 @@ int KYTY_SYSV_ABI NpGetAccountCountryA(int user_id, void* country_code) {
 
 	auto* code = static_cast<NpCountryCode*>(country_code);
 	std::memset(code, 0, sizeof(*code));
-	// code->data[0] = '';
-	// code->data[1] = 'S';
 
-	// return OK;
 	return np_error_signed_out;
 }
 
@@ -4277,10 +4263,8 @@ int KYTY_SYSV_ABI NpGetAccountAge(int req_id, int user_id, uint8_t* age) {
 		return np_error_invalid_argument;
 	}
 
-	// *age = 21;
 	*age = 0;
 
-	// return OK;
 	return np_error_signed_out;
 }
 
@@ -4377,10 +4361,6 @@ int KYTY_SYSV_ABI NpAbortRequest(int req_id) {
 int KYTY_SYSV_ABI NpCheckNpAvailability(int req_id, const char* user, void* result) {
 	PRINT_NAME();
 
-	// EXIT_NOT_IMPLEMENTED(req_id <= 0);
-	// EXIT_NOT_IMPLEMENTED(user == nullptr);
-	// EXIT_NOT_IMPLEMENTED(result != nullptr);
-
 	LOGF("\t req_id = %d\n"
 	     "\t user   = %s\n",
 	     req_id, user != nullptr ? user : "(null)");
@@ -4400,14 +4380,11 @@ int KYTY_SYSV_ABI NpCheckNpAvailability(int req_id, const char* user, void* resu
 		return np_error_request_not_found;
 	}
 
-	// return OK;
 	return np_complete_signed_out_locked(request);
 }
 
 int KYTY_SYSV_ABI NpCheckNpReachability(int req_id, int user_id) {
 	PRINT_NAME();
-
-	// EXIT_NOT_IMPLEMENTED(req_id <= 0);
 
 	LOGF("\t req_id  = %d\n", req_id);
 	LOGF("\t user_id = %d\n", user_id);
@@ -4423,7 +4400,6 @@ int KYTY_SYSV_ABI NpCheckNpReachability(int req_id, int user_id) {
 		return np_error_request_not_found;
 	}
 
-	// return OK;
 	return np_complete_signed_out_locked(request);
 }
 
@@ -4449,7 +4425,6 @@ int KYTY_SYSV_ABI NpPollAsync(int req_id, int* result) {
 
 	*result = request->result;
 
-	// return request->state == NpRequestState::Aborted ? np_error_aborted : OK;
 	return OK;
 }
 
@@ -4491,12 +4466,7 @@ int KYTY_SYSV_ABI NpCheckPremium(int req_id, const NpCheckPremiumParameter* para
 	}
 
 	std::memset(result, 0, sizeof(*result));
-	// result->authorized = true;
 
-	// request->state  = NpRequestState::Complete;
-	// request->result = OK;
-
-	// return OK;
 	return np_complete_signed_out_locked(request);
 }
 

@@ -498,11 +498,6 @@ static KYTY_SYSV_ABI void stack_chk_fail() {
 }
 
 static KYTY_SYSV_ABI int sigprocmask(int /*how*/, const void* /*set*/, void* /*oset*/) {
-	// PRINT_NAME();
-
-	// LOGF("\t how = %d\n", how);
-	// LOGF("\t set = %016" PRIx64 "\n", reinterpret_cast<uint64_t>(set));
-	// LOGF("\t oset = %016" PRIx64 "\n", reinterpret_cast<uint64_t>(oset));
 
 	return 0;
 }
@@ -1341,8 +1336,6 @@ static KYTY_SYSV_ABI KernelModule KernelLoadStartModule(const char* module_file_
                                                         const KernelLoadModuleOpt* opt, int* res) {
 	PRINT_NAME();
 
-	// EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
-
 	LOGF("\tmodule_file_name = %s\n", module_file_name);
 
 	EXIT_NOT_IMPLEMENTED(flags != 0);
@@ -1395,8 +1388,6 @@ static int KYTY_SYSV_ABI KernelStopUnloadModule(KernelModule handle, size_t args
                                                 int* res) {
 	PRINT_NAME();
 
-	// EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
-
 	auto* rt = Common::Singleton<Loader::RuntimeLinker>::Instance();
 
 	EXIT_NOT_IMPLEMENTED(flags != 0);
@@ -1441,8 +1432,6 @@ static int KYTY_SYSV_ABI KernelStopUnloadModule(KernelModule handle, size_t args
 
 static void* KYTY_SYSV_ABI tls_get_addr(TlsInfo* info) {
 	PRINT_NAME();
-
-	// EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 
 	return Loader::RuntimeLinker::TlsGetAddr(info->program) + info->offset;
 }
@@ -1514,7 +1503,6 @@ static void KYTY_SYSV_ABI KernelRtldSetApplicationHeapAPI(void* api[]) {
 }
 
 static int64_t KYTY_SYSV_ABI write(int d, const char* str, int64_t size) {
-	// PRINT_NAME();
 
 	EXIT_NOT_IMPLEMENTED(d < 0);
 
@@ -1553,7 +1541,6 @@ static int KYTY_SYSV_ABI close(int d) {
 }
 
 static int64_t KYTY_SYSV_ABI read(int d, void* buf, uint64_t nbytes) {
-	// PRINT_NAME();
 
 	if (buf == nullptr) {
 		*Posix::GetErrorAddr() = Posix::POSIX_EFAULT;
@@ -1965,15 +1952,11 @@ void KYTY_SYSV_ABI KernelSetThreadAtexitReport(thread_atexit_report_func_t func)
 int KYTY_SYSV_ABI KernelRtldThreadAtexitIncrement(uint64_t* /*c*/) {
 	PRINT_NAME();
 
-	//__sync_fetch_and_add(c, 1);
-
 	return 0;
 }
 
 int KYTY_SYSV_ABI KernelRtldThreadAtexitDecrement(uint64_t* /*c*/) {
 	PRINT_NAME();
-
-	//__sync_fetch_and_sub(c, 1);
 
 	return 0;
 }

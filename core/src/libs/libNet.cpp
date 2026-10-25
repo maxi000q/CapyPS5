@@ -2022,15 +2022,11 @@ static int KYTY_SYSV_ABI NpAuthGetAuthorizationCodeV3(int req_id, const void* pa
 		return NP_AUTH_ERROR_REQUEST_NOT_FOUND;
 	}
 	if (request->state == NpAuthRequestState::Aborted) {
-		// request->result = 0;
-		// return 0;
+
 		request->result = NP_AUTH_ERROR_ABORTED;
 		return NP_AUTH_ERROR_ABORTED;
 	}
-	// request->state  = NpAuthRequestState::Complete;
-	// request->result = 0;
 
-	// return 0;
 	return np_auth_complete_signed_out(request);
 }
 
@@ -2051,15 +2047,11 @@ static int KYTY_SYSV_ABI NpAuthGetIdTokenV3(int req_id, const void* param, void*
 		return NP_AUTH_ERROR_REQUEST_NOT_FOUND;
 	}
 	if (request->state == NpAuthRequestState::Aborted) {
-		// request->result = 0;
-		// return 0;
+
 		request->result = NP_AUTH_ERROR_ABORTED;
 		return NP_AUTH_ERROR_ABORTED;
 	}
-	// request->state  = NpAuthRequestState::Complete;
-	// request->result = 0;
 
-	// return 0;
 	return np_auth_complete_signed_out(request);
 }
 

@@ -28,7 +28,7 @@ struct Audio3dOpenParameters {
 	uint32_t queue_depth = 2;
 	uint32_t buffer_mode = 2;
 	uint32_t pad         = 0;
-	// uint32_t num_beds;
+
 };
 
 struct Audio3dData {

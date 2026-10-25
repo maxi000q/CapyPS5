@@ -542,8 +542,6 @@ static int mount_save_data(int slot, const std::filesystem::path& directory,
 int KYTY_SYSV_ABI SaveDataInitialize3(const void* /*init*/) {
 	PRINT_NAME();
 
-	// EXIT_NOT_IMPLEMENTED(init != nullptr);
-
 	return OK;
 }
 
