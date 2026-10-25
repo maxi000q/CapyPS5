@@ -92,20 +92,32 @@ object Updater {
     }
 
     /**
-     * Compares "v1.2.3"-style versions by their numeric parts; a leading "v" and any suffix such as
-     * "-alpha" are ignored.
+     * Compares "v1.2.3"-style versions by their numeric parts; a leading "v" is ignored.
+     * When the numbers tie, the trailing text of the last component decides: a component
+     * without a suffix outranks any suffixed build, and otherwise the suffixes compare
+     * lexicographically - so v0.0.5pro sorts below v0.0.5proplus, and both below a plain
+     * v0.0.5.
      */
     fun compareVersions(a: String, b: String): Int {
-        fun parts(version: String) = version.trim().removePrefix("v").removePrefix("V")
-            .substringBefore('-').substringBefore('+').split('.')
+        fun split(version: String) = version.trim().removePrefix("v").removePrefix("V")
+            .substringBefore('-').substringBefore('+')
+        fun parts(version: String) = split(version).split('.')
             .map { part -> part.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+        fun tail(version: String) = split(version).substringAfterLast('.').dropWhile(Char::isDigit)
         val left = parts(a)
         val right = parts(b)
         for (i in 0 until maxOf(left.size, right.size)) {
             val diff = left.getOrElse(i) { 0 } - right.getOrElse(i) { 0 }
             if (diff != 0) return diff
         }
-        return 0
+        val tailA = tail(a)
+        val tailB = tail(b)
+        return when {
+            tailA == tailB -> 0
+            tailA.isEmpty() -> 1
+            tailB.isEmpty() -> -1
+            else -> tailA.compareTo(tailB)
+        }
     }
 
     private fun apkFile(context: Context, release: Release): File =
