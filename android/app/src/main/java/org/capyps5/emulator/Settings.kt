@@ -88,6 +88,19 @@ enum class CoreOption(
         ),
         256L,
     ),
+    YieldSleep(
+        R.string.option_yield_us,
+        R.string.option_yield_us_desc,
+        "debug.capy.yield_us",
+        listOf(
+            0L to R.string.yield_us_0,
+            100L to R.string.yield_us_100,
+            250L to R.string.yield_us_250,
+            500L to R.string.yield_us_500,
+            1000L to R.string.yield_us_1000,
+        ),
+        0L,
+    ),
     ;
 
     fun title(context: Context) = context.getString(titleRes)

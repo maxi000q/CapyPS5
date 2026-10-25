@@ -70,6 +70,13 @@
     <string name="read_ahead_256">256 KB (default)</string>
     <string name="read_ahead_512">512 KB</string>
     <string name="read_ahead_1024">1024 KB</string>
+    <string name="option_yield_us">Sleep after spin-yields</string>
+    <string name="option_yield_us_desc">Unreal titles poll completion with millions of spin-yields; after a burst a short sleep releases the core and the power budget. Off restores pure sched_yield (may help or hurt per title)</string>
+    <string name="yield_us_0">Off (default)</string>
+    <string name="yield_us_100">100 µs</string>
+    <string name="yield_us_250">250 µs</string>
+    <string name="yield_us_500">500 µs</string>
+    <string name="yield_us_1000">1000 µs</string>
 
     <!-- GPU driver -->
     <string name="gpu_driver">GPU driver</string>

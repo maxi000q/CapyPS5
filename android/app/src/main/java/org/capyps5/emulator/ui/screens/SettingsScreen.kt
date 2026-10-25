@@ -175,6 +175,7 @@ fun SettingsScreen(
                     coreItem(CoreOption.AsyncShaders),
                     coreItem(CoreOption.StreamingBuffer),
                     coreItem(CoreOption.ReadAhead),
+                    coreItem(CoreOption.YieldSleep),
                     SettingItem(
                         context.getString(R.string.perf_overlay), context.getString(R.string.perf_overlay_desc),
                         settings.overlayMode.label(context),
