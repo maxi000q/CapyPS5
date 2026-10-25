@@ -5,6 +5,9 @@
 #if defined(__ANDROID__)
 #include <android/log.h>
 #endif
+#if defined(__ANDROID__) || defined(__linux__)
+#include <sys/resource.h>
+#endif
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 
 #include "common/assert.h"
@@ -580,7 +583,12 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
     : m_graphics(graphics), m_program_cache(std::make_unique<ProgramCache>(graphics.device)) {
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 	InitializeDriverCache();
-	for (uint32_t i = 0; i < 2; i++) {
+	// Background PSO compilation workers. Two on smaller SoCs, one more on 8+-core devices
+	// (Snapdragon 8/Dimensity class) so shader warm-up during material streaming finishes
+	// sooner, while the emulated game threads keep at least five cores to themselves.
+	const uint32_t host_cores = std::thread::hardware_concurrency();
+	const uint32_t worker_count = host_cores >= 8 ? 3 : 2;
+	for (uint32_t i = 0; i < worker_count; i++) {
 		m_async_workers.emplace_back([this] { AsyncWorker(); });
 	}
 }
@@ -739,7 +747,9 @@ void PipelineCache::SavePeriodically() {
 		m_last_save_ms = now_ms;
 		return;
 	}
-	if (now_ms - m_last_save_ms < 20000) {
+	// Flush every 10 s instead of 20 s: the atomic temp-file rename keeps each save cheap,
+	// and half the interval halves the shader-cache loss when a game crashes or is killed.
+	if (now_ms - m_last_save_ms < 10000) {
 		return;
 	}
 	m_last_save_ms = now_ms;
@@ -1263,6 +1273,12 @@ PipelineCache::Pipeline* PipelineCache::GetGraphicsPipeline(
 void PipelineCache::AsyncWorker() {
 #if defined(__ANDROID__) || defined(__linux__)
 	pthread_setname_np(pthread_self(), "CapyPipeline");
+	// Lower the scheduling priority: background pipeline compilation must never steal CPU
+	// from the emulated game threads and the GPU submission thread. Dropping priority
+	// (positive nice) needs no privileges; failure is harmless and ignored.
+	if (setpriority(PRIO_PROCESS, 0, 4) != 0) {
+		PipelineCacheLog("Vulkan pipeline cache: could not lower worker priority");
+	}
 #endif
 	for (;;) {
 		std::shared_ptr<AsyncCompile> job;

@@ -1,0 +1,168 @@
+# SPDX-FileCopyrightText: Copyright 2026 CapyPS5 Project
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Builds the full Android app (native FEX/Vulkan core + Kotlin UI), signs the release APK
+# with the repository's dedicated key and publishes both APKs to a GitHub Release on tags.
+#
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   KEYSTORE_BASE64    base64 of the release .jks/.keystore file
+#   KEYSTORE_PASSWORD  keystore password
+#   KEY_ALIAS          key alias inside the keystore
+#   KEY_PASSWORD       private-key password (same as keystore password for PKCS12)
+
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Native core + APK (arm64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+
+    steps:
+      - name: Checkout (full history so git describe finds tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK components (NDK 28.2, CMake 3.31.6)
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "cmake;3.31.6" \
+            "ndk;28.2.13676358"
+
+      - name: Install Ninja
+        run: sudo apt-get -y update && sudo apt-get -y install ninja-build
+
+      - name: Configure native build
+        run: |
+          cmake -S core -B build-android-arm64 -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/28.2.13676358/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-31 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DKYTY_BUILD_LAUNCHER=OFF \
+            -DGIT_EXECUTABLE=git
+
+      - name: Build libcapyps5.so
+        run: ninja -C build-android-arm64 capyps5
+
+      - name: Stage jniLibs (strip + adrenotools hooks + libc++)
+        run: |
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          LIBCXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+          JNI="android/app/src/main/jniLibs/arm64-v8a"
+          mkdir -p "$JNI"
+          "$STRIP" --strip-debug -o "$JNI/libcapyps5.so" build-android-arm64/libcapyps5.so
+          cp -f "$LIBCXX" "$JNI/libc++_shared.so"
+          # libadrenotools hooks must sit in nativeLibraryDir to load custom GPU drivers.
+          for HOOK in main_hook file_redirect_hook gsl_alloc_hook hook_impl; do
+            SRC="$(find build-android-arm64 -name "lib$HOOK.so" -print -quit)"
+            if [ -z "$SRC" ]; then echo "missing lib$HOOK.so" >&2; exit 1; fi
+            "$STRIP" --strip-debug -o "$JNI/lib$HOOK.so" "$SRC"
+          done
+          ls -la "$JNI"
+
+      - name: Build APKs (debug + release)
+        working-directory: android
+        run: ./gradlew assembleDebug assembleRelease --console=plain --no-daemon
+
+      - name: Sign release APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)"
+          echo "Building release for version $VERSION"
+          mkdir -p dist
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > /tmp/release.keystore
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          echo "Using apksigner: $APKSIGNER"
+          "$APKSIGNER" sign \
+            --ks /tmp/release.keystore \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            --out "dist/CapyPS5-v${VERSION}-release.apk" \
+            android/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$APKSIGNER" verify --print-certs "dist/CapyPS5-v${VERSION}-release.apk" | head -5
+          cp android/app/build/outputs/apk/debug/app-debug.apk "dist/CapyPS5-v${VERSION}-debug.apk"
+          ls -la dist
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CapyPS5-apk
+          path: dist/*.apk
+          if-no-files-found: error
+
+      - name: Create GitHub Release (tag builds)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)"
+          TAG="${GITHUB_REF_NAME}"
+          cat > /tmp/release_notes.md <<'NOTES'
+          A fork build of **CapyPS5 v0.0.3** by Ghael-V — the first PlayStation 5 emulator for Android, built on KytyPS5 and the FEX x86-64 JIT — with CI automation and scheduling improvements.
+
+          ## Fork changes over upstream v0.0.3
+
+          - **Automated builds**: full native core (FEX JIT + Vulkan renderer) compiled with NDK 28.2 / CMake 3.31 in GitHub Actions; debug and release APKs attached to every release.
+          - **Background PSO compilation tuned**: pipeline workers scale with the device (3 workers on 8+-core SoCs) and run at lowered CPU priority, so shader compilation no longer steals CPU time from the emulated game threads — fewer frame drops while games stream new materials.
+          - **Shader cache durability**: the Vulkan driver pipeline cache is flushed to disk every 10 s instead of 20 s, halving the shader-cache loss when a game crashes or is killed.
+          - **Updater repointed**: the in-app updater now tracks this fork's releases (upstream APKs are signed with a different key and would not install over this build).
+          - **Portable Gradle config**: Windows-specific JDK path removed so the project builds on any OS.
+
+          Already present from upstream v0.0.3 (not fork additions): asynchronous PSO compilation, persistent per-game Vulkan pipeline caches, mesh-shader emulation via compute shaders, in-app Turnip / PanVK driver downloads (Settings → Graphics → Download drivers).
+
+          ## Requirements (unchanged)
+
+          - Android 12 or later, arm64 device, Vulkan 1.3 GPU.
+          - 12 GB of RAM recommended.
+          - Your own PS5 game dumps (a folder with `eboot.bin` and `sce_sys/`).
+
+          **CapyPS5 includes no games, BIOS, firmware or Sony keys, and needs none of them.** Not affiliated with Sony Interactive Entertainment; PlayStation and PS5 are trademarks of their respective owners.
+
+          ## Credits
+
+          - **Ghael-V**, author of CapyPS5; **Madelein** for the logo.
+          - KytyPS5 and the original Kyty by InoriRus, and the FEX project.
+
+          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/CapyPS5 (tag: v0.0.3.pro)
+          NOTES
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; uploading assets."
+            gh release upload "$TAG" dist/*.apk --clobber
+          else
+            gh release create "$TAG" dist/*.apk \
+              --title "CapyPS5 v${VERSION}" \
+              --notes-file /tmp/release_notes.md
+          fi
+          gh release view "$TAG" --json name,assets --jq '{name: .name, assets: [.assets[].name]}'

@@ -25,9 +25,10 @@ data class Release(val tag: String, val name: String, val notes: String, val apk
  */
 object Updater {
     private const val TAG = "CapyPS5-Updater"
+    // Fork: updates come from this fork's GitHub releases only. The upstream sources were
+    // removed because their APKs are signed with a different key and would not install.
     private val SOURCES = listOf(
-        "https://git.capyps5.org/api/v1/repos/CapyPS5/CapyPS5/releases?limit=20",
-        "https://api.github.com/repos/Ghael-V/CapyPS5/releases?per_page=20",
+        "https://api.github.com/repos/maxi000q/CapyPS5/releases?per_page=20",
     )
 
     /** What the launcher and the pause menu show, from the APK's own version name. */
