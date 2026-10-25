@@ -163,11 +163,6 @@ fun HomeScreen(
         Crossfade(targetState = art, label = "background") { bitmap ->
             if (bitmap != null) {
                 Image(bitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, alpha = 0.6f)
-            } else {
-                Image(
-                    painterResource(R.drawable.capy_bg), null, Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop, alpha = 0.35f,
-                )
             }
         }
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color(0xEE07090E), 0.65f to Color(0x2207090E))))
@@ -277,11 +272,11 @@ private fun TopBar(tab: Int, onTab: (Int) -> Unit, onAdd: () -> Unit, onRefresh:
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         // Brand first: screenshots and videos of the launcher should say what they show.
-        Image(painterResource(R.drawable.capy_logo), null, Modifier.size(36.dp))
+        Image(painterResource(R.drawable.ic_logo), null, Modifier.size(36.dp))
         Text(
             buildAnnotatedString {
-                withStyle(SpanStyle(color = Capy.TextPrimary)) { append("Capy") }
-                withStyle(SpanStyle(color = Capy.Accent)) { append("PS5") }
+                withStyle(SpanStyle(color = Capy.TextPrimary)) { append("Console Five ") }
+                withStyle(SpanStyle(color = Capy.Accent)) { append("Pro") }
             },
             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
             modifier = Modifier.padding(start = 8.dp, end = 30.dp),

@@ -18,6 +18,9 @@
 #include <array>
 #include <mutex>
 #include <algorithm>
+#include <sys/resource.h>
+#include <cerrno>
+#include <cstring>
 #include <android/log.h>
 #include <atomic>
 #include <filesystem>
@@ -137,6 +140,14 @@ JNIEXPORT jboolean JNICALL Java_org_capyps5_emulator_NativeBridge_nativeStartGam
 	g_emulator_thread = std::thread([options]() {
 		ALOGI("Emulator thread started");
 		Common::InitializeThreads();
+		// Console Five Pro tweak (v0.0.4pro): ask the scheduler for a higher priority on the
+		// emulation thread. Best effort only: most ROMs deny nice < 0 for untrusted apps
+		// (EPERM), in which case this is a no-op logged once.
+		if (setpriority(PRIO_PROCESS, 0, -4) != 0) {
+			ALOGI("Emulator thread: priority boost unavailable (%s)", std::strerror(errno));
+		} else {
+			ALOGI("Emulator thread: priority raised (nice -4)");
+		}
 		Emulator::Run(options);
 		g_is_running.store(false);
 		ALOGI("Emulator thread finished");

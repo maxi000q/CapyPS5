@@ -29,7 +29,7 @@
         android:hardwareAccelerated="true">
 
         <activity
-            android:name=".MainActivity"
+            android:name="org.capyps5.emulator.MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode"
             android:screenOrientation="sensorLandscape"
@@ -42,7 +42,7 @@
 
         <!-- Each game runs in its own process, so leaving it frees the emulator completely. -->
         <activity
-            android:name=".GameActivity"
+            android:name="org.capyps5.emulator.GameActivity"
             android:exported="false"
             android:process=":game"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode"

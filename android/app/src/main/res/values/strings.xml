@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: GPL-2.0-only -->
 <!-- English (default). Spanish lives in values-es/strings.xml; keep both in sync. -->
 <resources>
-    <string name="app_name">CapyPS5</string>
+    <string name="app_name">Console Five Pro</string>
 
     <!-- Common -->
     <string name="settings">Settings</string>
@@ -135,7 +135,7 @@
     <string name="layer_targets">%1$d targets</string>
     <string name="error_start_title">Could not start</string>
     <string name="error_elf_missing">The executable was not found:\n%1$s</string>
-    <string name="error_elf_start">Could not start the executable. Check logcat (CapyPS5-*).</string>
+    <string name="error_elf_start">Could not start the executable. Save the log for details.</string>
     <string name="back_to_home_a">Back to home  Ⓐ</string>
     <string name="crash_title">The game closed because of an error</string>
     <!-- Updates -->
@@ -150,17 +150,13 @@
     <string name="update_retry">Retry</string>
     <string name="update_downloading">Downloading… %1$d %%</string>
     <string name="update_failed">The download failed. Check your connection and try again.</string>
-    <string name="update_permission">Allow CapyPS5 to install apps in the screen that just opened, then press Install.</string>
+    <string name="update_permission">Allow Console Five Pro to install apps in the screen that just opened, then press Install.</string>
 
     <!-- Support -->
-    <string name="support_title">Enjoying CapyPS5?</string>
-    <string name="support_description">CapyPS5 is free and made in our spare time. Join the community on Discord to report games and follow progress, or support development with a coffee.</string>
+    <string name="support_title">Enjoying Console Five Pro?</string>
+    <string name="support_description">Console Five Pro is free software made in spare time. Join the community on Discord to report games, get help and follow progress.</string>
     <string name="support_discord">Join our Discord</string>
-    <string name="support_kofi">Support us on Ko-fi</string>
-    <string name="support_buymeacoffee">Buy me a coffee</string>
-    <string name="discord_link" translatable="false">https://discord.com/invite/PEE7Q5TVM5</string>
-    <string name="kofi_link" translatable="false">https://ko-fi.com/LemonProject</string>
-    <string name="buymeacoffee_link" translatable="false">https://buymeacoffee.com/ghael</string>
+    <string name="discord_link" translatable="false">https://discord.gg/NQgP9JxtU3</string>
     <string name="trophies">Trophies</string>
     <string name="trophies_desc">Trophy list and what you have earned</string>
     <string name="trophies_progress">%1$d of %2$d earned · %3$d%%</string>
@@ -174,17 +170,16 @@
     <string name="trophy_silver">Silver</string>
     <string name="trophy_bronze">Bronze</string>
     <string name="trophies_share">Share</string>
-    <string name="trophies_share_text">%1$s: %2$d of %3$d trophies on CapyPS5 · capyps5.org</string>
+    <string name="trophies_share_text">%1$s: %2$d of %3$d trophies on Console Five Pro</string>
     <string name="trophies_card_recent">Latest trophies</string>
     <string name="trophies_card_next">Still to earn</string>
     <string name="whats_new_title">What\'s new in v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Unreal Engine games: hot TLS and clock reads run inside the game code instead of calling the emulator each time.</item>
-        <item>The game clock (RDTSC) now matches the frequency games are told, and shaders can read the real GPU clock.</item>
-        <item>First fiber (sceFiber) support on ARM: games that use them used to close the emulator at startup.</item>
-        <item>Final Fantasy VII Rebirth and Mewgenics: functions they need are now available.</item>
-        <item>Very large GPU compute dispatches are split to fit Adreno limits (Astro Bot).</item>
-        <item>New JPEG decoder and encoder libraries, and more fixes from KytyPS5.</item>
-        <item>Early groundwork for PS4 games: they appear tagged as PS4 but cannot be played yet.</item>
+        <item>Renamed to Console Five Pro with a new simple icon.</item>
+        <item>Fixed a fatal crash (exit 321) when videos or overlays were resolved into downscaled render targets — the game now degrades gracefully instead of closing.</item>
+        <item>The emulation thread now asks the OS for a higher priority, for smoother frames on ROMs that allow it.</item>
+        <item>Update checks no longer warn on every launch when the device is offline.</item>
+        <item>Settings: one community link (Discord) instead of the old donation links.</item>
+        <item>Background shader compilation tuned so it steals less CPU time from the game, and the shader cache is saved twice as often.</item>
     </string-array>
 </resources>

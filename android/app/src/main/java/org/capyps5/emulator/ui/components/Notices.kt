@@ -23,7 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Forum
-import androidx.compose.material.icons.outlined.LocalCafe
 import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.VolunteerActivism
@@ -222,7 +221,7 @@ fun UpdateDialog(release: Release, installed: String, onSkip: () -> Unit, onClos
     }
 }
 
-/** Community and donation links, shown every few launches. */
+/** Community link, shown every few launches. */
 @Composable
 fun SupportDialog(onClose: () -> Unit) {
     val context = LocalContext.current
@@ -240,10 +239,6 @@ fun SupportDialog(onClose: () -> Unit) {
         stacked = true,
         actions = listOf(
             NoticeAction(stringResource(R.string.support_discord), Icons.Outlined.Forum) { open(R.string.discord_link) },
-            NoticeAction(stringResource(R.string.support_kofi), Icons.Outlined.LocalCafe) { open(R.string.kofi_link) },
-            NoticeAction(stringResource(R.string.support_buymeacoffee), Icons.Outlined.LocalCafe) {
-                open(R.string.buymeacoffee_link)
-            },
             NoticeAction(stringResource(R.string.close), onClick = onClose),
         ),
         onBack = onClose,

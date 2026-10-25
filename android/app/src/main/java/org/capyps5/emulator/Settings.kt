@@ -113,7 +113,7 @@ class Settings(context: Context) {
         prefs.getString("library_paths", null)?.split('\n')?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() }
             ?: listOf(
                 prefs.getString("library_path", null)
-                    ?: File(Environment.getExternalStorageDirectory(), "CapyPS5").absolutePath
+                    ?: File(Environment.getExternalStorageDirectory(), "ConsoleFivePro").absolutePath
             )
     )
         private set

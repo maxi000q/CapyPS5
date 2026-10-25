@@ -21,18 +21,19 @@ data class Release(val tag: String, val name: String, val notes: String, val apk
 
 /**
  * Checks the project's releases for a newer APK, downloads it and hands it to the system installer.
- * The project's own Forgejo is asked first and the GitHub mirror when it does not answer.
  */
 object Updater {
-    private const val TAG = "CapyPS5-Updater"
-    // Fork: updates come from this fork's GitHub releases only. The upstream sources were
-    // removed because their APKs are signed with a different key and would not install.
+    private const val TAG = "CfyPro-Updater"
+    // Console Five Pro: updates come from this project's GitHub releases only. The upstream
+    // sources were removed because their APKs are signed with a different key and would not
+    // install over this build.
     private val SOURCES = listOf(
-        "https://api.github.com/repos/maxi000q/CapyPS5/releases?per_page=20",
+        "https://api.github.com/repos/maxi000q/ConsoleFivePro/releases?per_page=20",
     )
 
     /** What the launcher and the pause menu show, from the APK's own version name. */
-    fun versionText(context: Context): String = "CapyPS5 v${installedVersion(context)} Alpha (ARM64 Android)"
+    fun versionText(context: Context): String =
+        "Console Five Pro v${installedVersion(context)} (ARM64 Android)"
 
     fun installedVersion(context: Context): String =
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "0"
@@ -41,7 +42,14 @@ object Updater {
     suspend fun checkForUpdate(current: String): Release? = withContext(Dispatchers.IO) {
         for (source in SOURCES) {
             val releases = runCatching { fetchReleases(source) }
-                .onFailure { Log.w(TAG, "release check failed at $source: $it") }
+                .onFailure {
+                    // Offline / DNS-blocked devices used to warn on every launch; only real
+                    // surprises are worth a logcat warning.
+                    val quiet = it.cause is java.net.UnknownHostException ||
+                        it is java.net.UnknownHostException
+                    (if (quiet) Log.d(TAG, "release check skipped (offline): $it")
+                    else Log.w(TAG, "release check failed at $source: $it"))
+                }
                 .getOrNull() ?: continue
             return@withContext releases
                 .filter { compareVersions(it.tag, current) > 0 }
@@ -55,7 +63,7 @@ object Updater {
             connectTimeout = 8000
             readTimeout = 8000
             setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "CapyPS5-Updater")
+            setRequestProperty("User-Agent", "ConsoleFivePro-Updater")
         }
         try {
             check(connection.responseCode == HttpURLConnection.HTTP_OK) { "HTTP ${connection.responseCode}" }
@@ -101,7 +109,7 @@ object Updater {
     }
 
     private fun apkFile(context: Context, release: Release): File =
-        File(File(context.cacheDir, "updates").apply { mkdirs() }, "CapyPS5-${release.tag}.apk")
+        File(File(context.cacheDir, "updates").apply { mkdirs() }, "ConsoleFivePro-${release.tag}.apk")
 
     /** Downloads the release's APK, reporting progress from 0 to 1; returns the file or null. */
     suspend fun download(context: Context, release: Release, onProgress: (Float) -> Unit): File? =
@@ -113,7 +121,7 @@ object Updater {
                 val connection = (URL(release.apkUrl).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 10000
                     readTimeout = 30000
-                    setRequestProperty("User-Agent", "CapyPS5-Updater")
+                    setRequestProperty("User-Agent", "ConsoleFivePro-Updater")
                 }
                 try {
                     check(connection.responseCode == HttpURLConnection.HTTP_OK) { "HTTP ${connection.responseCode}" }

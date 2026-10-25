@@ -246,18 +246,10 @@ fun SettingsScreen(
             },
             SettingsCategory(context.getString(R.string.category_about), Icons.Outlined.Info) {
                 listOf(
-                    SettingItem("CapyPS5", "$versionText (Ghael-V)"),
+                    SettingItem("Console Five Pro", versionText),
                     SettingItem(
                         context.getString(R.string.support_discord), context.getString(R.string.discord_link),
                         onConfirm = { openLink(context, R.string.discord_link) },
-                    ),
-                    SettingItem(
-                        context.getString(R.string.support_kofi), context.getString(R.string.kofi_link),
-                        onConfirm = { openLink(context, R.string.kofi_link) },
-                    ),
-                    SettingItem(
-                        context.getString(R.string.support_buymeacoffee), context.getString(R.string.buymeacoffee_link),
-                        onConfirm = { openLink(context, R.string.buymeacoffee_link) },
                     ),
                     SettingItem(
                         context.getString(R.string.license),

@@ -12,11 +12,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "org.capyps5.emulator"
+        applicationId = "org.consolefivepro.emulator"
         minSdk = 31
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.0.3.pro"
+        versionCode = 5
+        versionName = "0.0.4pro"
 
         ndk {
             abiFilters.add("arm64-v8a")

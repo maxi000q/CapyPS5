@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 CapyPS5 Project
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# Builds the full Android app (native FEX/Vulkan core + Kotlin UI), signs the release APK
+# Builds the full Console Five Pro app (native FEX/Vulkan core + Kotlin UI), signs the release APK
 # with the repository's dedicated key and publishes both APKs to a GitHub Release on tags.
 #
 # Secrets (Settings -> Secrets and variables -> Actions):
@@ -121,16 +121,16 @@ jobs:
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass "pass:$KEYSTORE_PASSWORD" \
             --key-pass "pass:$KEY_PASSWORD" \
-            --out "dist/CapyPS5-v${VERSION}-release.apk" \
+            --out "dist/ConsoleFivePro-v${VERSION}-release.apk" \
             android/app/build/outputs/apk/release/app-release-unsigned.apk
-          "$APKSIGNER" verify --print-certs "dist/CapyPS5-v${VERSION}-release.apk" | head -5
-          cp android/app/build/outputs/apk/debug/app-debug.apk "dist/CapyPS5-v${VERSION}-debug.apk"
+          "$APKSIGNER" verify --print-certs "dist/ConsoleFivePro-v${VERSION}-release.apk" | head -5
+          cp android/app/build/outputs/apk/debug/app-debug.apk "dist/ConsoleFivePro-v${VERSION}-debug.apk"
           ls -la dist
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: CapyPS5-apk
+          name: ConsoleFivePro-apk
           path: dist/*.apk
           if-no-files-found: error
 
@@ -143,39 +143,39 @@ jobs:
           VERSION="$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)"
           TAG="${GITHUB_REF_NAME}"
           cat > /tmp/release_notes.md <<'NOTES'
-          A fork build of **CapyPS5 v0.0.3** by Ghael-V — the first PlayStation 5 emulator for Android, built on KytyPS5 and the FEX x86-64 JIT — with CI automation and scheduling improvements.
+          **Console Five Pro v0.0.4pro** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
 
-          ## Fork changes over upstream v0.0.3
+          ## New in v0.0.4pro
 
-          - **Automated builds**: full native core (FEX JIT + Vulkan renderer) compiled with NDK 28.2 / CMake 3.31 in GitHub Actions; debug and release APKs attached to every release.
-          - **Background PSO compilation tuned**: pipeline workers scale with the device (3 workers on 8+-core SoCs) and run at lowered CPU priority, so shader compilation no longer steals CPU time from the emulated game threads — fewer frame drops while games stream new materials.
-          - **Shader cache durability**: the Vulkan driver pipeline cache is flushed to disk every 10 s instead of 20 s, halving the shader-cache loss when a game crashes or is killed.
-          - **Updater repointed**: the in-app updater now tracks this fork's releases (upstream APKs are signed with a different key and would not install over this build).
-          - **Portable Gradle config**: Windows-specific JDK path removed so the project builds on any OS.
+          - **New name and icon**: Console Five Pro with a clean, simple white icon; the old CapyPS5 artwork is gone.
+          - **Fixed a fatal crash (exit status 321)**: games used to close when a video or overlay surface was resolved into a downscaled render target (`image.cpp` scale mismatch, seen on Unreal titles with in-game video). The renderer now degrades gracefully instead of exiting.
+          - **Smoother gameplay**: the emulation thread requests elevated scheduling priority where the OS allows it, and background shader compilation is tuned to take less CPU time from the game.
+          - **More resilient shader cache**: the Vulkan driver pipeline cache is flushed to disk every 10 s instead of 20 s.
+          - **Quieter updater**: release checks no longer warn on every launch when the device is offline, and updates come from this project's own releases.
+          - **Simpler Settings**: a single community link — Discord: https://discord.gg/NQgP9JxtU3 — replaces the old donation links.
+          - **Installs side by side** with the original CapyPS5 (new package id `org.consolefivepro.emulator`), so both apps can coexist.
 
-          Already present from upstream v0.0.3 (not fork additions): asynchronous PSO compilation, persistent per-game Vulkan pipeline caches, mesh-shader emulation via compute shaders, in-app Turnip / PanVK driver downloads (Settings → Graphics → Download drivers).
-
-          ## Requirements (unchanged)
+          ## Requirements
 
           - Android 12 or later, arm64 device, Vulkan 1.3 GPU.
           - 12 GB of RAM recommended.
           - Your own PS5 game dumps (a folder with `eboot.bin` and `sce_sys/`).
 
-          **CapyPS5 includes no games, BIOS, firmware or Sony keys, and needs none of them.** Not affiliated with Sony Interactive Entertainment; PlayStation and PS5 are trademarks of their respective owners.
+          **Console Five Pro includes no games, BIOS, firmware or Sony keys, and needs none of them.** Not affiliated with Sony Interactive Entertainment; PlayStation and PS5 are trademarks of their respective owners.
 
           ## Credits
 
-          - **Ghael-V**, author of CapyPS5; **Madelein** for the logo.
+          - Upstream **CapyPS5 v0.0.3** by Ghael-V; this project is an independent rebranded build of it.
           - KytyPS5 and the original Kyty by InoriRus, and the FEX project.
 
-          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/CapyPS5 (tag: v0.0.3.pro)
+          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.4pro)
           NOTES
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets."
             gh release upload "$TAG" dist/*.apk --clobber
           else
             gh release create "$TAG" dist/*.apk \
-              --title "CapyPS5 v${VERSION}" \
+              --title "Console Five Pro v${VERSION}" \
               --notes-file /tmp/release_notes.md
           fi
           gh release view "$TAG" --json name,assets --jq '{name: .name, assets: [.assets[].name]}'

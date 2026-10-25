@@ -167,7 +167,7 @@ object TrophyCard {
         // Footer: the emulator's logo and name.
         val footerY = HEIGHT - 70f
         canvas.drawLine(MARGIN, footerY - 34f, WIDTH - MARGIN, footerY - 34f, Paint().apply { color = SURFACE; strokeWidth = 2f })
-        val logo = BitmapFactory.decodeResource(context.resources, R.drawable.capy_logo)
+        val logo = BitmapFactory.decodeResource(context.resources, R.drawable.ic_logo)
         val logoRect = RectF(MARGIN, footerY - 20f, MARGIN + 56f, footerY + 36f)
         logo?.let { canvas.drawBitmap(it, null, logoRect, Paint(Paint.FILTER_BITMAP_FLAG)) }
         val brand = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -176,11 +176,9 @@ object TrophyCard {
         }
         val brandX = logoRect.right + 16f
         brand.color = TEXT
-        canvas.drawText("Capy", brandX, footerY + 21f, brand)
+        canvas.drawText("Console Five ", brandX, footerY + 21f, brand)
         brand.color = ACCENT
-        canvas.drawText("PS5", brandX + brand.measureText("Capy"), footerY + 21f, brand)
-        val site = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = TEXT_MUTED; textSize = 28f; textAlign = Paint.Align.RIGHT }
-        canvas.drawText("capyps5.org", WIDTH - MARGIN, footerY + 18f, site)
+        canvas.drawText("Pro", brandX + brand.measureText("Console Five "), footerY + 21f, brand)
         return bitmap
     }
 
