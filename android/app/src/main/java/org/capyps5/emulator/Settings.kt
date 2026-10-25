@@ -108,6 +108,13 @@ enum class CoreOption(
         listOf(1L to R.string.enabled, 0L to R.string.disabled),
         0L,
     ),
+    FenceFallback(
+        R.string.option_fence_fallback,
+        R.string.option_fence_fallback_desc,
+        "debug.capy.eop_flush",
+        listOf(1L to R.string.enabled, 0L to R.string.disabled),
+        0L,
+    ),
     ;
 
     fun title(context: Context) = context.getString(titleRes)

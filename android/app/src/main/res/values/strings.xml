@@ -79,6 +79,8 @@
     <string name="yield_us_1000">1000 µs</string>
     <string name="option_verbose">Verbose logging</string>
     <string name="option_verbose_desc">Detailed hot-path logging to logcat, for bug reports; slows the game while enabled</string>
+    <string name="option_fence_fallback">Fence submission fallback</string>
+    <string name="option_fence_fallback_desc">Submit to the GPU after every release event. Slower (a blocking submit per fence), but use if a game waits forever on a fence (stuck graphics after loading screens)</string>
 
     <!-- GPU driver -->
     <string name="gpu_driver">GPU driver</string>
