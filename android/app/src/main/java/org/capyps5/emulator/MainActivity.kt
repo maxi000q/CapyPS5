@@ -124,20 +124,26 @@ class MainActivity : CapyActivity() {
                         versionText = versionText,
                         onGameSelected = { GameActivity.launch(this@MainActivity, it) },
                         onAddGameFile = { uriString ->
-                            val localFile = if (uriString.startsWith("content://")) {
-                                copyUriToLocal(android.net.Uri.parse(uriString))
-                            } else {
-                                File(uriString)
-                            }
-                            if (localFile != null && localFile.exists()) {
-                                val newGame = GameItem(
-                                    titleId = "LOCAL",
-                                    titleName = localFile.name,
-                                    directoryPath = localFile.parent ?: filesDir.absolutePath,
-                                    elfPath = localFile.absolutePath,
-                                )
-                                games.add(newGame)
-                                GameActivity.launch(this@MainActivity, newGame)
+                            lifecycleScope.launch {
+                                // Content-resolver reads of a picked eboot can be large;
+                                // keep them off the main thread, then launch the game.
+                                val localFile = withContext(Dispatchers.IO) {
+                                    if (uriString.startsWith("content://")) {
+                                        copyUriToLocal(android.net.Uri.parse(uriString))
+                                    } else {
+                                        File(uriString)
+                                    }
+                                }
+                                if (localFile != null && localFile.exists()) {
+                                    val newGame = GameItem(
+                                        titleId = "LOCAL",
+                                        titleName = localFile.name,
+                                        directoryPath = localFile.parent ?: filesDir.absolutePath,
+                                        elfPath = localFile.absolutePath,
+                                    )
+                                    games.add(newGame)
+                                    GameActivity.launch(this@MainActivity, newGame)
+                                }
                             }
                         },
                         onRefresh = {
