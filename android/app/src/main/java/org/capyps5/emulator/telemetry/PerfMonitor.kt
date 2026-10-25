@@ -61,6 +61,8 @@ class PerfMonitor(private val context: Context) {
 
     private var lastTime = 0L
     private var lastStats: LongArray? = null
+    /** Smoothed FPS; raw per-window counters make the overlay jump by whole frames. */
+    private var fpsEma = 0f
     private var lastCpuTotal = 0L
     private var lastCpuIdle = 0L
 
@@ -82,7 +84,12 @@ class PerfMonitor(private val context: Context) {
             return (stats[index] - prev[index]).coerceAtLeast(0) / dtSec
         }
 
-        val fps = rate(NativeBridge.STAT_GAME_FRAMES)
+        val fpsRaw = rate(NativeBridge.STAT_GAME_FRAMES)
+        // Exponential smoothing (65/35): at ~2 Hz sampling the raw window rate
+        // flickers between e.g. 28 and 32; the EMA stays readable and still
+        // reacts to a real load change within about a second.
+        fpsEma = if (fpsEma <= 0f || fpsRaw <= 0f) fpsRaw else 0.65f * fpsRaw + 0.35f * fpsEma
+        val fps = fpsEma
         val memInfo = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
         val batteryIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val batteryTemp = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
