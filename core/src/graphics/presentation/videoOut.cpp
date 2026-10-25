@@ -37,6 +37,11 @@
 #include <thread>
 #include <vector>
 
+#if defined(__ANDROID__) || defined(__linux__)
+#include <pthread.h>
+#include <sys/resource.h>
+#endif
+
 namespace Libs::Graphics {
 struct GraphicContext;
 } // namespace Libs::Graphics
@@ -858,6 +863,10 @@ void VideoOutDriver::Impl::VblankEnd() {
 }
 
 void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
+#if defined(__ANDROID__) || defined(__linux__)
+	pthread_setname_np(pthread_self(), "CapyPresent");
+	setpriority(PRIO_PROCESS, 0, -6);
+#endif
 	const auto frequency = Common::Timer::QueryPerformanceFrequency();
 	EXIT_IF(frequency == 0);
 
