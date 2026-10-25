@@ -115,6 +115,13 @@ enum class CoreOption(
         listOf(1L to R.string.enabled, 0L to R.string.disabled),
         0L,
     ),
+    GuestReadCache(
+        R.string.option_guest_read_cache,
+        R.string.option_guest_read_cache_desc,
+        "debug.capy.guest_read_cache",
+        listOf(1L to R.string.enabled, 0L to R.string.disabled),
+        1L,
+    ),
     ;
 
     fun title(context: Context) = context.getString(titleRes)
