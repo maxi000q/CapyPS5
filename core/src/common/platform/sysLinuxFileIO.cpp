@@ -273,7 +273,6 @@ void SysFileClose(sys_file_t* f) {
 		delete f->buf;
 	}
 
-	// f.type = SYS_FILE_ERROR;
 	delete f;
 }
 
@@ -533,18 +532,6 @@ bool SysFileSetLastAccessTimeUtc(const std::filesystem::path& name, SysFileTimeS
 
 	return !(0 != utime(real_name_str.c_str(), &times));
 
-	//	if (0 != stat(n.data(), &s))
-	//	{
-	//		return false;
-	//	}
-	//
-	//	times.actime += times.actime - s.st_atime;
-	//	times.modtime += times.modtime - s.st_mtime;
-	//
-	//	if (0 != utime(n.data(), &times))
-	//	{
-	//		return false;
-	//	}
 }
 
 bool SysFileSetLastWriteTimeUtc(const std::filesystem::path& name, SysFileTimeStruct& write) {
@@ -567,18 +554,6 @@ bool SysFileSetLastWriteTimeUtc(const std::filesystem::path& name, SysFileTimeSt
 
 	return !(0 != utime(real_name_str.c_str(), &times));
 
-	//	if (0 != stat(n.data(), &s))
-	//	{
-	//		return false;
-	//	}
-	//
-	//	times.actime += times.actime - s.st_atime;
-	//	times.modtime += times.modtime - s.st_mtime;
-	//
-	//	if (0 != utime(n.data(), &times))
-	//	{
-	//		return false;
-	//	}
 }
 
 bool SysFileSetLastAccessAndWriteTimeUtc(const std::filesystem::path& name,
@@ -602,18 +577,6 @@ bool SysFileSetLastAccessAndWriteTimeUtc(const std::filesystem::path& name,
 
 	return !(0 != utime(real_name_str.c_str(), &times));
 
-	//	if (0 != stat(n.data(), &s))
-	//	{
-	//		return false;
-	//	}
-	//
-	//	times.actime += times.actime - s.st_atime;
-	//	times.modtime += times.modtime - s.st_mtime;
-	//
-	//	if (0 != utime(n.data(), &times))
-	//	{
-	//		return false;
-	//	}
 }
 
 // Keep "." and ".." to match FindFirstFileW.

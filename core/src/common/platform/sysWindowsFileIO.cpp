@@ -252,7 +252,6 @@ void SysFileClose(sys_file_t* f) {
 		delete f->buf;
 	}
 
-	// f.type = SYS_FILE_ERROR;
 	delete f;
 }
 
@@ -327,7 +326,7 @@ bool SysFileSeek(sys_file_t& f, uint64_t offset) {
 		LARGE_INTEGER s;
 		s.QuadPart = static_cast<LONGLONG>(offset);
 		ok         = (SetFilePointerEx(f.handle, s, nullptr, FILE_BEGIN) != 0);
-		// printf("seek: %u\n", offset);
+
 	} else if (f.type == SYS_FILE_MEMORY_STAT || f.type == SYS_FILE_MEMORY_DYN) {
 		f.buf->ptr = f.buf->base + offset;
 	}
@@ -341,7 +340,7 @@ uint64_t SysFileTell(sys_file_t& f) {
 		LARGE_INTEGER r {};
 		s.QuadPart = 0;
 		SetFilePointerEx(f.handle, s, &r, FILE_CURRENT);
-		// printf("tell: %u\n", r.QuadPart);
+
 		return r.QuadPart;
 	}
 

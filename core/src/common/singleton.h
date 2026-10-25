@@ -33,8 +33,6 @@ private:
 	static inline T* g_m_instance = nullptr;
 };
 
-// template<class T> T* Singleton<T>::instance = 0;
-
 } // namespace Common
 
 #endif /* KYTY_COMMON_SINGLETON_H_ */

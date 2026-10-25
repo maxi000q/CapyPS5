@@ -29,8 +29,6 @@
 
 namespace Common {
 
-// SUBSYSTEM_DEFINE(File);
-
 class File {
 public:
 	enum class Mode { Read, Write, ReadWrite, WriteRead };

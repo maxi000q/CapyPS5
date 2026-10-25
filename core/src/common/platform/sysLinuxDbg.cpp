@@ -23,8 +23,6 @@
 void SysStackUsage(sys_dbg_stack_info_t& s) {
 	pid_t pid = getpid();
 
-	// printf("pid = %"I64"d\n", (int64_t)pid);
-
 	[[maybe_unused]] int result = 0;
 
 	memset(&s, 0, sizeof(sys_dbg_stack_info_t));
@@ -73,8 +71,6 @@ void SysStackUsage(sys_dbg_stack_info_t& s) {
 		return;
 	}
 
-	// printf("&str = %"I64"x\n", (uint64_t)&str);
-
 	uint64_t                  addr                 = 0;
 	uint64_t                  endaddr              = 0;
 	[[maybe_unused]] uint64_t size                 = 0;
@@ -112,10 +108,7 @@ void SysStackUsage(sys_dbg_stack_info_t& s) {
 		bool write = (strchr(permissions, 'w') != nullptr);
 		bool exec  = (strchr(permissions, 'x') != nullptr);
 
-		// printf("%016"I64"x, %"I64"d, %s, %d, %d\n", addr, size, filename, read, write);
-
 		if (read && write && !exec && strncmp(filename, "[stack", 6) == 0) {
-			// printf("stack: %016"I64"x, %"I64"d\n", addr, size);
 
 			if (check_addr >= addr && check_addr < addr + size) {
 				s.addr          = addr;
