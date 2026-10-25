@@ -179,9 +179,11 @@
     <string name="trophies_card_next">Por conseguir</string>
     <string name="whats_new_title">Lo nuevo en la v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Corregido el cierre fatal del shader (exit 321) que interrumpía Final Fantasy VII Rebirth y otros juegos al seleccionar un descriptor de buffer en la GPU: ahora el shader se degrada de forma segura y el juego continúa.</item>
-        <item>Corrección de mando: los juegos que usan el handle 0 del pad (FF7 Rebirth, Castlevania Dominus Collection) ya reciben entrada, y scePadOpen acepta cualquier usuario local y tipo de mando.</item>
-        <item>El hilo de GPU ahora también pide prioridad elevada, igual que el hilo de emulación, para frames más fluidos donde el sistema lo permita.</item>
-        <item>Registro de la ruta crítica sin bloqueos: menos sobrecarga en cada command buffer y creación de sampler, una pequeña mejora de rendimiento gratuita.</item>
+        <item>Ajuste del hilo de presentación: el hilo de vblank ahora tiene nombre, pide prioridad por encima del hilo de GPU y divide la espera en trozos de 4 ms en lugar de una sola pausa larga — entrega de frames más fluida.</item>
+        <item>La caché de pipelines también se guarda tras 250 pipelines nuevos: si el juego se cierra durante el calentamiento de shaders, se pierde mucho menos trabajo compilado.</item>
+        <item>Nuevo ajuste — Búfer de streaming (64–256 MB): ayuda a los juegos que llenan el anillo cada fotograma (clase Asterix XXL2); por juego y global, en Ajustes → Rendimiento.</item>
+        <item>Corrección del actualizador: los sufijos de versión ahora se comparan bien (v0.0.5pro &lt; v0.0.5proplus &lt; v0.0.5 a secas) — sin esto, esta actualización nunca se habría ofrecido a los dispositivos con 0.0.5pro.</item>
+        <item>Superposición de rendimiento: lectura de FPS suavizada (sin saltos de frames enteros) y menos basura por muestra.</item>
+        <item>Limpieza: 374 líneas de código muerto comentado eliminadas en 26 archivos, incluido un bloque #if 0 de 199 líneas — consulta el historial para los más de 60 cambios.</item>
     </string-array>
 </resources>
