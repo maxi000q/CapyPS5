@@ -260,10 +260,16 @@ private fun PauseMenu(
     onLayers: () -> Unit,
     onExit: () -> Unit,
 ) {
-    val entries = listOf(
+    var logNote by remember { mutableStateOf<String?>(null) }
+    val entries = listOfNotNull(
         Triple(stringResource(R.string.resume), Icons.Filled.PlayArrow, onResume),
         Triple(stringResource(R.string.settings), Icons.Outlined.Tune, onSettings),
         Triple(stringResource(R.string.layers), Icons.Outlined.Layers, onLayers),
+        // Both processes share the app UID, so the game's lines are in the same log.
+        Triple(
+            stringResource(R.string.save_log), Icons.Outlined.Description,
+            { logNote = saveLog(context) },
+        ),
         Triple(stringResource(R.string.exit), Icons.AutoMirrored.Outlined.Logout, onExit),
     )
     var focused by remember { mutableIntStateOf(0) }
@@ -299,6 +305,9 @@ private fun PauseMenu(
                     style = MaterialTheme.typography.bodySmall,
                     color = Capy.TextSecondary,
                 )
+            }
+            logNote?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = Capy.TextSecondary)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 entries.forEachIndexed { i, (label, icon, action) ->
@@ -367,3 +376,15 @@ private fun ErrorCard(message: String, onExit: () -> Unit) {
         }
     }
 }
+
+/** Dumps the shared log next to the game library, as the launcher does. */
+private fun saveLog(context: android.content.Context): String? = runCatching {
+    val dir = java.io.File(Settings(context).libraryPath, "logs").apply { mkdirs() }
+    val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+        .format(java.util.Date())
+    val file = java.io.File(dir, "consolefivepro-$stamp.txt")
+    val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time"))
+    process.inputStream.use { input -> file.outputStream().use { output -> input.copyTo(output) } }
+    process.waitFor()
+    context.getString(R.string.log_saved_in, file.absolutePath)
+}.getOrNull()
