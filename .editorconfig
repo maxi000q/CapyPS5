@@ -1,0 +1,23 @@
+; EditorConfig keeps the mixed conventions of this tree consistent:
+; tabs in C/C++ (upstream Kyty style), 4 spaces in Kotlin, 2 in Gradle/XML.
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{c,cpp,h,hpp,inc}]
+indent_style = tab
+indent_size = 4
+
+[*.{kt,kts}]
+indent_style = space
+indent_size = 4
+
+[*.{kts,gradle,xml,xml.dist}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
