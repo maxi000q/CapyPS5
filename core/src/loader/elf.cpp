@@ -106,9 +106,6 @@ static void SaveShdr64(Common::File& f, uint64_t offset, Elf64_Half num, const E
 static std::unique_ptr<uint8_t[]> LoadDynamic64(Elf64* f, uint64_t offset, uint64_t size) {
 	auto dynamic_data = std::make_unique<uint8_t[]>(size);
 
-	// f.Seek(offset);
-	// f.Read(dynamic_data, size);
-
 	f->LoadSegment(reinterpret_cast<uint64_t>(dynamic_data.get()), offset, size);
 
 	return dynamic_data;
@@ -372,9 +369,6 @@ void Elf64::DbgDump(const std::string& folder) {
 		fout.Create(folder_str + str);
 
 		auto buf = std::make_unique<char[]>(static_cast<uint32_t>(m_phdr[i].p_filesz));
-
-		// m_f->Seek(m_phdr[i].p_offset);
-		// m_f->Read(buf, static_cast<uint32_t>(m_phdr[i].p_filesz));
 
 		LoadSegment(reinterpret_cast<uint64_t>(buf.get()), m_phdr[i].p_offset, m_phdr[i].p_filesz);
 

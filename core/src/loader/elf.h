@@ -310,7 +310,7 @@ private:
 	std::unique_ptr<uint8_t[]>     m_dynamic_data;
 	std::unique_ptr<char[]>        m_str_table;
 	uint32_t                       m_str_table_size = 0;
-	// uint64_t    m_base_vaddr   = 0;
+
 };
 
 } // namespace Loader

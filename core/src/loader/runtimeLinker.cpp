@@ -915,7 +915,7 @@ static void GetDynModules(Elf64* elf, T* out, const char* names, Elf64_Sxword ta
 	GetDynValues(elf, &needed_modules, tag);
 	for (auto need: needed_modules) {
 		ModuleId id {};
-		// id.id            = static_cast<int>((need >> 48u) & 0xffffu);
+
 		EncodeId64(static_cast<uint16_t>((need >> 48u) & 0xffffu), &id.id);
 		id.version_major = static_cast<int>((need >> 40u) & 0xffu);
 		id.version_minor = static_cast<int>((need >> 32u) & 0xffu);
@@ -930,7 +930,7 @@ static void GetDynLibs(Elf64* elf, T* out, const char* names, Elf64_Sxword tag) 
 	GetDynValues(elf, &needed_modules, tag);
 	for (auto need: needed_modules) {
 		LibraryId id {};
-		// id.id      = static_cast<int>((need >> 48u) & 0xffffu);
+
 		EncodeId64(static_cast<uint16_t>((need >> 48u) & 0xffffu), &id.id);
 		id.version = static_cast<int>((need >> 32u) & 0xffffu);
 		id.name    = names + (need & 0xffffffff);
@@ -1153,7 +1153,6 @@ static void PatchProgram(Program* program, uint64_t address, uint64_t size) {
 }
 
 uint64_t RuntimeLinker::GetEntry() {
-	// EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 
 	Common::LockGuard lock(m_mutex);
 
@@ -1166,7 +1165,6 @@ uint64_t RuntimeLinker::GetEntry() {
 }
 
 uint64_t RuntimeLinker::GetProcParam() {
-	// EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 
 	Common::LockGuard lock(m_mutex);
 
@@ -1198,9 +1196,6 @@ void RuntimeLinker::DbgDump(const std::string& folder) {
 			                     p->dynamic_info->symbol_table_entry_size != sizeof(Elf64_Sym));
 			EXIT_NOT_IMPLEMENTED(p->dynamic_info->rela_table_entry_size != 0 &&
 			                     p->dynamic_info->rela_table_entry_size != sizeof(Elf64_Rela));
-			// EXIT_NOT_IMPLEMENTED(p->dynamic_info->jmprela_table == nullptr);
-			// EXIT_NOT_IMPLEMENTED(p->dynamic_info->rela_table == nullptr);
-			// EXIT_NOT_IMPLEMENTED(p->dynamic_info->symbol_table == nullptr);
 
 			if (p->dynamic_info->symbol_table != nullptr) {
 				DbgDumpSymbols(folder_str, p->dynamic_info->symbol_table,
@@ -1229,7 +1224,6 @@ void RuntimeLinker::DbgDump(const std::string& folder) {
 }
 
 void RuntimeLinker::RelocateAll() {
-	// EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 
 	Common::LockGuard lock(m_mutex);
 
@@ -1251,7 +1245,6 @@ void RuntimeLinker::RelocateProgram(Program* program) {
 }
 
 void RuntimeLinker::UnloadProgram(Program* program) {
-	// EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 
 	Common::LockGuard lock(m_mutex);
 
@@ -1502,7 +1495,6 @@ void RuntimeLinker::Execute(const std::filesystem::path& game_patch) {
 }
 
 void RuntimeLinker::Clear() {
-	// EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 
 	Common::LockGuard lock(m_mutex);
 	GamePatch::Clear();
@@ -1894,8 +1886,6 @@ void RuntimeLinker::LoadProgramToMemory(Program* program) {
 
 	EXIT_IF(program == nullptr || program->base_vaddr != 0 || program->base_size != 0 ||
 	        program->elf == nullptr);
-
-	// static uint64_t desired_base_addr = DESIRED_BASE_ADDR;
 
 	bool is_shared   = program->elf->IsShared();
 	bool is_next_gen = program->elf->IsNextGen();
