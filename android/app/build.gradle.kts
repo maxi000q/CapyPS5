@@ -21,6 +21,10 @@ android {
         ndk {
             abiFilters.add("arm64-v8a")
         }
+
+        // The app ships English and Spanish; keep locale resources from
+        // androidx/Compose out of the APK for every other language.
+        resourceConfigurations += listOf("en", "es")
     }
 
     lint {
