@@ -396,13 +396,11 @@ LIB_VERSION("libkernel", 1, "libkernel", 1, 1);
 
 namespace Apr {
 
-// TODO: change helper name
-static int KernelSyscallResult(int result) {
+static int TranslateAprResult(int result) {
 	if (result >= OK) {
 		return result;
 	}
 
-	// TODO: actually __error() thread local
 	*Posix::GetErrorAddr() = LibKernel::KernelToPosix(result);
 	return -1;
 }
@@ -411,7 +409,7 @@ static int KYTY_SYSV_ABI ResolveFilepathsToIds(const char* const* path_list, uin
                                                uint32_t* error_index) {
 	PRINT_NAME();
 
-	return KernelSyscallResult(AprShared::ResolvePathsCommon(path_list, count, ids, nullptr,
+	return TranslateAprResult(AprShared::ResolvePathsCommon(path_list, count, ids, nullptr,
 	                                                         error_index, nullptr, nullptr));
 }
 
@@ -419,35 +417,35 @@ static int KYTY_SYSV_ABI GetFileStat(uint32_t file_id, LibKernel::FileSystem::Fi
 	PRINT_NAME();
 
 	if (st == nullptr) {
-		return KernelSyscallResult(LibKernel::KERNEL_ERROR_EINVAL);
+		return TranslateAprResult(LibKernel::KERNEL_ERROR_EINVAL);
 	}
 
 	std::filesystem::path host_path;
 	if (!AprShared::TryGetHostPath(file_id, &host_path)) {
 		LOGF("\tAPR stat failed for unknown file id: 0x%08" PRIx32 "\n", file_id);
-		return KernelSyscallResult(LibKernel::KERNEL_ERROR_ENOENT);
+		return TranslateAprResult(LibKernel::KERNEL_ERROR_ENOENT);
 	}
 	if (!AprShared::IsValidGuestRange(reinterpret_cast<uint64_t>(st), sizeof(*st), true)) {
-		return KernelSyscallResult(LibKernel::KERNEL_ERROR_EFAULT);
+		return TranslateAprResult(LibKernel::KERNEL_ERROR_EFAULT);
 	}
 
-	return KernelSyscallResult(AprShared::GetHostPathStat(host_path, st));
+	return TranslateAprResult(AprShared::GetHostPathStat(host_path, st));
 }
 
 static int KYTY_SYSV_ABI GetFileSize(uint32_t file_id, uint64_t* size) {
 	PRINT_NAME();
 
 	if (size == nullptr) {
-		return KernelSyscallResult(LibKernel::KERNEL_ERROR_EINVAL);
+		return TranslateAprResult(LibKernel::KERNEL_ERROR_EINVAL);
 	}
 	if (!AprShared::IsValidGuestRange(reinterpret_cast<uint64_t>(size), sizeof(*size), true)) {
-		return KernelSyscallResult(LibKernel::KERNEL_ERROR_EFAULT);
+		return TranslateAprResult(LibKernel::KERNEL_ERROR_EFAULT);
 	}
 
 	std::filesystem::path host_path;
 	if (!AprShared::TryGetHostPath(file_id, &host_path)) {
 		LOGF("\tAPR size failed for unknown file id: 0x%08" PRIx32 "\n", file_id);
-		return KernelSyscallResult(LibKernel::KERNEL_ERROR_ENOENT);
+		return TranslateAprResult(LibKernel::KERNEL_ERROR_ENOENT);
 	}
 
 	uint64_t cached_size = 0;
@@ -461,7 +459,7 @@ static int KYTY_SYSV_ABI GetFileSize(uint32_t file_id, uint64_t* size) {
 		return OK;
 	}
 	if (!Common::File::IsFileExisting(host_path)) {
-		return KernelSyscallResult(LibKernel::KERNEL_ERROR_ENOENT);
+		return TranslateAprResult(LibKernel::KERNEL_ERROR_ENOENT);
 	}
 
 	*size = Common::File::Size(host_path);
@@ -473,7 +471,7 @@ static int KYTY_SYSV_ABI ResolveFilepathsToIdsAndFileSizes(const char* const* pa
                                                            uint32_t* error_index) {
 	PRINT_NAME();
 
-	return KernelSyscallResult(
+	return TranslateAprResult(
 	    AprShared::ResolvePathsCommon(path_list, count, ids, sizes, error_index, nullptr, nullptr));
 }
 
@@ -482,7 +480,7 @@ static int KYTY_SYSV_ABI ResolveFilepathsWithPrefixToIds(const char* prefix, con
                                                          uint32_t* error_index) {
 	PRINT_NAME();
 
-	return KernelSyscallResult(AprShared::ResolvePathsCommon(path_list, count, ids, nullptr,
+	return TranslateAprResult(AprShared::ResolvePathsCommon(path_list, count, ids, nullptr,
 	                                                         error_index, prefix, nullptr));
 }
 
@@ -493,7 +491,7 @@ static int KYTY_SYSV_ABI ResolveFilepathsWithPrefixToIdsAndFileSizes(const char*
                                                                      uint32_t* error_index) {
 	PRINT_NAME();
 
-	return KernelSyscallResult(AprShared::ResolvePathsCommon(path_list, count, ids, sizes,
+	return TranslateAprResult(AprShared::ResolvePathsCommon(path_list, count, ids, sizes,
 	                                                         error_index, prefix, nullptr));
 }
 
@@ -501,7 +499,7 @@ static int KYTY_SYSV_ABI ResolveFilepathsToIdsForEach(const char* const* path_li
                                                       uint32_t* ids, int* results) {
 	PRINT_NAME();
 
-	return KernelSyscallResult(
+	return TranslateAprResult(
 	    AprShared::ResolvePathsCommon(path_list, count, ids, nullptr, nullptr, nullptr, results));
 }
 
@@ -510,7 +508,7 @@ static int KYTY_SYSV_ABI ResolveFilepathsToIdsAndFileSizesForEach(const char* co
                                                                   uint64_t* sizes, int* results) {
 	PRINT_NAME();
 
-	return KernelSyscallResult(
+	return TranslateAprResult(
 	    AprShared::ResolvePathsCommon(path_list, count, ids, sizes, nullptr, nullptr, results));
 }
 
@@ -520,7 +518,7 @@ static int KYTY_SYSV_ABI ResolveFilepathsWithPrefixToIdsForEach(const char* pref
                                                                 int* results) {
 	PRINT_NAME();
 
-	return KernelSyscallResult(AprShared::ResolvePathsCommon(path_list, count, ids, nullptr,
+	return TranslateAprResult(AprShared::ResolvePathsCommon(path_list, count, ids, nullptr,
 	                                                         nullptr, prefix, results));
 }
 
@@ -529,7 +527,7 @@ static int KYTY_SYSV_ABI ResolveFilepathsWithPrefixToIdsAndFileSizesForEach(
     int* results) {
 	PRINT_NAME();
 
-	return KernelSyscallResult(
+	return TranslateAprResult(
 	    AprShared::ResolvePathsCommon(path_list, count, ids, sizes, nullptr, prefix, results));
 }
 
@@ -537,14 +535,14 @@ static int KYTY_SYSV_ABI SubmitCommandBufferAndGetResult(void* command_buffer, u
                                                          void*     result,
                                                          uint32_t* out_submission_id) {
 	PRINT_NAME();
-	return KernelSyscallResult(LibAmpr::Ampr::QueueCommandBuffer(
+	return TranslateAprResult(LibAmpr::Ampr::QueueCommandBuffer(
 	    LibAmpr::Ampr::Engine::Apr, reinterpret_cast<uint64_t>(command_buffer), 0, priority, result,
 	    out_submission_id));
 }
 
 static int KYTY_SYSV_ABI SubmitCommandBuffer(void* command_buffer, uint32_t priority) {
 	PRINT_NAME();
-	return KernelSyscallResult(LibAmpr::Ampr::QueueCommandBuffer(
+	return TranslateAprResult(LibAmpr::Ampr::QueueCommandBuffer(
 	    LibAmpr::Ampr::Engine::Apr, reinterpret_cast<uint64_t>(command_buffer), 0, priority,
 	    nullptr, nullptr));
 }
@@ -553,16 +551,16 @@ static int KYTY_SYSV_ABI SubmitCommandBufferAndGetId(void* command_buffer, uint3
                                                      uint32_t* out_submission_id) {
 	PRINT_NAME();
 	if (out_submission_id == nullptr) {
-		return KernelSyscallResult(LibKernel::KERNEL_ERROR_EINVAL);
+		return TranslateAprResult(LibKernel::KERNEL_ERROR_EINVAL);
 	}
-	return KernelSyscallResult(LibAmpr::Ampr::QueueCommandBuffer(
+	return TranslateAprResult(LibAmpr::Ampr::QueueCommandBuffer(
 	    LibAmpr::Ampr::Engine::Apr, reinterpret_cast<uint64_t>(command_buffer), 0, priority,
 	    nullptr, out_submission_id));
 }
 
 static int KYTY_SYSV_ABI WaitCommandBuffer(uint32_t submission_id) {
 	PRINT_NAME();
-	return KernelSyscallResult(
+	return TranslateAprResult(
 	    AprShared::CompleteSubmission(submission_id) ? OK : LibKernel::KERNEL_ERROR_ESRCH);
 }
 
