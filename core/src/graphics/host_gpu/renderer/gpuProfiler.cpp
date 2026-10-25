@@ -14,6 +14,9 @@
 #include <dlfcn.h>
 #include <mutex>
 #include <string>
+#if defined(__ANDROID__) || defined(__linux__)
+#include <pthread.h>
+#endif
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -75,6 +78,9 @@ bool Begin(GraphicContext& graphics, vk::CommandBuffer command, std::string labe
 		// thread reports which scope never finished.
 		state.watchdog = true;
 		std::thread([] {
+#if defined(__ANDROID__) || defined(__linux__)
+			pthread_setname_np(pthread_self(), "CapyGpuWatchdog");
+#endif
 			bool reported = false;
 			for (;;) {
 				std::this_thread::sleep_for(std::chrono::seconds(1));

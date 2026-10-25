@@ -214,6 +214,9 @@ private:
 	}
 
 	void Loop() {
+#if defined(__ANDROID__) || defined(__linux__)
+		pthread_setname_np(pthread_self(), "CapyArchiveIo");
+#endif
 		for (;;) {
 			Request* request;
 			{

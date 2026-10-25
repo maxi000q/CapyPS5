@@ -18,6 +18,7 @@
 #include <array>
 #include <mutex>
 #include <algorithm>
+#include <pthread.h>
 #include <sys/resource.h>
 #include <cerrno>
 #include <cstring>
@@ -139,6 +140,7 @@ JNIEXPORT jboolean JNICALL Java_org_capyps5_emulator_NativeBridge_nativeStartGam
 	g_is_running.store(true);
 	g_emulator_thread = std::thread([options]() {
 		ALOGI("Emulator thread started");
+		pthread_setname_np(pthread_self(), "CapyEmulator");
 		Common::InitializeThreads();
 		// Console Five Pro tweak (v0.0.4pro): ask the scheduler for a higher priority on the
 		// emulation thread. Best effort only: most ROMs deny nice < 0 for untrusted apps

@@ -13,6 +13,9 @@
 #include "kernel/pthread.h"
 
 #include <vector>
+#if defined(__ANDROID__) || defined(__linux__)
+#include <pthread.h>
+#endif
 
 #if !defined(__x86_64__) && !defined(_M_X64)
 #include "common/virtualMemory.h"
@@ -204,6 +207,9 @@ void HleStartWatchdog() {
 	static std::once_flag once;
 	std::call_once(once, [] {
 		std::thread([] {
+#if defined(__ANDROID__) || defined(__linux__)
+			pthread_setname_np(pthread_self(), "CapyHleWatchdog");
+#endif
 			for (;;) {
 				std::this_thread::sleep_for(std::chrono::seconds(3));
 				if (HleStatsEnabled()) {
