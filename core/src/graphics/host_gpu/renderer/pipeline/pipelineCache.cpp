@@ -584,10 +584,11 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 	InitializeDriverCache();
 	// Background PSO compilation workers. Two on smaller SoCs, one more on 8+-core devices
-	// (Snapdragon 8/Dimensity class) so shader warm-up during material streaming finishes
-	// sooner, while the emulated game threads keep at least five cores to themselves.
+	// (Snapdragon 8/Dimensity class) and two more on 12+-core devices (big mid-range SoCs
+	// ship 4x A7x + 8x A5x), so shader warm-up during material streaming finishes sooner,
+	// while the emulated game threads keep at least eight cores to themselves.
 	const uint32_t host_cores = std::thread::hardware_concurrency();
-	const uint32_t worker_count = host_cores >= 8 ? 3 : 2;
+	const uint32_t worker_count = host_cores >= 12 ? 4 : host_cores >= 8 ? 3 : 2;
 	for (uint32_t i = 0; i < worker_count; i++) {
 		m_async_workers.emplace_back([this] { AsyncWorker(); });
 	}
