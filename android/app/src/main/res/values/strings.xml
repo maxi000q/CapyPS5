@@ -56,6 +56,13 @@
     <string name="ue_value">Unreal (%1$s)</string>
     <string name="option_async_shaders">Compile shaders in the background</string>
     <string name="option_async_shaders_desc">Avoids stutter; an object may take a moment to appear</string>
+    <string name="option_stream_mb">Streaming buffer</string>
+    <string name="option_stream_mb_desc">Ring for CPU-updated data. Some games fill 64 MB every frame and wait on the GPU; a larger ring avoids that, but may cause visual glitches in a few titles</string>
+    <string name="stream_mb_64">64 MB (default)</string>
+    <string name="stream_mb_96">96 MB</string>
+    <string name="stream_mb_128">128 MB</string>
+    <string name="stream_mb_192">192 MB</string>
+    <string name="stream_mb_256">256 MB</string>
 
     <!-- GPU driver -->
     <string name="gpu_driver">GPU driver</string>

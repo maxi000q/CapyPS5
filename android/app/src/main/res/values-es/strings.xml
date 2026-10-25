@@ -54,6 +54,13 @@
     <string name="ue_value">Unreal (%1$s)</string>
     <string name="option_async_shaders">Compilar shaders en segundo plano</string>
     <string name="option_async_shaders_desc">Evita tirones; un objeto puede tardar un instante en aparecer</string>
+    <string name="option_stream_mb">Búfer de streaming</string>
+    <string name="option_stream_mb_desc">Anillo para datos actualizados por la CPU. Algunos juegos llenan 64 MB cada fotograma y esperan a la GPU; un anillo mayor lo evita, pero puede causar glitches visuales en algunos títulos</string>
+    <string name="stream_mb_64">64 MB (predeterminado)</string>
+    <string name="stream_mb_96">96 MB</string>
+    <string name="stream_mb_128">128 MB</string>
+    <string name="stream_mb_192">192 MB</string>
+    <string name="stream_mb_256">256 MB</string>
 
     <!-- Driver de GPU -->
     <string name="gpu_driver">Driver de GPU</string>

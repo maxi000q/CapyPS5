@@ -62,6 +62,19 @@ enum class CoreOption(
         listOf(1L to R.string.enabled, 0L to R.string.disabled),
         1L,
     ),
+    StreamingBuffer(
+        R.string.option_stream_mb,
+        R.string.option_stream_mb_desc,
+        "debug.capy.stream_mb",
+        listOf(
+            64L to R.string.stream_mb_64,
+            96L to R.string.stream_mb_96,
+            128L to R.string.stream_mb_128,
+            192L to R.string.stream_mb_192,
+            256L to R.string.stream_mb_256,
+        ),
+        64L,
+    ),
     ;
 
     fun title(context: Context) = context.getString(titleRes)

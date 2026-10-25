@@ -173,6 +173,7 @@ fun SettingsScreen(
             SettingsCategory(context.getString(R.string.category_performance), Icons.Outlined.Speed) {
                 listOf(
                     coreItem(CoreOption.AsyncShaders),
+                    coreItem(CoreOption.StreamingBuffer),
                     SettingItem(
                         context.getString(R.string.perf_overlay), context.getString(R.string.perf_overlay_desc),
                         settings.overlayMode.label(context),
