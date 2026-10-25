@@ -870,9 +870,7 @@ void DefineModule(EmitterState& state) {
 		state.builder.RequireCapability(spv::CapabilityFloat64);
 		state.builder.AddExecutionMode(state.main_func, spv::ExecutionModeSignedZeroInfNanPreserve,
 		                               64u);
-		// FP64 denormal preservation is temporarily disabled.
-		// state.builder.RequireCapability(spv::CapabilityDenormPreserve);
-		// state.builder.AddExecutionMode(state.main_func, spv::ExecutionModeDenormPreserve, 64u);
+
 	}
 	if (const auto* cs = ShaderWorkgroupInput(state.program.stage, state.input_info)) {
 		uint32_t    local_x = state.program.info.compute_derivatives ? 2u : 1u;
