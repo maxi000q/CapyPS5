@@ -1,9 +1,13 @@
 # SPDX-FileCopyrightText: Copyright 2026 CapyPS5 Project
 # SPDX-License-Identifier: GPL-2.0-only
 
-import os, re, struct
+import struct
+import sys
 
-path = r"C:\Users\LeYJa\Downloads\Dead.Cells.PS5-DUPLEX\Dead.Cells.PS5-DUPLEX\PPSA15552-app0\eboot.bin"
+if len(sys.argv) < 2:
+    sys.exit("usage: resolve_unresolved.py <eboot.bin> [nid#lib#mod ...]\n"
+             "       each symbol is NID#lib-id#mod-id as printed by the loader;")
+path = sys.argv[1]
 with open(path, 'rb') as f:
     data = f.read()
 
@@ -79,20 +83,9 @@ for tag, val in entries:
 print("Import Libs:", import_libs)
 print("Import Mods:", import_mods)
 
-unresolved_syms = [
-    'CCbC+lqqvF0#C#D',
-    'DHmwsa6S8Tc#C#D',
-    'dsqCVsNM0Zg#C#D',
-    'EHQEDVXZ0TI#E#F',
-    'AAeX-U5-P3M#L#M',
-    'NN01qLRhiqU#O#P',
-    'TXFFFiNldU8#O#P',
-    'TUuiYS2kE8s#O#P',
-    'uNAUmANZMEw#Q#R',
-    '1kzQRoWEgSA#Q#R',
-    'JPh3Zgg0Zwc#Q#R',
-    'Hwh11+m5KoI#Q#R',
-]
+unresolved_syms = sys.argv[2:]
+if not unresolved_syms:
+    sys.exit("no symbols given; pass them as arguments")
 
 for sym in unresolved_syms:
     nid, lib_id, mod_id = sym.split('#')
