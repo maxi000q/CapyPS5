@@ -291,7 +291,14 @@ private fun PauseMenu(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(game.titleName, style = MaterialTheme.typography.titleLarge, maxLines = 1)
                 Spacer(Modifier.width(12.dp))
-                Text(game.titleId, style = MaterialTheme.typography.bodySmall, color = Capy.TextSecondary)
+                Text(
+                    listOfNotNull(
+                        game.titleId,
+                        game.version?.let { "v$it" },
+                    ).joinToString("  ·  "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Capy.TextSecondary,
+                )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 entries.forEachIndexed { i, (label, icon, action) ->
