@@ -86,6 +86,8 @@ object DriverCatalog {
                     val assets = release.optJSONArray("assets") ?: JSONArray()
                     (0 until assets.length()).map { assets.getJSONObject(it) }
                         .filter { it.optString("name").endsWith(source.assetSuffix, ignoreCase = true) }
+                        // An asset still uploading has no download URL; installing it can only fail.
+                        .filter { it.optString("browser_download_url").isNotBlank() }
                         .map { asset ->
                             DriverPackage(
                                 source = source,
