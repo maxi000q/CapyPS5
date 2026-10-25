@@ -766,7 +766,10 @@ void GuestGpu::ThreadRun(void* data) {
 					gpu->m_processing = false;
 					// A wake that came before this wait must not be lost.
 					if (!std::exchange(gpu->m_wake_pending, false)) {
-						gpu->m_work_available.WaitFor(&gpu->m_queue_mutex, 100);
+						// 50 ms instead of 100: this wait only runs while every queue is blocked, as
+					// a lost-wakeup safety net; halving it halves the worst-case unblock latency
+					// at a negligible extra wakeup cost while idle-blocked.
+					gpu->m_work_available.WaitFor(&gpu->m_queue_mutex, 50);
 					}
 					for (auto& queue: gpu->m_queues) {
 						if (!queue.empty()) {
