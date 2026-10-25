@@ -39,13 +39,23 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install SDK components (NDK 28.2, CMake 3.31.6)
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install \
+          set -euo pipefail
+          # The ubuntu-latest runner image ships the SDK with cmdline-tools preinstalled;
+          # android-actions/setup-android is not used (it fails on the retired 'tools' package).
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager not found; cmdline-tools contents:" >&2
+            ls "$ANDROID_HOME/cmdline-tools/" >&2 || true
+            exit 1
+          fi
+          echo "sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0" \
@@ -57,7 +67,9 @@ jobs:
 
       - name: Configure native build
         run: |
-          cmake -S core -B build-android-arm64 -G Ninja \
+          CMAKE="$ANDROID_HOME/cmake/3.31.6/bin/cmake"
+          [ -x "$CMAKE" ] || CMAKE="cmake"
+          "$CMAKE" -S core -B build-android-arm64 -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/28.2.13676358/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-31 \
