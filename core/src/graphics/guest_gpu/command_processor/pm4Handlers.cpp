@@ -2132,8 +2132,6 @@ KYTY_CP_OP_PARSER(CpOpIndirectUcRegs) {
 KYTY_CP_OP_PARSER(CpOpMarker) {
 	KYTY_PROFILER_FUNCTION();
 
-	// EXIT_NOT_IMPLEMENTED(cmd_id != 0xC0001000);
-
 	uint32_t id     = buffer[0] & 0xfffu;
 	uint32_t len_dw = ((cmd_id >> 16u) & 0x3fffu);
 

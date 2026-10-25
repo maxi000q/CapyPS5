@@ -25,7 +25,7 @@ struct ColorView {
 
 struct ColorInfo {
 	bool fmask_compression_enable = false;
-	// uint32_t fmask_compression_mode   = 0;
+
 	bool                    fmask_data_compression_disable = false;
 	bool                    fmask_one_frag_mode            = false;
 	bool                    cmask_fast_clear_enable        = false;
@@ -549,7 +549,6 @@ struct ShaderRegisters {
 	uint32_t m_paClVsOutCntl      = 0;
 
 	uint32_t ps_interpolator_settings[32] = {0};
-	// uint32_t ps_input_num                 = 0;
 
 	uint32_t m_spiShaderIdxFormat     = 0;
 	uint32_t m_geNggSubgrpCntl        = 0;
