@@ -64,7 +64,7 @@
     <string name="stream_mb_192">192 MB</string>
     <string name="stream_mb_256">256 MB</string>
     <string name="option_read_ahead">Read-ahead window</string>
-    <string name="option_read_ahead_desc">KB downloaded in one wait when a game reads GPU-written buffers page by page (Stray's render thread). Larger can speed up sequential reads; too large wastes bandwidth on random access</string>
+    <string name="option_read_ahead_desc">KB downloaded in one wait when a game reads GPU-written buffers page by page (Stray\'s render thread). Larger can speed up sequential reads; too large wastes bandwidth on random access</string>
     <string name="read_ahead_64">64 KB</string>
     <string name="read_ahead_128">128 KB</string>
     <string name="read_ahead_256">256 KB (default)</string>
