@@ -71,6 +71,10 @@ fun PerfOverlay(mode: OverlayMode, snapshot: PerfSnapshot, fpsHistory: List<Floa
                         withStyle(SpanStyle(color = if (snapshot.maxFrameTimeMs > 50f) Capy.Warn else Capy.TextPrimary)) {
                             append("%.1f".format(snapshot.maxFrameTimeMs))
                         }
+                        if (snapshot.hostFps > 0f) {
+                            withStyle(SpanStyle(color = Label)) { append("  host ") }
+                            append("%.0f".format(snapshot.hostFps))
+                        }
                     }
                 },
                 color = Capy.TextPrimary, fontFamily = mono, fontSize = 12.sp,
