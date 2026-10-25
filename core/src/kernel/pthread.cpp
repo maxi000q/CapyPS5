@@ -700,7 +700,7 @@ public:
 	void SetThreadDtors(thread_dtors_func_t dtors) { m_thread_dtors = dtors; }
 
 private:
-	// Common::Mutex           m_mutex;
+
 	PthreadMutexattr      m_default_mutexattr      = nullptr;
 	PthreadRwlockattr     m_default_rwlockattr     = nullptr;
 	PthreadCondattr       m_default_condattr       = nullptr;
@@ -1662,7 +1662,6 @@ static void DestructPthreadSpecific() {
 }
 
 int KYTY_SYSV_ABI PthreadMutexattrInit(PthreadMutexattr* attr) {
-	// PRINT_NAME();
 
 	EXIT_NOT_IMPLEMENTED(attr == nullptr);
 
@@ -1681,7 +1680,6 @@ int KYTY_SYSV_ABI PthreadMutexattrInit(PthreadMutexattr* attr) {
 }
 
 int KYTY_SYSV_ABI PthreadMutexattrDestroy(PthreadMutexattr* attr) {
-	// PRINT_NAME();
 
 	EXIT_NOT_IMPLEMENTED(attr == nullptr || *attr == nullptr);
 
@@ -1698,7 +1696,6 @@ int KYTY_SYSV_ABI PthreadMutexattrDestroy(PthreadMutexattr* attr) {
 }
 
 int KYTY_SYSV_ABI PthreadMutexattrSettype(PthreadMutexattr* attr, int type) {
-	// PRINT_NAME();
 
 	EXIT_NOT_IMPLEMENTED(attr == nullptr || *attr == nullptr);
 
@@ -1723,7 +1720,6 @@ int KYTY_SYSV_ABI PthreadMutexattrSettype(PthreadMutexattr* attr, int type) {
 
 int KYTY_SYSV_ABI PthreadMutexattrSetprotocol([[maybe_unused]] PthreadMutexattr* attr,
                                               int                                protocol) {
-	// PRINT_NAME();
 
 	EXIT_NOT_IMPLEMENTED(attr == nullptr || *attr == nullptr);
 
@@ -1752,7 +1748,6 @@ static int PthreadMutexInitNamed(PthreadMutex* mutex, const PthreadMutexattr* at
 		PRINT_NAME();
 	}
 
-	// EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 	if (mutex == nullptr) {
 		return KERNEL_ERROR_EINVAL;
 	}
@@ -1833,7 +1828,6 @@ int KYTY_SYSV_ABI PthreadMutexDestroy(PthreadMutex* mutex) {
 }
 
 int KYTY_SYSV_ABI PthreadMutexLock(PthreadMutex* mutex) {
-	// PRINT_NAME();
 
 	auto* pthread_static_objects = g_pthread_context->GetPthreadStaticObjects();
 
@@ -1848,8 +1842,6 @@ int KYTY_SYSV_ABI PthreadMutexLock(PthreadMutex* mutex) {
 
 	int result = NativeMutexLock(*mutex, nullptr);
 
-	// LOGF("\tmutex lock: %s, %d\n", (*mutex)->name.c_str(), result);
-
 	switch (result) {
 		case 0: return OK;
 		case EAGAIN: return KERNEL_ERROR_EAGAIN;
@@ -1860,7 +1852,6 @@ int KYTY_SYSV_ABI PthreadMutexLock(PthreadMutex* mutex) {
 }
 
 int KYTY_SYSV_ABI PthreadMutexTrylock(PthreadMutex* mutex) {
-	// PRINT_NAME();
 
 	auto* pthread_static_objects = g_pthread_context->GetPthreadStaticObjects();
 
@@ -1875,8 +1866,6 @@ int KYTY_SYSV_ABI PthreadMutexTrylock(PthreadMutex* mutex) {
 
 	int result = NativeMutexTrylock(*mutex);
 
-	// LOGF("\tmutex trylock: %s, %d\n", (*mutex)->name.c_str(), result);
-
 	switch (result) {
 		case 0: return OK;
 		case EAGAIN: return KERNEL_ERROR_EAGAIN;
@@ -1887,7 +1876,6 @@ int KYTY_SYSV_ABI PthreadMutexTrylock(PthreadMutex* mutex) {
 }
 
 int KYTY_SYSV_ABI PthreadMutexTimedlock(PthreadMutex* mutex, KernelUseconds usec) {
-	// PRINT_NAME();
 
 	auto* pthread_static_objects = g_pthread_context->GetPthreadStaticObjects();
 
@@ -1913,7 +1901,6 @@ int KYTY_SYSV_ABI PthreadMutexTimedlock(PthreadMutex* mutex, KernelUseconds usec
 }
 
 int KYTY_SYSV_ABI PthreadMutexUnlock(PthreadMutex* mutex) {
-	// PRINT_NAME();
 
 	auto* pthread_static_objects = g_pthread_context->GetPthreadStaticObjects();
 
@@ -1943,7 +1930,6 @@ int KYTY_SYSV_ABI PthreadMutexUnlock(PthreadMutex* mutex) {
 }
 
 int KYTY_SYSV_ABI PthreadAttrInit(PthreadAttr* attr) {
-	// PRINT_NAME();
 
 	*attr = new PthreadAttrPrivate {};
 
@@ -1978,7 +1964,6 @@ int KYTY_SYSV_ABI PthreadAttrInit(PthreadAttr* attr) {
 }
 
 int KYTY_SYSV_ABI PthreadAttrDestroy(PthreadAttr* attr) {
-	// PRINT_NAME();
 
 	auto* attr_value = GetPthreadAttrValue(attr, "PthreadAttrDestroy");
 	if (attr_value == nullptr) {
@@ -1997,7 +1982,6 @@ int KYTY_SYSV_ABI PthreadAttrDestroy(PthreadAttr* attr) {
 }
 
 int KYTY_SYSV_ABI PthreadAttrGet(Pthread thread, PthreadAttr* attr) {
-	// PRINT_NAME();
 
 	if (thread == nullptr || attr == nullptr || *attr == nullptr) {
 		return KERNEL_ERROR_EINVAL;
@@ -2007,7 +1991,6 @@ int KYTY_SYSV_ABI PthreadAttrGet(Pthread thread, PthreadAttr* attr) {
 }
 
 int KYTY_SYSV_ABI PthreadAttrGetaffinity(const PthreadAttr* attr, KernelCpumask* mask) {
-	// PRINT_NAME();
 
 	if (mask == nullptr || attr == nullptr || *attr == nullptr) {
 		return KERNEL_ERROR_EINVAL;
@@ -2019,13 +2002,11 @@ int KYTY_SYSV_ABI PthreadAttrGetaffinity(const PthreadAttr* attr, KernelCpumask*
 }
 
 int KYTY_SYSV_ABI PthreadAttrGetdetachstate(const PthreadAttr* attr, int* state) {
-	// PRINT_NAME();
 
 	if (state == nullptr || attr == nullptr || *attr == nullptr) {
 		return KERNEL_ERROR_EINVAL;
 	}
 
-	// int result = pthread_attr_getdetachstate(&(*attr)->p, state);
 	int result = 0;
 
 	*state = ((*attr)->detached ? PTHREAD_CREATE_DETACHED : PTHREAD_CREATE_JOINABLE);
@@ -2043,7 +2024,6 @@ int KYTY_SYSV_ABI PthreadAttrGetdetachstate(const PthreadAttr* attr, int* state)
 }
 
 int KYTY_SYSV_ABI PthreadAttrGetguardsize(const PthreadAttr* attr, size_t* guard_size) {
-	// PRINT_NAME();
 
 	if (guard_size == nullptr || attr == nullptr || *attr == nullptr) {
 		return KERNEL_ERROR_EINVAL;
@@ -2055,7 +2035,6 @@ int KYTY_SYSV_ABI PthreadAttrGetguardsize(const PthreadAttr* attr, size_t* guard
 }
 
 int KYTY_SYSV_ABI PthreadAttrGetinheritsched(const PthreadAttr* attr, int* inherit_sched) {
-	// PRINT_NAME();
 
 	if (inherit_sched == nullptr || attr == nullptr || *attr == nullptr) {
 		return KERNEL_ERROR_EINVAL;
@@ -2073,7 +2052,6 @@ int KYTY_SYSV_ABI PthreadAttrGetinheritsched(const PthreadAttr* attr, int* inher
 }
 
 int KYTY_SYSV_ABI PthreadAttrGetschedparam(const PthreadAttr* attr, KernelSchedParam* param) {
-	// PRINT_NAME();
 
 	if (param == nullptr || attr == nullptr || *attr == nullptr) {
 		return KERNEL_ERROR_EINVAL;
@@ -2091,7 +2069,6 @@ int KYTY_SYSV_ABI PthreadAttrGetschedparam(const PthreadAttr* attr, KernelSchedP
 }
 
 int KYTY_SYSV_ABI PthreadAttrGetschedpolicy(const PthreadAttr* attr, int* policy) {
-	// PRINT_NAME();
 
 	if (policy == nullptr || attr == nullptr || *attr == nullptr) {
 		return KERNEL_ERROR_EINVAL;
@@ -2113,7 +2090,6 @@ int KYTY_SYSV_ABI PthreadAttrGetschedpolicy(const PthreadAttr* attr, int* policy
 }
 
 int KYTY_SYSV_ABI PthreadAttrGetsolosched(const PthreadAttr* attr, int* solosched) {
-	// PRINT_NAME();
 
 	if (solosched == nullptr || attr == nullptr || *attr == nullptr) {
 		return KERNEL_ERROR_EINVAL;
@@ -2126,7 +2102,6 @@ int KYTY_SYSV_ABI PthreadAttrGetsolosched(const PthreadAttr* attr, int* solosche
 
 int KYTY_SYSV_ABI PthreadAttrGetstack(const PthreadAttr* __restrict attr,
                                       void** __restrict stack_addr, size_t* __restrict stack_size) {
-	// PRINT_NAME();
 
 	if (stack_size == nullptr || stack_addr == nullptr || attr == nullptr || *attr == nullptr) {
 		return KERNEL_ERROR_EINVAL;
@@ -2139,7 +2114,6 @@ int KYTY_SYSV_ABI PthreadAttrGetstack(const PthreadAttr* __restrict attr,
 }
 
 int KYTY_SYSV_ABI PthreadAttrGetstackaddr(const PthreadAttr* attr, void** stack_addr) {
-	// PRINT_NAME();
 
 	if (stack_addr == nullptr || attr == nullptr || *attr == nullptr) {
 		return KERNEL_ERROR_EINVAL;
@@ -2151,7 +2125,6 @@ int KYTY_SYSV_ABI PthreadAttrGetstackaddr(const PthreadAttr* attr, void** stack_
 }
 
 int KYTY_SYSV_ABI PthreadAttrGetstacksize(const PthreadAttr* attr, size_t* stack_size) {
-	// PRINT_NAME();
 
 	if (stack_size == nullptr || attr == nullptr || *attr == nullptr) {
 		return KERNEL_ERROR_EINVAL;
@@ -2163,7 +2136,6 @@ int KYTY_SYSV_ABI PthreadAttrGetstacksize(const PthreadAttr* attr, size_t* stack
 }
 
 int KYTY_SYSV_ABI PthreadAttrSetaffinity(PthreadAttr* attr, KernelCpumask mask) {
-	// PRINT_NAME();
 
 	auto* attr_value = GetPthreadAttrValue(attr, "PthreadAttrSetaffinity");
 	if (attr_value == nullptr) {
@@ -2176,7 +2148,6 @@ int KYTY_SYSV_ABI PthreadAttrSetaffinity(PthreadAttr* attr, KernelCpumask mask) 
 }
 
 int KYTY_SYSV_ABI PthreadAttrSetdetachstate(PthreadAttr* attr, int state) {
-	// PRINT_NAME();
 
 	auto* attr_value = GetPthreadAttrValue(attr, "PthreadAttrSetdetachstate");
 	if (attr_value == nullptr) {
@@ -2190,7 +2161,6 @@ int KYTY_SYSV_ABI PthreadAttrSetdetachstate(PthreadAttr* attr, int state) {
 		default: EXIT("unknown state: %d\n", state);
 	}
 
-	// int result = pthread_attr_setdetachstate(&(*attr)->p, pstate);
 	int result = 0;
 
 	attr_value->detached = (pstate == PTHREAD_CREATE_DETACHED);
@@ -2202,7 +2172,6 @@ int KYTY_SYSV_ABI PthreadAttrSetdetachstate(PthreadAttr* attr, int state) {
 }
 
 int KYTY_SYSV_ABI PthreadAttrSetguardsize(PthreadAttr* attr, size_t guard_size) {
-	// PRINT_NAME();
 
 	auto* attr_value = GetPthreadAttrValue(attr, "PthreadAttrSetguardsize");
 	if (attr_value == nullptr) {
@@ -2215,7 +2184,6 @@ int KYTY_SYSV_ABI PthreadAttrSetguardsize(PthreadAttr* attr, size_t guard_size) 
 }
 
 int KYTY_SYSV_ABI PthreadAttrSetinheritsched(PthreadAttr* attr, int inherit_sched) {
-	// PRINT_NAME();
 
 	auto* attr_value = GetPthreadAttrValue(attr, "PthreadAttrSetinheritsched");
 	if (attr_value == nullptr) {
@@ -2239,7 +2207,6 @@ int KYTY_SYSV_ABI PthreadAttrSetinheritsched(PthreadAttr* attr, int inherit_sche
 }
 
 int KYTY_SYSV_ABI PthreadAttrSetschedparam(PthreadAttr* attr, const KernelSchedParam* param) {
-	// PRINT_NAME();
 
 	auto* attr_value = GetPthreadAttrValue(attr, "PthreadAttrSetschedparam");
 	if (param == nullptr || attr_value == nullptr) {
@@ -2266,7 +2233,6 @@ int KYTY_SYSV_ABI PthreadAttrSetschedparam(PthreadAttr* attr, const KernelSchedP
 }
 
 int KYTY_SYSV_ABI PthreadAttrSetschedpolicy(PthreadAttr* attr, int policy) {
-	// PRINT_NAME();
 
 	auto* attr_value = GetPthreadAttrValue(attr, "PthreadAttrSetschedpolicy");
 	if (attr_value == nullptr) {
@@ -2287,7 +2253,6 @@ int KYTY_SYSV_ABI PthreadAttrSetschedpolicy(PthreadAttr* attr, int policy) {
 }
 
 int KYTY_SYSV_ABI PthreadAttrSetsolosched(PthreadAttr* attr, int solosched) {
-	// PRINT_NAME();
 
 	auto* attr_value = GetPthreadAttrValue(attr, "PthreadAttrSetsolosched");
 	if (attr_value == nullptr) {
@@ -2300,7 +2265,6 @@ int KYTY_SYSV_ABI PthreadAttrSetsolosched(PthreadAttr* attr, int solosched) {
 }
 
 int KYTY_SYSV_ABI PthreadAttrSetstack(PthreadAttr* attr, void* addr, size_t size) {
-	// PRINT_NAME();
 
 	auto* attr_value = GetPthreadAttrValue(attr, "PthreadAttrSetstack");
 	if (addr == nullptr || size < GUEST_PTHREAD_STACK_MIN || attr_value == nullptr) {
@@ -2317,7 +2281,6 @@ int KYTY_SYSV_ABI PthreadAttrSetstack(PthreadAttr* attr, void* addr, size_t size
 }
 
 int KYTY_SYSV_ABI PthreadAttrSetstackaddr(PthreadAttr* attr, void* addr) {
-	// PRINT_NAME();
 
 	auto* attr_value = GetPthreadAttrValue(attr, "PthreadAttrSetstackaddr");
 	if (addr == nullptr || attr_value == nullptr) {
@@ -2333,7 +2296,6 @@ int KYTY_SYSV_ABI PthreadAttrSetstackaddr(PthreadAttr* attr, void* addr) {
 }
 
 int KYTY_SYSV_ABI PthreadAttrSetstacksize(PthreadAttr* attr, size_t stack_size) {
-	// PRINT_NAME();
 
 	auto* attr_value = GetPthreadAttrValue(attr, "PthreadAttrSetstacksize");
 	if (stack_size < GUEST_PTHREAD_STACK_MIN || attr_value == nullptr) {
@@ -2619,7 +2581,6 @@ int KYTY_SYSV_ABI PthreadRwlockTrywrlock(PthreadRwlock* rwlock) {
 }
 
 int KYTY_SYSV_ABI PthreadRwlockUnlock(PthreadRwlock* rwlock) {
-	// PRINT_NAME();
 
 	auto* pthread_static_objects = g_pthread_context->GetPthreadStaticObjects();
 
@@ -2658,7 +2619,6 @@ int KYTY_SYSV_ABI PthreadRwlockUnlock(PthreadRwlock* rwlock) {
 }
 
 int KYTY_SYSV_ABI PthreadRwlockWrlock(PthreadRwlock* rwlock) {
-	// PRINT_NAME();
 
 	auto* pthread_static_objects = g_pthread_context->GetPthreadStaticObjects();
 
@@ -2806,7 +2766,6 @@ int KYTY_SYSV_ABI PthreadCondattrSetclock(PthreadCondattr* attr, KernelClockid c
 }
 
 int KYTY_SYSV_ABI PthreadCondBroadcast(PthreadCond* cond) {
-	// PRINT_NAME();
 
 	auto* pthread_static_objects = g_pthread_context->GetPthreadStaticObjects();
 
@@ -2896,7 +2855,6 @@ int KYTY_SYSV_ABI PthreadCondInit(PthreadCond* cond, const PthreadCondattr* attr
 }
 
 int KYTY_SYSV_ABI PthreadCondSignal(PthreadCond* cond) {
-	// PRINT_NAME();
 
 	auto* pthread_static_objects = g_pthread_context->GetPthreadStaticObjects();
 
@@ -2915,7 +2873,6 @@ int KYTY_SYSV_ABI PthreadCondSignal(PthreadCond* cond) {
 }
 
 int KYTY_SYSV_ABI PthreadCondSignalto(PthreadCond* cond, Pthread thread) {
-	// PRINT_NAME();
 
 	auto* pthread_static_objects = g_pthread_context->GetPthreadStaticObjects();
 
@@ -2935,7 +2892,6 @@ int KYTY_SYSV_ABI PthreadCondSignalto(PthreadCond* cond, Pthread thread) {
 
 int KYTY_SYSV_ABI PthreadCondTimedwait(PthreadCond* cond, PthreadMutex* mutex,
                                        KernelUseconds usec) {
-	// PRINT_NAME();
 
 	auto* pthread_static_objects = g_pthread_context->GetPthreadStaticObjects();
 
@@ -3006,8 +2962,6 @@ int KYTY_SYSV_ABI PthreadCondTimedwait(PthreadCond* cond, PthreadMutex* mutex,
 		result = lock_result;
 	}
 
-	// LOGF("\tcond timedwait: %s, %d\n", (*cond)->name.c_str(), result);
-
 	switch (result) {
 		case 0: return OK;
 		case ETIMEDOUT: return KERNEL_ERROR_ETIMEDOUT;
@@ -3019,7 +2973,6 @@ int KYTY_SYSV_ABI PthreadCondTimedwait(PthreadCond* cond, PthreadMutex* mutex,
 
 int KYTY_SYSV_ABI PthreadCondTimedwaitAbs(PthreadCond* cond, PthreadMutex* mutex,
                                           const KernelTimespec* abstime) {
-	// PRINT_NAME();
 
 	auto* pthread_static_objects = g_pthread_context->GetPthreadStaticObjects();
 
@@ -3159,7 +3112,6 @@ int KYTY_SYSV_ABI PthreadCondWait(PthreadCond* cond, PthreadMutex* mutex) {
 }
 
 Pthread KYTY_SYSV_ABI PthreadSelf() {
-	// PRINT_NAME();
 
 	EXIT_NOT_IMPLEMENTED(g_pthread_self == nullptr);
 
@@ -3751,7 +3703,6 @@ void KYTY_SYSV_ABI PthreadYield() {
 }
 
 int KYTY_SYSV_ABI PthreadGetthreadid() {
-	// PRINT_NAME();
 
 	return g_pthread_self != nullptr ? g_pthread_self->guest.thread_id : 0;
 }
@@ -3824,7 +3775,6 @@ int KYTY_SYSV_ABI KernelClockGettime(KernelClockid clock_id, KernelTimespec* tp)
 }
 
 int KYTY_SYSV_ABI KernelGettimeofday(KernelTimeval* tp) {
-	// PRINT_NAME();
 
 	if (tp == nullptr) {
 		return KERNEL_ERROR_EFAULT;
@@ -4001,11 +3951,10 @@ uint64_t KYTY_SYSV_ABI KernelGetProcessTimeCounterFrequency() {
 void KYTY_SYSV_ABI KernelSetThreadDtors(thread_dtors_func_t dtors) {
 	PRINT_NAME();
 
-	// EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 	EXIT_NOT_IMPLEMENTED(g_pthread_context->GetThreadDtors() != nullptr);
 
 	g_pthread_context->SetThreadDtors(dtors);
-	// g_thread_dtors = dtors;
+
 }
 
 int KYTY_SYSV_ABI KernelUsleep(KernelUseconds microseconds) {
@@ -4305,52 +4254,44 @@ int KYTY_SYSV_ABI pthread_join(LibKernel::Pthread thread, void** value) {
 }
 
 int KYTY_SYSV_ABI pthread_attr_init(LibKernel::PthreadAttr* attr) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrInit(attr));
 }
 
 int KYTY_SYSV_ABI pthread_attr_destroy(LibKernel::PthreadAttr* attr) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrDestroy(attr));
 }
 
 int KYTY_SYSV_ABI pthread_attr_get_np(LibKernel::Pthread thread, LibKernel::PthreadAttr* attr) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrGet(thread, attr));
 }
 
 int KYTY_SYSV_ABI pthread_attr_getdetachstate(const LibKernel::PthreadAttr* attr, int* state) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrGetdetachstate(attr, state));
 }
 
 int KYTY_SYSV_ABI pthread_attr_getguardsize(const LibKernel::PthreadAttr* attr,
                                             size_t*                       guard_size) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrGetguardsize(attr, guard_size));
 }
 
 int KYTY_SYSV_ABI pthread_attr_getinheritsched(const LibKernel::PthreadAttr* attr,
                                                int*                          inherit_sched) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrGetinheritsched(attr, inherit_sched));
 }
 
 int KYTY_SYSV_ABI pthread_attr_getschedparam(const LibKernel::PthreadAttr* attr,
                                              LibKernel::KernelSchedParam*  param) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrGetschedparam(attr, param));
 }
 
 int KYTY_SYSV_ABI pthread_attr_getschedpolicy(const LibKernel::PthreadAttr* attr, int* policy) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrGetschedpolicy(attr, policy));
 }
@@ -4358,45 +4299,38 @@ int KYTY_SYSV_ABI pthread_attr_getschedpolicy(const LibKernel::PthreadAttr* attr
 int KYTY_SYSV_ABI pthread_attr_getstack(const LibKernel::PthreadAttr* __restrict attr,
                                         void** __restrict stack_addr,
                                         size_t* __restrict stack_size) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrGetstack(attr, stack_addr, stack_size));
 }
 
 int KYTY_SYSV_ABI pthread_attr_getstacksize(const LibKernel::PthreadAttr* attr,
                                             size_t*                       stack_size) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrGetstacksize(attr, stack_size));
 }
 
 int KYTY_SYSV_ABI pthread_attr_setdetachstate(LibKernel::PthreadAttr* attr, int state) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrSetdetachstate(attr, state));
 }
 
 int KYTY_SYSV_ABI pthread_attr_setguardsize(LibKernel::PthreadAttr* attr, size_t guard_size) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrSetguardsize(attr, guard_size));
 }
 
 int KYTY_SYSV_ABI pthread_attr_setinheritsched(LibKernel::PthreadAttr* attr, int inherit_sched) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrSetinheritsched(attr, inherit_sched));
 }
 
 int KYTY_SYSV_ABI pthread_attr_setschedparam(LibKernel::PthreadAttr*            attr,
                                              const LibKernel::KernelSchedParam* param) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrSetschedparam(attr, param));
 }
 
 int KYTY_SYSV_ABI pthread_attr_setschedpolicy(LibKernel::PthreadAttr* attr, int policy) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrSetschedpolicy(attr, policy));
 }
@@ -4406,19 +4340,16 @@ int KYTY_SYSV_ABI pthread_attr_setstack(LibKernel::PthreadAttr* attr, void* addr
 }
 
 int KYTY_SYSV_ABI pthread_attr_setstacksize(LibKernel::PthreadAttr* attr, size_t stack_size) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadAttrSetstacksize(attr, stack_size));
 }
 
 int KYTY_SYSV_ABI pthread_cond_broadcast(LibKernel::PthreadCond* cond) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadCondBroadcast(cond));
 }
 
 int KYTY_SYSV_ABI pthread_cond_signal(LibKernel::PthreadCond* cond) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadCondSignal(cond));
 }
@@ -4450,7 +4381,6 @@ int KYTY_SYSV_ABI pthread_condattr_destroy(LibKernel::PthreadCondattr* attr) {
 }
 
 int KYTY_SYSV_ABI pthread_cond_wait(LibKernel::PthreadCond* cond, LibKernel::PthreadMutex* mutex) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadCondWait(cond, mutex));
 }
@@ -4464,13 +4394,11 @@ int KYTY_SYSV_ABI pthread_cond_timedwait(LibKernel::PthreadCond*          cond,
 }
 
 int KYTY_SYSV_ABI pthread_mutex_lock(LibKernel::PthreadMutex* mutex) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadMutexLock(mutex));
 }
 
 int KYTY_SYSV_ABI pthread_mutex_trylock(LibKernel::PthreadMutex* mutex) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadMutexTrylock(mutex));
 }
@@ -4509,7 +4437,6 @@ int KYTY_SYSV_ABI pthread_mutex_timedlock(LibKernel::PthreadMutex*         mutex
 }
 
 int KYTY_SYSV_ABI pthread_mutex_unlock(LibKernel::PthreadMutex* mutex) {
-	// PRINT_NAME();
 
 	return POSIX_PTHREAD_CALL(LibKernel::PthreadMutexUnlock(mutex));
 }
