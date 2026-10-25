@@ -204,14 +204,29 @@ inline void WatchWrite(const char* who, uint64_t addr, uint64_t size, uint64_t v
 
 /** Logs a warning the first time `key` is seen (at most 4096 distinct keys). */
 inline void NoteOnce(const char* tag, uint64_t key, const char* fmt, ...) {
-	static std::mutex            mutex;
-	static std::vector<uint64_t> seen;
-	{
-		std::lock_guard lock(mutex);
-		if (seen.size() >= 4096 || std::find(seen.begin(), seen.end(), key) != seen.end()) {
-			return;
+	// Console Five Pro tweak (v0.0.5pro): fixed-size lock-free linear-probing set.
+	// NoteOnce runs in the hottest logging paths (every RELEASE_MEM packet, every
+	// sampler creation) and the previous mutex + O(n) vector scan stung the GPU
+	// thread. Behaviour is unchanged: log once per key, up to a cap, then drop.
+	constexpr uint32_t kSlots  = 8192; // power of two, 2x the old 4096 cap
+	constexpr uint32_t kProbes = 32;
+	static std::atomic<uint64_t> slots[kSlots]; // zero-initialized (static storage)
+	const uint64_t tagged = key == 0 ? 1u : key; // 0 marks an empty slot
+	uint32_t    index    = static_cast<uint32_t>(tagged) & (kSlots - 1u);
+	bool        first    = false;
+	for (uint32_t probe = 0; probe < kProbes; ++probe) {
+		uint64_t expected = 0;
+		if (slots[index].compare_exchange_strong(expected, tagged, std::memory_order_relaxed)) {
+			first = true; // claimed a slot: first sighting of this key
+			break;
 		}
-		seen.push_back(key);
+		if (expected == tagged) {
+			return; // already logged
+		}
+		index = (index + 1u) & (kSlots - 1u);
+	}
+	if (!first) {
+		return; // table saturated: behave like the old 4096-key cap
 	}
 #if defined(__ANDROID__)
 	va_list args;

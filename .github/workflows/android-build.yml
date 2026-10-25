@@ -143,17 +143,21 @@ jobs:
           VERSION="$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)"
           TAG="${GITHUB_REF_NAME}"
           cat > /tmp/release_notes.md <<'NOTES'
-          **Console Five Pro v0.0.4pro** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
+          **Console Five Pro v0.0.5pro** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
 
-          ## New in v0.0.4pro
+          ## New in v0.0.5pro — bug fixes from your logs
 
-          - **New name and icon**: Console Five Pro with a clean, simple white icon; the old CapyPS5 artwork is gone.
-          - **Fixed a fatal crash (exit status 321)**: games used to close when a video or overlay surface was resolved into a downscaled render target (`image.cpp` scale mismatch, seen on Unreal titles with in-game video). The renderer now degrades gracefully instead of exiting.
-          - **Smoother gameplay**: the emulation thread requests elevated scheduling priority where the OS allows it, and background shader compilation is tuned to take less CPU time from the game.
-          - **More resilient shader cache**: the Vulkan driver pipeline cache is flushed to disk every 10 s instead of 20 s.
-          - **Quieter updater**: release checks no longer warn on every launch when the device is offline, and updates come from this project's own releases.
-          - **Simpler Settings**: a single community link — Discord: https://discord.gg/NQgP9JxtU3 — replaces the old donation links.
-          - **Installs side by side** with the original CapyPS5 (new package id `org.consolefivepro.emulator`), so both apps can coexist.
+          - **Fixed the FF7 Rebirth shader crash (exit status 321)**: when a game computes a buffer descriptor on the GPU and the shader compiler cannot track it, the emulator used to close itself (`ResourceTracking` "buffer descriptor is not a valid runtime value"). The shader now binds a safe null descriptor instead — that one access degrades to a zero read / dropped write and the game keeps running.
+          - **Fixed controller input in games that poll pad handle 0** (seen in FF7 Rebirth and Castlevania Dominus Collection logs: `PadCheckHandle failed for handle=0`): real hardware numbers the first pad handle from 0, so handle 0 is now accepted. `scePadOpen` also accepts any local user id and pad type, matching single-user real-console behaviour.
+          - **GPU thread priority boost**: the frame-critical guest GPU thread now requests the same best-effort elevated priority as the emulation thread (v0.0.4pro), for smoother frames on ROMs that allow it.
+          - **Lock-free hot-path logging**: the once-per-key log filter ran a mutex + linear scan on *every* RELEASE_MEM packet and every sampler creation. It is now a fixed-size lock-free hash set — a small, free performance gain in the GPU command path.
+
+          ## Also inherited from v0.0.4pro
+
+          - Console Five Pro rebrand, white icon, Discord community link in Settings.
+          - Fatal crash fix for video/overlay resolve into downscaled render targets.
+          - Elevated emulation-thread priority, tuned background shader compilation, 10 s pipeline-cache flush, quieter offline updater.
+          - Installs side by side with the original CapyPS5 (package id `org.consolefivepro.emulator`).
 
           ## Requirements
 
@@ -168,7 +172,7 @@ jobs:
           - Upstream **CapyPS5 v0.0.3** by Ghael-V; this project is an independent rebranded build of it.
           - KytyPS5 and the original Kyty by InoriRus, and the FEX project.
 
-          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.4pro)
+          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.5pro)
           NOTES
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets."

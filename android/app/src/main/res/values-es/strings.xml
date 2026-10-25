@@ -172,11 +172,9 @@
     <string name="trophies_card_next">Por conseguir</string>
     <string name="whats_new_title">Lo nuevo en la v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Renombrado a Console Five Pro con un icono nuevo y sencillo.</item>
-        <item>Corregido un cierre fatal (exit 321) al resolver vídeos o superposiciones en render targets reducidos: ahora el juego continúa sin cerrarse.</item>
-        <item>El hilo de emulación pide al sistema una prioridad mayor, para frames más fluidos donde el ROM lo permita.</item>
-        <item>La comprobación de actualizaciones ya no avisa en cada arranque si el dispositivo está sin conexión.</item>
-        <item>Ajustes: un único enlace de comunidad (Discord) en lugar de los antiguos enlaces de donación.</item>
-        <item>Compilación de shaders en segundo plano afinada para robar menos CPU al juego, y la caché de shaders se guarda el doble de a menudo.</item>
+        <item>Corregido el cierre fatal del shader (exit 321) que interrumpía Final Fantasy VII Rebirth y otros juegos al seleccionar un descriptor de buffer en la GPU: ahora el shader se degrada de forma segura y el juego continúa.</item>
+        <item>Corrección de mando: los juegos que usan el handle 0 del pad (FF7 Rebirth, Castlevania Dominus Collection) ya reciben entrada, y scePadOpen acepta cualquier usuario local y tipo de mando.</item>
+        <item>El hilo de GPU ahora también pide prioridad elevada, igual que el hilo de emulación, para frames más fluidos donde el sistema lo permita.</item>
+        <item>Registro de la ruta crítica sin bloqueos: menos sobrecarga en cada command buffer y creación de sampler, una pequeña mejora de rendimiento gratuita.</item>
     </string-array>
 </resources>

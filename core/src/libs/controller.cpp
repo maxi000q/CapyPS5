@@ -1009,7 +1009,11 @@ int GetActiveControllerId() {
 
 static bool PadOpenArgsAreValid(int user_id, int type, int index) {
 	// The host keyboard and gamepad feed one standard port for the configured user.
-	return user_id == Config::GetUserId() && type == 0 && index == 0;
+	// Titles hardcode various local user ids (real hardware reports 0x1c000000
+	// for the initial user) and may request specialized pad types, so accept any
+	// non-special user id and any pad type on the single emulated port.
+	(void)type;
+	return user_id >= 0 && index == 0;
 }
 
 int GameController::InitPort() {
@@ -1045,7 +1049,12 @@ int GameController::CheckPortHandleLocked(int handle) const {
 	if (m_port_state == PortState::Uninitialized) {
 		return PAD_ERROR_NOT_INITIALIZED;
 	}
-	return m_port_state == PortState::Open && handle == PAD_HANDLE ? OK : PAD_ERROR_INVALID_HANDLE;
+	// Real hardware numbers the first pad handle from 0; PAD_HANDLE is kept for
+	// titles that use scePadOpen's return value. Accept both so games polling a
+	// hardcoded handle 0 still receive input.
+	return m_port_state == PortState::Open && (handle == PAD_HANDLE || handle == 0)
+	           ? OK
+	           : PAD_ERROR_INVALID_HANDLE;
 }
 
 int GameController::CheckPortHandle(int handle) {

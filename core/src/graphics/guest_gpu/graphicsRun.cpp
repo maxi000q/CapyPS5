@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 #include "graphics/guest_gpu/graphicsRun.h"
+
+#include <sys/resource.h>
 #include <fmt/format.h>
 #include <string>
 #if defined(__ANDROID__) || defined(__linux__)
@@ -706,6 +708,10 @@ void GuestGpu::ThreadRun(void* data) {
 	KYTY_PROFILER_THREAD("Thread_Gpu");
 #if defined(__ANDROID__) || defined(__linux__)
 	pthread_setname_np(pthread_self(), "CapyGpu");
+	// Console Five Pro tweak (v0.0.5pro): the GPU thread is frame-critical, so ask
+	// the scheduler for the same best-effort boost as the emulator thread. Most
+	// ROMs deny nice < 0 for untrusted apps (EPERM); failures are harmless.
+	setpriority(PRIO_PROCESS, 0, -4);
 #endif
 	g_gpu_thread = true;
 	g_gpu_state  = gpu;

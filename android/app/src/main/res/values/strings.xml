@@ -175,11 +175,9 @@
     <string name="trophies_card_next">Still to earn</string>
     <string name="whats_new_title">What\'s new in v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Renamed to Console Five Pro with a new simple icon.</item>
-        <item>Fixed a fatal crash (exit 321) when videos or overlays were resolved into downscaled render targets — the game now degrades gracefully instead of closing.</item>
-        <item>The emulation thread now asks the OS for a higher priority, for smoother frames on ROMs that allow it.</item>
-        <item>Update checks no longer warn on every launch when the device is offline.</item>
-        <item>Settings: one community link (Discord) instead of the old donation links.</item>
-        <item>Background shader compilation tuned so it steals less CPU time from the game, and the shader cache is saved twice as often.</item>
+        <item>Fixed the fatal shader crash (exit 321) that closed Final Fantasy VII Rebirth and other titles when a game picks a buffer descriptor on the GPU — the shader now falls back safely and the game keeps running.</item>
+        <item>Controller fix: games that poll pad handle 0 (FF7 Rebirth, Castlevania Dominus Collection) now receive input, and scePadOpen accepts any local user and pad type.</item>
+        <item>The GPU thread now also requests elevated priority, matching the emulation thread, for smoother frames where the OS allows it.</item>
+        <item>Hot-path logging made lock-free: less overhead on every command buffer and sampler creation, a small but free performance gain.</item>
     </string-array>
 </resources>
