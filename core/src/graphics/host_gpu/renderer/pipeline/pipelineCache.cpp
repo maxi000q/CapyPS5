@@ -749,7 +749,10 @@ void PipelineCache::SavePeriodically() {
 	}
 	// Flush every 10 s instead of 20 s: the atomic temp-file rename keeps each save cheap,
 	// and half the interval halves the shader-cache loss when a game crashes or is killed.
-	if (now_ms - m_last_save_ms < 10000) {
+	// Also flush once 250 pipelines were built since the last save: the first minutes
+	// of a game create thousands of PSOs while materials stream in, and a crash would
+	// otherwise lose up to a full 10 s window of compilation work.
+	if (now_ms - m_last_save_ms < 10000 && m_pipelines_since_save < 250) {
 		return;
 	}
 	m_last_save_ms = now_ms;
