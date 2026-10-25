@@ -463,10 +463,7 @@ void MainDialog::RunInterpreter(QProcess* process, const Configuration& info) {
 		args->startupInfo->dwFlags |= static_cast<DWORD>(STARTF_USECOUNTCHARS);
 		args->startupInfo->dwXCountChars = CMD_X_CHARS;
 		args->startupInfo->dwYCountChars = CMD_Y_CHARS;
-		// args->startupInfo->dwFlags |= static_cast<DWORD>(STARTF_USEFILLATTRIBUTE);
-		// args->startupInfo->dwFillAttribute =
-		//     static_cast<DWORD>(BACKGROUND_BLUE) | static_cast<DWORD>(FOREGROUND_RED) |
-		//     static_cast<DWORD>(FOREGROUND_INTENSITY);
+
 	});
 #endif
 	process->start();

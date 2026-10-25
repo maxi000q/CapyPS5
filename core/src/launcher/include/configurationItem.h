@@ -28,7 +28,7 @@ public:
 
 	Configuration&                     GetInfo() { return *m_info; }
 	[[nodiscard]] const Configuration& GetInfo() const { return *m_info; }
-	// void                                     SetInfo(Configuration* info);
+
 	void               SetRunning(bool state);
 	void               SetCompatibilityEditable(bool editable);
 	[[nodiscard]] bool IsRunning() const { return m_running; }
