@@ -1,14 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-FileCopyrightText: Copyright 2026 CapyPS5 Project -->
 <!-- SPDX-License-Identifier: GPL-2.0-only -->
-<!-- Cache (update downloads, driver imports) must not be backed up or
-     transferred: it is re-creatable and bloats every backup. Save data,
-     trophies and settings stay included by default. -->
-<data-extraction-rules>
-    <cloud-backup>
-        <exclude domain="cache" path="." />
-    </cloud-backup>
-    <device-transfer>
-        <exclude domain="cache" path="." />
-    </device-transfer>
-</data-extraction-rules>
+<!-- The schema has no cache domain: Android excludes app cache from cloud
+     backups and device transfer by default, which is what this file set out
+     to express. Saves, trophies and settings stay backed up by default. -->
+<data-extraction-rules />
