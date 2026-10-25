@@ -95,6 +95,10 @@ fun EmulationScreen(
     var gamepadConnected by remember { mutableStateOf(hasPhysicalGamepad()) }
     var snapshot by remember { mutableStateOf(PerfSnapshot()) }
     val fpsHistory = remember { mutableStateListOf<Float>() }
+    // Probing /sys and /sys/class/thermal costs ~130 file reads (see cpuThermalZones);
+    // keep one monitor for the whole screen instead of rebuilding it on every overlay
+    // mode change. Constructed lazily on Dispatchers.IO inside the effect.
+    var perfMonitor by remember { mutableStateOf<PerfMonitor?>(null) }
 
     // While any menu is open, controller input drives the UI instead of the game.
     val uiHasInput = showPauseMenu || showSettings || showLayers || loadError != null
@@ -116,7 +120,8 @@ fun EmulationScreen(
 
     LaunchedEffect(settings.overlayMode) {
         if (settings.overlayMode == OverlayMode.Off) return@LaunchedEffect
-        val monitor = withContext(Dispatchers.IO) { PerfMonitor(context) }
+        val monitor = perfMonitor ?: withContext(Dispatchers.IO) { PerfMonitor(context) }
+            .also { perfMonitor = it }
         while (isActive) {
             val sample = withContext(Dispatchers.IO) { monitor.sample() }
             snapshot = sample
