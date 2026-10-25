@@ -21,6 +21,12 @@ on:
 permissions:
   contents: write
 
+# Superseded main-branch builds are cancelled automatically; tag builds get a
+# unique group per tag and are never cancelled by each other or by main.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Native core + APK (arm64)
