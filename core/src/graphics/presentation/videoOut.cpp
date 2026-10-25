@@ -877,7 +877,7 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 			const auto remaining_us =
 			    (static_cast<uint64_t>(total_wait) * 1000000u + frequency - 1) / frequency;
 			Common::Thread::SleepMicro(static_cast<uint32_t>(
-			    std::clamp<uint64_t>(remaining_us, 1, std::numeric_limits<uint32_t>::max())));
+			    std::clamp<uint64_t>(remaining_us, 1, 4000)));
 		}
 		if (token.stop_requested()) {
 			break;
