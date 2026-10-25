@@ -262,14 +262,15 @@ private fun PauseMenu(
 ) {
     var logNote by remember { mutableStateOf<String?>(null) }
     var confirmingExit by remember { mutableStateOf(false) }
+    val pauseContext = androidx.compose.ui.platform.LocalContext.current
     val entries = listOfNotNull(
         Triple(stringResource(R.string.resume), Icons.Filled.PlayArrow, onResume),
         Triple(stringResource(R.string.settings), Icons.Outlined.Tune, onSettings),
         Triple(stringResource(R.string.layers), Icons.Outlined.Layers, onLayers),
         // Both processes share the app UID, so the game's lines are in the same log.
         Triple(
-            stringResource(R.string.save_log), Icons.Outlined.Description,
-            { logNote = saveLog(context) },
+            stringResource(R.string.save_log), Icons.Outlined.SystemUpdate,
+            { logNote = saveLog(pauseContext) },
         ),
         Triple(
             stringResource(R.string.exit), Icons.AutoMirrored.Outlined.Logout,
