@@ -47,7 +47,9 @@ import java.util.Date
 import java.util.Locale
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.capyps5.emulator.ui.components.SupportDialog
 import org.capyps5.emulator.ui.components.UpdateDialog
 import org.capyps5.emulator.ui.components.WhatsNewDialog
@@ -108,8 +110,11 @@ class MainActivity : CapyActivity() {
             CapyPS5Theme {
                 val games = remember { mutableStateListOf<GameItem>() }
                 LaunchedEffect(settings.libraryPaths, storageCheck) {
+                    // Folder walks + param.sfo reads per game stay off the main thread;
+                    // swap the list in one go so the grid does not flicker while scanning.
+                    val found = withContext(Dispatchers.IO) { scanLibrary() }
                     games.clear()
-                    games.addAll(scanLibrary())
+                    games.addAll(found)
                 }
                 Box(Modifier.fillMaxSize()) {
                     HomeScreen(
