@@ -39,7 +39,8 @@ LIB_VERSION("SaveData", 1, "SaveData", 1, 1);
 
 namespace SaveData {
 
-// TODO(): specify dir at launcher
+// Base directory under the platform files dir; the TODO about choosing it
+// at the launcher was resolved by routing through AndroidGetFilesDir().
 static constexpr char     SAVE_DATA_DIR[]      = "_SaveData";
 static constexpr uint64_t SAVE_DATA_BLOCKS_MIN = 48;
 static constexpr uint64_t SAVE_DATA_BLOCKS_MAX = 16384;
