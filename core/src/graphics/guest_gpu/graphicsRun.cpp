@@ -711,7 +711,9 @@ void GuestGpu::ThreadRun(void* data) {
 	// Console Five Pro tweak (v0.0.5pro): the GPU thread is frame-critical, so ask
 	// the scheduler for the same best-effort boost as the emulator thread. Most
 	// ROMs deny nice < 0 for untrusted apps (EPERM); failures are harmless.
-	setpriority(PRIO_PROCESS, 0, -4);
+	if (setpriority(PRIO_PROCESS, 0, -4) != 0) {
+		LOGF("GPU thread: priority boost unavailable (nice -4 denied)\n");
+	}
 #endif
 	g_gpu_thread = true;
 	g_gpu_state  = gpu;

@@ -865,7 +865,9 @@ void VideoOutDriver::Impl::VblankEnd() {
 void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 #if defined(__ANDROID__) || defined(__linux__)
 	pthread_setname_np(pthread_self(), "CapyPresent");
-	setpriority(PRIO_PROCESS, 0, -6);
+	if (setpriority(PRIO_PROCESS, 0, -6) != 0) {
+		LOGF("Present thread: priority boost unavailable (nice -6 denied)\n");
+	}
 #endif
 	const auto frequency = Common::Timer::QueryPerformanceFrequency();
 	EXIT_IF(frequency == 0);
