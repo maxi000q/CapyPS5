@@ -176,6 +176,7 @@ fun SettingsScreen(
                     coreItem(CoreOption.StreamingBuffer),
                     coreItem(CoreOption.ReadAhead),
                     coreItem(CoreOption.YieldSleep),
+                    coreItem(CoreOption.VerboseLogging),
                     SettingItem(
                         context.getString(R.string.perf_overlay), context.getString(R.string.perf_overlay_desc),
                         settings.overlayMode.label(context),

@@ -101,6 +101,13 @@ enum class CoreOption(
         ),
         0L,
     ),
+    VerboseLogging(
+        R.string.option_verbose,
+        R.string.option_verbose_desc,
+        "debug.capy.verbose",
+        listOf(1L to R.string.enabled, 0L to R.string.disabled),
+        0L,
+    ),
     ;
 
     fun title(context: Context) = context.getString(titleRes)

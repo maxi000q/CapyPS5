@@ -77,6 +77,8 @@
     <string name="yield_us_250">250 µs</string>
     <string name="yield_us_500">500 µs</string>
     <string name="yield_us_1000">1000 µs</string>
+    <string name="option_verbose">Verbose logging</string>
+    <string name="option_verbose_desc">Detailed hot-path logging to logcat, for bug reports; slows the game while enabled</string>
 
     <!-- GPU driver -->
     <string name="gpu_driver">GPU driver</string>
