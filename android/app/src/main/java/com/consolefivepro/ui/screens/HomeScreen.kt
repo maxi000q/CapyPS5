@@ -40,7 +40,9 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.EmojiEvents
@@ -56,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -67,6 +70,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -567,6 +573,26 @@ private fun GameOptionsPanel(
     }
     if (row >= items.size) row = items.size - 1
 
+    // v0.0.9pro: the rows scroll. On small screens the lower rows (save export/import, reset,
+    // play) were cut off; the header and the hint bar stay pinned while this column scrolls.
+    val panelScroll = rememberScrollState()
+    val rowTops = remember { mutableStateMapOf<Int, Int>() }
+    val rowBottoms = remember { mutableStateMapOf<Int, Int>() }
+    var rowsViewportHeight by remember { mutableIntStateOf(0) }
+    LaunchedEffect(row, items.size) {
+        // Gamepad navigation: bring the focused row into view (touch users scroll directly).
+        val top = rowTops[row] ?: return@LaunchedEffect
+        val bottom = rowBottoms[row] ?: (top + 1)
+        if (rowsViewportHeight > 0) {
+            val target = when {
+                top < panelScroll.value -> top
+                bottom > panelScroll.value + rowsViewportHeight -> bottom - rowsViewportHeight
+                else -> return@LaunchedEffect
+            }
+            panelScroll.animateScrollTo(target.coerceIn(0, panelScroll.maxValue))
+        }
+    }
+
     OnNavKey { key ->
         val item = items.getOrNull(row)
         when (key) {
@@ -596,8 +622,26 @@ private fun GameOptionsPanel(
                 color = Capy.TextSecondary,
             )
             Spacer(Modifier.height(8.dp))
-            items.forEachIndexed { i, item -> SettingRowView(item, focused = i == row) { row = i } }
-            Spacer(Modifier.weight(1f))
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(panelScroll)
+                    .onSizeChanged { rowsViewportHeight = it.height },
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items.forEachIndexed { i, item ->
+                    Box(
+                        Modifier.onGloballyPositioned { coords ->
+                            val top = coords.positionInParent().y.toInt()
+                            rowTops[i] = top
+                            rowBottoms[i] = top + coords.size.height
+                        },
+                    ) {
+                        SettingRowView(item, focused = i == row) { row = i }
+                    }
+                }
+            }
             HintBar(
                 listOf(
                     "◀ ▶" to stringResource(R.string.hint_change),
