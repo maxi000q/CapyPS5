@@ -10,6 +10,7 @@
 #include "common/debugFlags.h"
 #include "common/emulatorConfig.h"
 #include "common/file.h"
+#include "common/gpuProfile.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
 #include "common/stringUtils.h"
@@ -1292,6 +1293,15 @@ void WindowContext::CreateVulkan() {
 	const auto& device_properties = graphic_ctx.GetPhysicalDeviceProperties();
 
 	LOGF("Select device: %s\n", device_properties.deviceName.data());
+	// v0.0.9pro: record the GPU vendor so per-vendor performance defaults can key off it.
+	Common::GpuProfile::SetVendor(device_properties.vendorID,
+	                               device_properties.deviceName.data());
+	if (Common::GpuProfile::MaliProfileEnabled()) {
+		Log::WriteToConsoleAndLog(fmt::format(
+			"GPU: {} - Mali performance profile enabled: hardware render-target clears "
+			"(AFBC-friendly), 128 MiB streaming buffer, +1 pipeline worker\n",
+			device_properties.deviceName.data()));
+	}
 
 	const vk::PhysicalDeviceImageFormatInfo2 block_texel_view_info {
 	    .format = vk::Format::eBc1RgbaUnormBlock,

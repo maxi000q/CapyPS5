@@ -5,6 +5,7 @@
 #include "common/assert.h"
 #include "common/common.h"
 #include "common/debugFlags.h"
+#include "common/gpuProfile.h"
 #include "common/profiler.h"
 #include "common/threads.h"
 #include "graphics/host_gpu/graphicContext.h"
@@ -86,8 +87,20 @@ void CommandBuffer::BeginRendering(const RenderState& state) const {
 	// sprites showed through in 8x8 blocks). Default (3): open with LOAD and clear inside the
 	// pass. `debug.capy.rp_mode`: 0 loadOp CLEAR, 1 keep the open pass when only the clears
 	// change, 2 clear in a pass of its own.
-	static Common::DebugFlags::CachedValue rp_mode("debug.capy.rp_mode", 3);
-	const auto mode = rp_mode.Get();
+	// v0.0.9pro: the default now depends on the GPU. Mode 3 (clear inside a LOAD pass)
+	// works around an Adreno depth bug; on Mali it makes every pass load and decompress
+	// the previous contents only to overwrite them, which costs bandwidth on a GPU that
+	// is bandwidth-bound. The Mali profile defaults to 0 instead: hardware loadOp clears
+	// are free and keep AFBC (Arm Frame Buffer Compression) alive - same pixels, less
+	// memory traffic. An explicit `setprop debug.capy.rp_mode` still wins.
+	static Common::DebugFlags::CachedValue rp_mode("debug.capy.rp_mode", -1);
+	const auto mode = [&] {
+		const auto requested = rp_mode.Get();
+		if (requested >= 0 && requested <= 3) {
+			return requested;
+		}
+		return static_cast<int64_t>(Common::GpuProfile::MaliProfileEnabled() ? 0 : 3);
+	}();
 	if (mode == 1 && m_rendering && WithoutClears(m_render_state) == state) {
 		return;
 	}

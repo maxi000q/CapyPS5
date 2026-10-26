@@ -14,6 +14,7 @@
 #include "common/debugFlags.h"
 #include "graphics/shader/recompiler/HostFeatures.h"
 #include "common/emulatorConfig.h"
+#include "common/gpuProfile.h"
 #include "common/file.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
@@ -589,7 +590,12 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	// ship 4x A7x + 8x A5x), so shader warm-up during material streaming finishes sooner,
 	// while the emulated game threads keep at least eight cores to themselves.
 	const uint32_t host_cores = std::thread::hardware_concurrency();
-	const uint32_t worker_count = host_cores >= 12 ? 4 : host_cores >= 8 ? 3 : 2;
+	// v0.0.9pro: one more worker under the Mali profile - Mali shader compiles are
+	// slower, so finishing the warm-up sooner means fewer hitches while a game
+	// streams new materials.
+	const uint32_t mali_extra = Common::GpuProfile::MaliProfileEnabled() ? 1 : 0;
+	const uint32_t worker_count =
+		std::min(5u, (host_cores >= 12 ? 4u : host_cores >= 8 ? 3u : 2u) + mali_extra);
 	for (uint32_t i = 0; i < worker_count; i++) {
 		m_async_workers.emplace_back([this] { AsyncWorker(); });
 	}
