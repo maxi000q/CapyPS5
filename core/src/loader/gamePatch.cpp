@@ -49,6 +49,10 @@ using Json = nlohmann::json;
 
 std::unique_ptr<Plan> g_pending_plan;
 std::vector<uint64_t> g_applied_cave_pages;
+// Console Five Pro fix (v0.0.8pro): the plan is staged by RuntimeLinker::Execute
+// on the boot thread while a concurrent module load can consume it through
+// RelocateProgram, and Clear tears both down at shutdown; serialize access.
+Common::Mutex g_plan_mutex;
 
 bool Fail(std::string* error, std::string message) {
 	*error = std::move(message);
@@ -333,12 +337,20 @@ bool Apply(const std::filesystem::path& plan_path, Program* main_program,
 		return true;
 	}
 
-	g_pending_plan = std::make_unique<Plan>(std::move(plan));
+	{
+		Common::LockGuard lock(g_plan_mutex);
+		g_pending_plan = std::make_unique<Plan>(std::move(plan));
+	}
 	for (auto* program: programs) {
 		if (!ApplyPending(program)) {
 			return false;
 		}
-		if (g_pending_plan == nullptr) {
+		bool consumed = false;
+		{
+			Common::LockGuard lock(g_plan_mutex);
+			consumed = g_pending_plan == nullptr;
+		}
+		if (consumed) {
 			return true;
 		}
 	}
@@ -347,6 +359,8 @@ bool Apply(const std::filesystem::path& plan_path, Program* main_program,
 }
 
 bool ApplyPending(Program* program) {
+	Common::LockGuard lock(g_plan_mutex);
+
 	uint64_t source_base = 0;
 	if (g_pending_plan == nullptr || program == nullptr || program->elf == nullptr ||
 	    !Matches(g_pending_plan.get(), *program, &source_base)) {
@@ -373,6 +387,8 @@ bool ApplyPending(Program* program) {
 }
 
 void Clear() {
+	Common::LockGuard lock(g_plan_mutex);
+
 	if (g_pending_plan != nullptr) {
 		ReleaseCaves(&g_pending_plan->cave_pages);
 	}
