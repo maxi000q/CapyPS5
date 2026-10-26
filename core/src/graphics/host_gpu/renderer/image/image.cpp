@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <fmt/format.h>
 #include <memory>
+#include <utility>
 #include <xxhash.h>
 
 namespace Libs::Graphics {
@@ -1143,10 +1144,25 @@ void Image::ReinterpretAsMutable() {
 	if (!info.data.Empty()) {
 		FormatReinterpret::Mark(info.data.address, info.data.size);
 	}
-	auto       old       = std::make_unique<VulkanImage>(std::move(backing));
+	// VulkanImage cannot move (KYTY_CLASS_NO_COPY deletes copy and move assignment, which
+	// also suppresses the move constructor), so the retired backing is salvaged member by
+	// member into a heap object; `backing` keeps null handles and empty tracking state,
+	// exactly what CreateBacking expects.
+	auto       old       = std::make_unique<VulkanImage>();
 	auto       old_views = std::move(views);
-	backing              = VulkanImage {};
-	m_single_format_list = false;
+	old->format             = backing.format;
+	old->image_type         = backing.image_type;
+	old->extent             = backing.extent;
+	old->layers             = backing.layers;
+	old->mip_levels         = backing.mip_levels;
+	old->samples            = backing.samples;
+	old->usage              = backing.usage;
+	old->flags              = backing.flags;
+	old->image              = std::exchange(backing.image, nullptr);
+	old->allocation         = std::exchange(backing.allocation, nullptr);
+	old->state              = backing.state;
+	old->subresource_states = std::move(backing.subresource_states);
+	m_single_format_list    = false;
 	CreateBacking(false);
 	SetVulkanObjectNameF(
 	    m_graphics.device, backing.image,
