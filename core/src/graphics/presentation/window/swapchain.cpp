@@ -813,24 +813,40 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, Presenter::Frame* 
 	                           nullptr, 0, nullptr, 1, &to_transfer);
 
 	if (source != nullptr) {
-		vk::ImageBlit region {};
-		region.srcSubresource.aspectMask     = vk::ImageAspectFlagBits::eColor;
-		region.srcSubresource.mipLevel       = 0;
-		region.srcSubresource.baseArrayLayer = 0;
-		region.srcSubresource.layerCount     = 1;
-		region.srcOffsets[1].x               = static_cast<int>(source->image.extent.width);
-		region.srcOffsets[1].y               = static_cast<int>(source->image.extent.height);
-		region.srcOffsets[1].z               = 1;
-		region.dstSubresource.aspectMask     = vk::ImageAspectFlagBits::eColor;
-		region.dstSubresource.mipLevel       = 0;
-		region.dstSubresource.baseArrayLayer = 0;
-		region.dstSubresource.layerCount     = 1;
-		region.dstOffsets[1].x               = static_cast<int>(m_extent.width);
-		region.dstOffsets[1].y               = static_cast<int>(m_extent.height);
-		region.dstOffsets[1].z               = 1;
-		vk_command.blitImage(source->image.image, vk::ImageLayout::eTransferSrcOptimal,
-		                     m_images[m_image_index], vk::ImageLayout::eTransferDstOptimal, 1,
-		                     &region, vk::Filter::eLinear);
+		// v0.0.9proQ1: when the frame already matches the swapchain exactly, a 1:1 copy
+		// replaces the scaled blit — no sampler pass on the way out, cheaper on every GPU,
+		// identical pixels (native-resolution output at a 100% scale).
+		const bool exact_copy = source->image.extent.width == m_extent.width &&
+		                      source->image.extent.height == m_extent.height &&
+		                      source->image.format == m_format && source->image.samples == 1;
+		if (exact_copy) {
+			vk::ImageCopy region {};
+			region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+			region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+			region.extent         = {m_extent.width, m_extent.height, 1};
+			vk_command.copyImage(source->image.image, vk::ImageLayout::eTransferSrcOptimal,
+			                     m_images[m_image_index], vk::ImageLayout::eTransferDstOptimal, 1,
+			                     &region);
+		} else {
+			vk::ImageBlit region {};
+			region.srcSubresource.aspectMask     = vk::ImageAspectFlagBits::eColor;
+			region.srcSubresource.mipLevel       = 0;
+			region.srcSubresource.baseArrayLayer = 0;
+			region.srcSubresource.layerCount     = 1;
+			region.srcOffsets[1].x               = static_cast<int>(source->image.extent.width);
+			region.srcOffsets[1].y               = static_cast<int>(source->image.extent.height);
+			region.srcOffsets[1].z               = 1;
+			region.dstSubresource.aspectMask     = vk::ImageAspectFlagBits::eColor;
+			region.dstSubresource.mipLevel       = 0;
+			region.dstSubresource.baseArrayLayer = 0;
+			region.dstSubresource.layerCount     = 1;
+			region.dstOffsets[1].x               = static_cast<int>(m_extent.width);
+			region.dstOffsets[1].y               = static_cast<int>(m_extent.height);
+			region.dstOffsets[1].z               = 1;
+				vk_command.blitImage(source->image.image, vk::ImageLayout::eTransferSrcOptimal,
+				                     m_images[m_image_index], vk::ImageLayout::eTransferDstOptimal, 1,
+				                     &region, vk::Filter::eLinear);
+		}
 	} else {
 		const vk::ClearColorValue black {};
 		vk_command.clearColorImage(m_images[m_image_index], vk::ImageLayout::eTransferDstOptimal,

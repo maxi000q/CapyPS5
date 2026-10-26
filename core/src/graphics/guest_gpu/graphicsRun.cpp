@@ -937,7 +937,21 @@ bool GuestGpu::Process(Submission& submission) {
 				if (complete) {
 					m_renderer.RunGarbageCollector();
 				}
-				cp.BufferFlush();
+				// v0.0.9proQ1: the same drain policy the graphics queue has (see above) —
+				// UE/Unity titles interleave many small async-compute batches with graphics,
+				// and every one ended the command buffer (a vkQueueSubmit per batch). While
+				// more work is queued, keep recording into the current command buffer; the
+				// per-packet handlers still flush on explicit sync points (EOP events, flips,
+				// waits).
+				static Common::DebugFlags::CachedValue compute_batch_submits("debug.capy.batch_submits", 1);
+				bool more_queued = false;
+				if (complete && compute_batch_submits.Get() != 0) {
+					Common::LockGuard lock(m_queue_mutex);
+					more_queued = m_submission_count != 0;
+				}
+				if (!more_queued) {
+					cp.BufferFlush();
+				}
 			} else if (complete) {
 				m_renderer.RunGarbageCollector();
 			}

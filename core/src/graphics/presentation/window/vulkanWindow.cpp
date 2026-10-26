@@ -1300,7 +1300,17 @@ void WindowContext::CreateVulkan() {
 		Log::WriteToConsoleAndLog(fmt::format(
 			"GPU: {} - Mali performance profile enabled: hardware render-target clears "
 			"(AFBC-friendly), 128 MiB streaming buffer, +1 pipeline worker, "
-			"pass-split-free event barriers\n",
+			"pass-split-free event barriers, batched compute submissions\n",
+			device_properties.deviceName.data()));
+	}
+	// v0.0.9proQ1: render targets keep the driver framebuffer compression (AFBC on Mali,
+	// UBWC on Adreno) via a single-format view list, with safe in-place recreation when a
+	// game reinterprets the memory (debug.capy.rt_format_list).
+	if (Common::GpuProfile::FramebufferCompressionProfileEnabled()) {
+		Log::WriteToConsoleAndLog(fmt::format(
+			"GPU: {} - framebuffer compression profile enabled: single-format render targets "
+			"keep AFBC/UBWC alive; reinterpreted targets are recreated mutable with contents "
+			"copied\n",
 			device_properties.deviceName.data()));
 	}
 

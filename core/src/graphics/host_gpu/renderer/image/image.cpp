@@ -6,11 +6,13 @@
 
 #include "common/assert.h"
 #include "common/debugFlags.h"
+#include "common/gpuProfile.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
 #include "graphics/host_gpu/renderer/cache/streamBuffer.h"
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 #include "graphics/host_gpu/renderer/gpuProfiler.h"
+#include "graphics/host_gpu/renderer/image/formatReinterpret.h"
 #include "graphics/host_gpu/renderer/image/imageView.h"
 #include "graphics/host_gpu/renderer/image/tiler.h"
 #include "graphics/host_gpu/renderer/renderTarget.h"
@@ -61,6 +63,17 @@ ImageCreateFlags(const GraphicContext& graphics, const ImageInfo& info, vk::Imag
 [[nodiscard]] bool HasFormatFeature(vk::FormatProperties      properties,
                                     vk::FormatFeatureFlagBits feature) {
 	return static_cast<bool>(properties.optimalTilingFeatures & feature);
+}
+
+// v0.0.9proQ1: colour, non-block images of never-reinterpreted guest memory get the
+// single-format (compression-friendly) view list. Depth images are never created mutable and
+// block-compressed textures need cross-format views, so both stay out.
+[[nodiscard]] static bool WantsCompressionFriendlyList(const ImageInfo& info) {
+	if (!Common::GpuProfile::FramebufferCompressionProfileEnabled() || info.data.Empty() ||
+	    info.IsBlock() || DepthAspectTransferFormat(info.pixel_format) != vk::Format::eUndefined) {
+		return false;
+	}
+	return !FormatReinterpret::IsMarked(info.data.address, info.data.size);
 }
 
 [[nodiscard]] vk::ImageUsageFlags ImageUsageFlags(GraphicContext& graphics, const ImageInfo& info) {
@@ -1041,9 +1054,24 @@ Image::Image(GraphicContext& graphics, CommandScheduler& scheduler, const ImageI
 		return;
 	}
 
+	// v0.0.9proQ1: with the framebuffer-compression profile active (Mali/Adreno), colour
+	// render targets whose guest memory was never reinterpreted are created with a
+	// single-format view list, so the driver keeps AFBC/UBWC alive. A later view in
+	// another format rebuilds the image as fully mutable (ReinterpretAsMutable).
+	m_single_format_list = WantsCompressionFriendlyList(info);
+	CreateBacking(m_single_format_list);
+	SetVulkanObjectNameF(
+	    graphics.device, backing.image,
+	    "Kyty.Image[guest=0x{:016x} size=0x{:x} extent={}x{}x{} format={} mips={} layers={} samples={}]",
+	    info.data.address, info.data.size, info.extent.width, info.extent.height, info.extent.depth,
+	    static_cast<uint32_t>(info.pixel_format), info.resources.levels, info.resources.layers,
+	    info.samples);
+}
+
+void Image::CreateBacking(bool single_format_list) {
 	vk::ImageCreateInfo create {};
-	create.usage         = ImageUsageFlags(graphics, info);
-	create.flags         = ImageCreateFlags(graphics, info, create.usage);
+	create.usage         = ImageUsageFlags(m_graphics, info);
+	create.flags         = ImageCreateFlags(m_graphics, info, create.usage);
 	create.imageType     = HostImageType(info.type);
 	create.extent        = ScaledExtent(info.extent, scale);
 	create.mipLevels     = info.resources.levels;
@@ -1052,23 +1080,28 @@ Image::Image(GraphicContext& graphics, CommandScheduler& scheduler, const ImageI
 	create.tiling        = vk::ImageTiling::eOptimal;
 	create.initialLayout = vk::ImageLayout::eUndefined;
 	create.samples       = vulkan_sample_count(info.samples);
-	// Measurement probe: `setprop debug.capy.ubwc_probe 1` declares only the image's own format
-	// for render targets, which lets drivers keep framebuffer compression (UBWC) despite
-	// eMutableFormat. Views in other formats then read wrong data; for FPS comparisons only.
+	// A view-format list naming only the image's own format keeps the driver's framebuffer
+	// compression alive (AFBC on Mali, UBWC on Adreno); eMutableFormat with an open-ended
+	// list makes both families disable it, roughly doubling render-target memory traffic.
+	// `setprop debug.capy.ubwc_probe 1` forces the list for every attachment (FPS probe).
+	// Foreign-format views are not allowed by a single-format list: the profile recreates
+	// such an image as fully mutable on first use (Image::ReinterpretAsMutable).
 	static Common::DebugFlags::CachedValue ubwc_probe("debug.capy.ubwc_probe", 0);
 	vk::ImageFormatListCreateInfo own_format {};
 	own_format.viewFormatCount = 1;
 	own_format.pViewFormats    = &create.format;
-	if (ubwc_probe.Get() != 0 && !info.IsBlock() &&
+	const bool probe =
+	    ubwc_probe.Get() != 0 && !info.IsBlock() &&
 	    (create.usage & (vk::ImageUsageFlagBits::eColorAttachment |
-	                     vk::ImageUsageFlagBits::eDepthStencilAttachment))) {
+			     vk::ImageUsageFlagBits::eDepthStencilAttachment));
+	if (single_format_list || probe) {
 		create.pNext = &own_format;
 	}
 
 	vk::ImageFormatProperties properties {};
-	if (graphics.GetImageFormatProperties(create.format, create.imageType, create.tiling,
-	                                      create.usage, create.flags,
-	                                      &properties) != vk::Result::eSuccess ||
+	if (m_graphics.GetImageFormatProperties(create.format, create.imageType, create.tiling,
+						create.usage, create.flags,
+						&properties) != vk::Result::eSuccess ||
 	    !static_cast<bool>(properties.sampleCounts & create.samples)) {
 		EXIT("image format does not support required usage: format=%d type=%d usage=0x%x "
 		     "flags=0x%x samples=%u\n",
@@ -1077,17 +1110,11 @@ Image::Image(GraphicContext& graphics, CommandScheduler& scheduler, const ImageI
 		     static_cast<vk::ImageCreateFlags::MaskType>(create.flags), info.samples);
 	}
 
-	if (!graphics.CreateImage(create, backing)) {
+	if (!m_graphics.CreateImage(create, backing)) {
 		EXIT("failed to create image: extent=%ux%ux%u format=%d layers=%u levels=%u\n",
 		     create.extent.width, create.extent.height, create.extent.depth,
 		     static_cast<int>(create.format), create.arrayLayers, create.mipLevels);
 	}
-	SetVulkanObjectNameF(
-	    graphics.device, backing.image,
-	    "Kyty.Image[guest=0x{:016x} size=0x{:x} extent={}x{}x{} format={} mips={} layers={} samples={}]",
-	    info.data.address, info.data.size, info.extent.width, info.extent.height, info.extent.depth,
-	    static_cast<uint32_t>(info.pixel_format), info.resources.levels, info.resources.layers,
-	    info.samples);
 }
 
 uint64_t Image::HashGuestEdges() const {
@@ -1107,6 +1134,115 @@ uint64_t Image::HashGuestEdges() const {
 		EXIT("Image: failed to hash guest backing\n");
 	}
 	return XXH3_64bits(bytes.data(), static_cast<size_t>(head_size + tail_size));
+}
+
+void Image::ReinterpretAsMutable() {
+	EXIT_IF(!m_single_format_list || backing.image == nullptr);
+	// The range counts as reinterpreted from now on: every future image of this memory is
+	// created fully mutable, so no later copy is ever needed.
+	if (!info.data.Empty()) {
+		FormatReinterpret::Mark(info.data.address, info.data.size);
+	}
+	auto       old       = std::make_unique<VulkanImage>(std::move(backing));
+	auto       old_views = std::move(views);
+	backing              = VulkanImage {};
+	m_single_format_list = false;
+	CreateBacking(false);
+	SetVulkanObjectNameF(
+	    m_graphics.device, backing.image,
+	    "Kyty.Image[guest=0x{:016x} size=0x{:x} extent={}x{}x{} format={} mips={} layers={} samples={}]",
+	    info.data.address, info.data.size, info.extent.width, info.extent.height, info.extent.depth,
+	    static_cast<uint32_t>(info.pixel_format), info.resources.levels, info.resources.layers,
+	    info.samples);
+
+	// Only colour images are ever created with the single-format list (see
+	// WantsCompressionFriendlyList), so the contents move with a plain same-format copy.
+	EXIT_IF(FullAspectMask(old->format) != vk::ImageAspectFlagBits::eColor);
+	m_scheduler.EndRendering();
+	auto command = m_scheduler.Current().Handle();
+
+	// The retired image becomes a transfer source from whatever its tracked state is
+	// (per subresource when finer-grained tracking was active), the fresh image a
+	// destination; identical formats and extents make the copy pixel-exact.
+	std::vector<vk::ImageMemoryBarrier2> barriers;
+	const auto old_to_source = [&](vk::PipelineStageFlags2 src_stage, vk::AccessFlags2 src_access,
+				       vk::ImageLayout src_layout, uint32_t level, uint32_t layer,
+				       uint32_t level_count, uint32_t layer_count) {
+		vk::ImageMemoryBarrier2 barrier {};
+		barrier.srcStageMask        = src_stage;
+		barrier.srcAccessMask       = src_access;
+		barrier.dstStageMask        = vk::PipelineStageFlagBits2::eAllTransfer;
+		barrier.dstAccessMask       = vk::AccessFlagBits2::eTransferRead;
+		barrier.oldLayout           = src_layout;
+		barrier.newLayout           = vk::ImageLayout::eTransferSrcOptimal;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.image               = old->image;
+		barrier.subresourceRange    = {vk::ImageAspectFlagBits::eColor, level, level_count,
+					       layer, layer_count};
+		barriers.push_back(barrier);
+	};
+	if (old->subresource_states.empty()) {
+		old_to_source(old->state.pl_stage, old->state.access_mask, old->state.layout, 0, 0,
+			      VK_REMAINING_MIP_LEVELS, VK_REMAINING_ARRAY_LAYERS);
+	} else {
+		for (uint32_t level = 0; level < old->mip_levels; level++) {
+			for (uint32_t layer = 0; layer < old->layers; layer++) {
+				const auto& state = old->subresource_states[level * old->layers + layer];
+				old_to_source(state.pl_stage, state.access_mask, state.layout, level,
+					      layer, 1, 1);
+			}
+		}
+	}
+	vk::ImageMemoryBarrier2 new_to_destination {};
+	new_to_destination.srcStageMask        = vk::PipelineStageFlagBits2::eAllCommands;
+	new_to_destination.dstStageMask        = vk::PipelineStageFlagBits2::eAllTransfer;
+	new_to_destination.dstAccessMask       = vk::AccessFlagBits2::eTransferWrite;
+	new_to_destination.oldLayout           = vk::ImageLayout::eUndefined;
+	new_to_destination.newLayout           = vk::ImageLayout::eTransferDstOptimal;
+	new_to_destination.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	new_to_destination.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	new_to_destination.image               = backing.image;
+	new_to_destination.subresourceRange    = {vk::ImageAspectFlagBits::eColor, 0,
+						  VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
+	barriers.push_back(new_to_destination);
+	vk::DependencyInfo to_copy {};
+	to_copy.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
+	to_copy.pImageMemoryBarriers    = barriers.data();
+	command.pipelineBarrier2(to_copy);
+
+	const uint32_t levels = std::min(old->mip_levels, backing.mip_levels);
+	const uint32_t layers = std::min(old->layers, backing.layers);
+	std::vector<vk::ImageCopy> copies;
+	copies.reserve(levels);
+	for (uint32_t level = 0; level < levels; level++) {
+		const auto width  = std::max(old->extent.width >> level, 1u);
+		const auto height = std::max(old->extent.height >> level, 1u);
+		vk::ImageCopy copy {};
+		copy.srcSubresource = {vk::ImageAspectFlagBits::eColor, level, 0, layers};
+		copy.dstSubresource = {vk::ImageAspectFlagBits::eColor, level, 0, layers};
+		if (old->image_type == vk::ImageType::e3D) {
+			copy.extent = {width, height, std::max(old->extent.depth >> level, 1u)};
+		} else {
+			copy.extent = {width, height, 1};
+		}
+		copies.push_back(copy);
+	}
+	command.copyImage(old->image, vk::ImageLayout::eTransferSrcOptimal, backing.image,
+			  vk::ImageLayout::eTransferDstOptimal, static_cast<uint32_t>(copies.size()),
+			  copies.data());
+
+	// Back to a layout the next binding can transition from; the retired image and its
+	// views stay alive until the GPU finished everything recorded so far.
+	Transit(vk::ImageLayout::eGeneral,
+		vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eTransferRead, {}, command);
+	auto* graphics = &m_graphics;
+	m_scheduler.DeferOperation([graphics, old = std::move(old), views = std::move(old_views)]() mutable {
+		for (const auto& cached: views) {
+			graphics->device.destroyImageView(cached.view, nullptr);
+		}
+		graphics->DeleteImage(*old);
+	});
 }
 
 Image::~Image() {

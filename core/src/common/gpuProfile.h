@@ -80,6 +80,29 @@ inline void SetVendor(uint32_t vendor_id, const char* device_name) {
         }
 }
 
+/**
+ * The framebuffer-compression profile (v0.0.9proQ1): render targets are created with a
+ * single-format view list, which lets the driver keep its lossless framebuffer compression
+ * alive — AFBC (Arm Frame Buffer Compression) on Mali, UBWC on Adreno. An open-ended
+ * eMutableFormat (no list) forces both driver families to disable compression, roughly
+ * doubling the memory traffic of every render target store/reload on GPUs that are
+ * bandwidth-bound. Games that reinterpret target memory (view it in another format) pay a
+ * one-time image copy; the range is then remembered (FormatReinterpret) so images of that
+ * memory are created fully mutable again. Identical pixels: both compressors are lossless.
+ * `debug.capy.rt_format_list`: 1 on, 0 off, 2 auto (on for Mali and Adreno, the default).
+ */
+[[nodiscard]] inline bool FramebufferCompressionProfileEnabled() {
+        static DebugFlags::CachedValue profile("debug.capy.rt_format_list", 2);
+        switch (profile.Get()) {
+                case 1: return true;
+                case 0: return false;
+                default: {
+                        const auto vendor = GetVendor();
+                        return vendor == Vendor::Arm || vendor == Vendor::Qualcomm;
+                }
+        }
+}
+
 } // namespace Common::GpuProfile
 
 #endif /* COMMON_GPU_PROFILE_H */

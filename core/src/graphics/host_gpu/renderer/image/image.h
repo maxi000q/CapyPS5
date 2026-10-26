@@ -146,6 +146,13 @@ public:
 	}
 	[[nodiscard]] uint64_t HashGuestEdges() const;
 
+	// v0.0.9proQ1 framebuffer-compression profile: true while this image was created with a
+	// single-format view list (AFBC/UBWC-friendly). A view in a foreign format calls
+	// ReinterpretAsMutable() once, which rebuilds the backing as fully mutable with the
+	// contents copied over, and remembers the guest range in FormatReinterpret.
+	[[nodiscard]] bool SingleFormatList() const noexcept { return m_single_format_list; }
+	void                    ReinterpretAsMutable();
+
 	[[nodiscard]] bool IsScaled() const noexcept { return scale != 1.0f; }
 	[[nodiscard]] static vk::Extent3D ScaledExtent(vk::Extent3D extent, float scale) noexcept;
 
@@ -173,6 +180,10 @@ private:
 	                                                   uint64_t capacity) noexcept;
 	[[nodiscard]] static std::pair<uint32_t, uint32_t>
 	SanitizeCopyLayers(const Image& source, const Image& destination, uint32_t depth);
+	// Creates the Vulkan image for `info`/`scale` into `backing`. With a single-format
+	// list the driver may keep framebuffer compression (AFBC on Mali, UBWC on Adreno)
+	// alive; without it every compatible format stays viewable (the mutable default).
+	void CreateBacking(bool single_format_list);
 	// Resampling paths for images whose host size differs from the guest size (`scale`).
 	void UploadScaled(std::span<const vk::BufferImageCopy> copies, vk::Buffer buffer,
 	                  uint64_t offset, uint64_t size);
@@ -189,6 +200,7 @@ private:
 	bool              m_maybe_hash_valid = false;
 	bool              m_gpu_modified     = false;
 	bool              m_buffer_modified  = false;
+	bool              m_single_format_list = false;
 };
 
 namespace ImageOps {

@@ -357,6 +357,15 @@ vk::ImageView Image::FindView(const ImageViewInfo& view_info) {
 		normalized.aspect = vk::ImageAspectFlagBits::eStencil;
 	}
 	normalized.usage = is_storage ? vk::ImageUsageFlagBits::eStorage : vk::ImageUsageFlags {};
+	// v0.0.9proQ1: a single-format (compression-friendly) image cannot host a view in
+	// another format. Rebuild it as fully mutable with its contents copied — a game that
+	// reinterprets render-target memory pays this once per range; afterwards images of
+	// that memory are created mutable from the start (FormatReinterpret).
+	if (m_single_format_list && normalized.format != vk::Format::eUndefined &&
+	    normalized.format != image.format) {
+		ReinterpretAsMutable();
+		return FindView(view_info);
+	}
 	for (const auto& cached: views) {
 		if (cached.info == normalized) {
 			return cached.view;
