@@ -723,6 +723,18 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 		    Libs::LibKernel::Memory::AdoptFaultingGuestWindow(info->access_violation_vaddr)) {
 			return true;
 		}
+		// Console Five Pro (v0.0.9proQ1): a guest null-pointer READ used to end the
+		// session ("the game itself crashed"). Android cannot map the null page
+		// (mmap_min_addr), so the faulting load is emulated against a zero page
+		// instead - a one-off hiccup (a race, an HLE gap, an unused pointer) keeps
+		// running, while a real null-deref loop still terminates once the recovery
+		// budget is spent. Writes are never faked; debug.capy.null_read_recovery=0
+		// restores the old behaviour.
+		if (access == GpuAccess::Read && info->access_violation_vaddr < 0x10000 &&
+		    Cpu::GuestRipFromHostPc(info->exception_address) != 0 &&
+		    Cpu::RecoverGuestNullRead(info->native_context, info->access_violation_vaddr)) {
+			return true;
+		}
 	}
 	// Report whatever guest context can be read safely before terminating: which guest thread
 	// faulted, the register file, the faulting code bytes and the top of its stack.

@@ -30,6 +30,15 @@ uint64_t LastHleFunction();
 uint64_t GuestReturnAddress();
 /** Guest RIP of the translated code at host address `host_pc` on this thread (0 when unknown). */
 uint64_t GuestRipFromHostPc(uint64_t host_pc);
+/**
+ * Recovers a guest null-pointer READ (fault below 64 KiB inside translated code) by
+ * emulating the faulting A64 load against a zero page: the destination register
+ * receives zero and execution resumes past the instruction. Returns false when the
+ * recovery is disabled (debug.capy.null_read_recovery=0), the budget is spent or the
+ * instruction is not an exactly-matched plain load; the caller then reports the
+ * fault as before. Writes are never faked.
+ */
+bool RecoverGuestNullRead(void* native_context, uint64_t fault_address);
 
 enum class BackendType {
 	Native,      // Direct x86_64 host execution (PC)

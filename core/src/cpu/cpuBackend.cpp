@@ -35,6 +35,7 @@
 #if defined(__aarch64__)
 #include <FEXCore/Utils/ArchHelpers/Arm64.h>
 #include <ucontext.h>
+#include <asm/sigcontext.h>
 #endif
 
 #include <algorithm>
@@ -1305,6 +1306,166 @@ bool HandleFexUnalignedAccess(void* native_context) {
 	(void)native_context;
 #endif
 	return false;
+}
+
+// Console Five Pro (v0.0.9proQ1): guest null-pointer READ recovery. A data read below
+// 64 KiB from translated guest code used to end the whole session with "the game
+// itself crashed" - even when it was a one-off hiccup the game would have survived
+// (a race, an HLE gap, an unused-but-uninitialised pointer). The null page cannot be
+// mapped on Android (mmap_min_addr), so the load is emulated instead: the faulting
+// A64 instruction is decoded, its destination receives what a zeroed page would
+// return (zero for every sign- or zero-extending load) and the PC advances past it.
+// Only exactly-matched plain loads are recovered - unsigned-offset, unscaled (LDUR)
+// and register-offset single loads plus GPR LDP (signed offset); no writeback forms,
+// no atomics, no exclusives, no literals. Anything else falls through to the normal
+// crash report. Writes are never faked. A budget stops a real null-deref loop from
+// becoming a silent hang. `setprop debug.capy.null_read_recovery 0` restores the
+// old behaviour.
+bool RecoverGuestNullRead(void* native_context, uint64_t fault_address) {
+#if defined(__aarch64__)
+	static Common::DebugFlags::CachedValue enabled("debug.capy.null_read_recovery", 1);
+	if (enabled.Get() == 0) {
+		return false;
+	}
+	static constexpr uint32_t kBudget = 64;
+	static std::atomic<uint32_t> recovered {0};
+	if (recovered.load(std::memory_order_relaxed) >= kBudget) {
+		return false;
+	}
+
+	auto* context = static_cast<ucontext_t*>(native_context);
+	if (context == nullptr) {
+		return false;
+	}
+	const uintptr_t pc   = static_cast<uintptr_t>(context->uc_mcontext.pc);
+	const uint32_t insn  = *reinterpret_cast<const uint32_t*>(pc);
+	uint64_t*       gprs = reinterpret_cast<uint64_t*>(context->uc_mcontext.regs);
+	const uint32_t  rt   = insn & 0x1fu;
+	const uint32_t  rt2  = (insn >> 10) & 0x1fu;
+
+	enum Dest { kNone, kGpr, kSimd };
+	Dest      dest  = kNone;
+	uint32_t  bytes = 0;
+	bool      pair  = false;
+
+	// Every case below loads from a zeroed region, so the destination is zero no
+	// matter the sign/zero extension; `bytes` is the memory the load touches.
+	switch (insn & 0xFFC00000u) {
+		// GPR loads, unsigned immediate offset (this group has no writeback forms).
+		case 0x39400000: dest = kGpr;  bytes = 1;  break; // LDRB Wt
+		case 0x39800000: dest = kGpr;  bytes = 1;  break; // LDRSB Wt
+		case 0x39C00000: dest = kGpr;  bytes = 1;  break; // LDRSB Xt
+		case 0x79400000: dest = kGpr;  bytes = 2;  break; // LDRH Wt
+		case 0x79800000: dest = kGpr;  bytes = 2;  break; // LDRSH Wt
+		case 0x79C00000: dest = kGpr;  bytes = 2;  break; // LDRSH Xt
+		case 0xB9400000: dest = kGpr;  bytes = 4;  break; // LDR Wt
+		case 0xB9800000: dest = kGpr;  bytes = 4;  break; // LDRSW Xt
+		case 0xF9400000: dest = kGpr;  bytes = 8;  break; // LDR Xt
+		// SIMD&FP loads, unsigned immediate offset.
+		case 0x3D400000: dest = kSimd; bytes = 1;  break; // LDR Bt
+		case 0x7D400000: dest = kSimd; bytes = 2;  break; // LDR Ht
+		case 0xBD400000: dest = kSimd; bytes = 4;  break; // LDR St
+		case 0xFD400000: dest = kSimd; bytes = 8;  break; // LDR Dt
+		case 0x3DC00000: dest = kSimd; bytes = 16; break; // LDR Qt
+		// Load pair, signed offset (no writeback; the masked bits keep the
+		// post/pre-index forms out). Both registers receive zero.
+		case 0x29400000: dest = kGpr;  bytes = 8;  pair = true; break; // LDP Wt1, Wt2
+		case 0xA9400000: dest = kGpr;  bytes = 16; pair = true; break; // LDP Xt1, Xt2
+		default: break;
+	}
+	if (dest == kNone) {
+		// Unscaled-offset loads. Bits 11:10 are masked to 00: the LDUR encoding,
+		// which never writes back (post/pre-index use 01/11).
+		switch (insn & 0xFFC00C00u) {
+			case 0x38400000: dest = kGpr;  bytes = 1;  break; // LDURB Wt
+			case 0x38800000: dest = kGpr;  bytes = 1;  break; // LDURSB Wt
+			case 0x38C00000: dest = kGpr;  bytes = 1;  break; // LDURSB Xt
+			case 0x78400000: dest = kGpr;  bytes = 2;  break; // LDURH Wt
+			case 0x78800000: dest = kGpr;  bytes = 2;  break; // LDURSH Wt
+			case 0x78C00000: dest = kGpr;  bytes = 2;  break; // LDURSH Xt
+			case 0xB8400000: dest = kGpr;  bytes = 4;  break; // LDUR Wt
+			case 0xB8800000: dest = kGpr;  bytes = 4;  break; // LDURSW Xt
+			case 0xF8400000: dest = kGpr;  bytes = 8;  break; // LDUR Xt
+			case 0x3C400000: dest = kSimd; bytes = 1;  break; // LDUR Bt
+			case 0x7C400000: dest = kSimd; bytes = 2;  break; // LDUR Ht
+			case 0xBC400000: dest = kSimd; bytes = 4;  break; // LDUR St
+			case 0xFC400000: dest = kSimd; bytes = 8;  break; // LDUR Dt
+			case 0x3CC00000: dest = kSimd; bytes = 16; break; // LDUR Qt
+			default: break;
+		}
+	}
+	if (dest == kNone) {
+		// Register-offset loads (Xm-indexed; bits 11:10 masked to 10, the
+		// register encoding, which never writes back).
+		switch (insn & 0xFFE00C00u) {
+			case 0x38600800: dest = kGpr;  bytes = 1;  break; // LDRB Wt, [Xn, Xm]
+			case 0x38A00800: dest = kGpr;  bytes = 1;  break; // LDRSB Wt, [Xn, Xm]
+			case 0x38E00800: dest = kGpr;  bytes = 1;  break; // LDRSB Xt, [Xn, Xm]
+			case 0x78600800: dest = kGpr;  bytes = 2;  break; // LDRH Wt, [Xn, Xm]
+			case 0x78A00800: dest = kGpr;  bytes = 2;  break; // LDRSH Wt, [Xn, Xm]
+			case 0x78E00800: dest = kGpr;  bytes = 2;  break; // LDRSH Xt, [Xn, Xm]
+			case 0xB8600800: dest = kGpr;  bytes = 4;  break; // LDR Wt, [Xn, Xm]
+			case 0xB8A00800: dest = kGpr;  bytes = 4;  break; // LDRSW Xt, [Xn, Xm]
+			case 0xF8600800: dest = kGpr;  bytes = 8;  break; // LDR Xt, [Xn, Xm]
+			case 0x3C600800: dest = kSimd; bytes = 1;  break; // LDR Bt, [Xn, Xm]
+			case 0x7C600800: dest = kSimd; bytes = 2;  break; // LDR Ht, [Xn, Xm]
+			case 0xBC600800: dest = kSimd; bytes = 4;  break; // LDR St, [Xn, Xm]
+			case 0xFC600800: dest = kSimd; bytes = 8;  break; // LDR Dt, [Xn, Xm]
+			case 0x3CE00800: dest = kSimd; bytes = 16; break; // LDR Qt, [Xn, Xm]
+			default: break;
+		}
+	}
+	if (dest == kNone) {
+		return false;
+	}
+	// The whole access must sit inside the unmapped null region: a load reaching
+	// across the 64 KiB boundary could touch live guest memory.
+	if (fault_address + bytes > 0x10000) {
+		return false;
+	}
+	if (dest == kSimd) {
+		// The SIMD destination lives in the fpsimd context inside the ucontext's
+		// reserved area, behind its own magic header. Without it: no recovery.
+		auto*       reserved     = reinterpret_cast<uint8_t*>(context->uc_mcontext.__reserved);
+		const auto* reserved_end = reserved + sizeof(context->uc_mcontext.__reserved);
+		auto*       fpsimd       = static_cast<struct fpsimd_context*>(nullptr);
+		while (reserved + sizeof(struct _aarch64_ctx) <= reserved_end) {
+			const auto* head = reinterpret_cast<const struct _aarch64_ctx*>(reserved);
+			if (head->magic == 0 || head->size < sizeof(struct _aarch64_ctx) ||
+			    reserved + head->size > reserved_end) {
+				break;
+			}
+			if (head->magic == FPSIMD_MAGIC && head->size >= sizeof(struct fpsimd_context)) {
+				fpsimd = reinterpret_cast<struct fpsimd_context*>(reserved);
+				break;
+			}
+			reserved += head->size;
+		}
+		if (fpsimd == nullptr) {
+			return false;
+		}
+		fpsimd->vregs[rt * 2]     = 0;
+		fpsimd->vregs[rt * 2 + 1] = 0;
+	} else if (rt != 31) { // GPR number 31 is the stack pointer here, never a load target
+		gprs[rt] = 0;
+		if (pair && rt2 != 31) {
+			gprs[rt2] = 0;
+		}
+	}
+	context->uc_mcontext.pc = static_cast<uint64_t>(pc + 4);
+	const auto count = recovered.fetch_add(1, std::memory_order_relaxed) + 1;
+	if (count <= 4 || count == kBudget) {
+		ALOGW("CpuBackend: recovered guest null read #%u/%u (pc=0x%llx vaddr=0x%llx) - "
+		      "returning zero and continuing",
+		      count, kBudget, static_cast<unsigned long long>(pc),
+		      static_cast<unsigned long long>(fault_address));
+	}
+	return true;
+#else
+	(void)native_context;
+	(void)fault_address;
+	return false;
+#endif
 }
 
 CpuBackend* CpuBackend::Instance() {
