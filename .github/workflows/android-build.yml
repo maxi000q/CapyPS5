@@ -35,12 +35,13 @@ jobs:
 
     steps:
       - name: Checkout (full history so git describe finds tags)
-        uses: actions/checkout@v4
+        # Pinned to a commit SHA; Dependabot (.github/dependabot.yml) opens the bump PRs.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: '17'
@@ -144,14 +145,14 @@ jobs:
 
       - name: Upload staged native libraries (when the gate fails)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: staged-jnilibs-failed-gate
           path: android/app/src/main/jniLibs/arm64-v8a/*.so
           if-no-files-found: ignore
 
       - name: Cache Gradle dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.gradle/caches
@@ -189,7 +190,7 @@ jobs:
           ls -la dist
 
       - name: Upload APK artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ConsoleFivePro-apk
           path: dist/*.apk

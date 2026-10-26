@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: Copyright 2026 CapyPS5 Project
+# SPDX-License-Identifier: GPL-2.0-only
+
+# Keeps the pinned GitHub Actions in .github/workflows/ up to date: every action is
+# pinned to a commit SHA, and Dependabot opens a PR whenever a newer release is out.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci: "
+    labels:
+      - ci
