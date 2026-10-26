@@ -299,14 +299,13 @@ public:
 		if (m_dynamic_data == nullptr || offset > m_dynamic_data_size) {
 			return nullptr;
 		}
-		if constexpr (std::is_pointer_v<T>) {
+		if constexpr (std::is_pointer_v<T> && !std::is_void_v<std::remove_pointer_t<T>>) {
 			using Element = std::remove_pointer_t<T>;
-			if (offset + sizeof(Element) > m_dynamic_data_size) {
+			if (m_dynamic_data_size - offset < sizeof(Element)) {
 				return nullptr;
 			}
 		}
-		return (m_dynamic_data == nullptr ? nullptr
-		                                  : reinterpret_cast<T>(m_dynamic_data.get() + offset));
+		return reinterpret_cast<T>(m_dynamic_data.get() + offset);
 	}
 
 private:

@@ -859,6 +859,7 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 	     " access=%u address=0x%016" PRIx64 "\n",
 	     static_cast<unsigned>(info->type), info->native_code, info->exception_address,
 	     static_cast<unsigned>(info->access_violation_type), info->access_violation_vaddr);
+	return false;
 }
 
 static void EncodeId64(uint16_t in_id, std::string* out_id) {
