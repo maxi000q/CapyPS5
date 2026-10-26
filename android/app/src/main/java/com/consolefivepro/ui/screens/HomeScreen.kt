@@ -79,6 +79,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.consolefivepro.CoreOption
+import com.consolefivepro.GameSaves
 import com.consolefivepro.R
 import com.consolefivepro.Settings
 import com.consolefivepro.model.GameItem
@@ -466,6 +467,42 @@ private fun GameOptionsPanel(
     // Read so the rows recompose when a value changes.
     val optionsVersion = settings.coreOptionsVersion
     val context = androidx.compose.ui.platform.LocalContext.current
+    // v0.0.8proplus: per-game save export/import, so a save can be moved without knowing
+    // which title id it belongs to — the game is picked here, the zip only holds its saves.
+    val savesScope = androidx.compose.runtime.rememberCoroutineScope()
+    val exportOneSaves = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null) {
+            savesScope.launch {
+                val ok = withContext(Dispatchers.IO) { GameSaves.exportOne(context, game.titleId, uri) }
+                val any = withContext(Dispatchers.IO) { GameSaves.hasSavesFor(context, game.titleId) }
+                message = context.getString(
+                    when {
+                        ok -> R.string.saves_exported
+                        any -> R.string.saves_export_failed
+                        else -> R.string.saves_export_empty
+                    }
+                )
+            }
+        }
+    }
+    val importOneSaves = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            savesScope.launch {
+                val restored = withContext(Dispatchers.IO) { GameSaves.importOne(context, game.titleId, uri) }
+                message = context.getString(
+                    when {
+                        restored > 0 -> R.string.saves_game_imported
+                        restored == 0 -> R.string.saves_game_import_empty
+                        else -> R.string.saves_game_import_failed
+                    }
+                )
+            }
+        }
+    }
     val items = remember(optionsVersion, message) {
         val drivers = com.consolefivepro.GpuDrivers.list(context)
         // null = follow the global driver, "" = system driver.
@@ -497,6 +534,21 @@ private fun GameOptionsPanel(
             if (Trophies.hasTrophies(game.directoryPath)) {
                 SettingItem(context.getString(R.string.trophies), context.getString(R.string.trophies_desc), onConfirm = onTrophies)
             } else null,
+            SettingItem(
+                context.getString(R.string.saves_game_export),
+                context.getString(R.string.saves_game_export_desc),
+                onConfirm = {
+                    exportOneSaves.launch(
+                        "ConsoleFivePro-${game.titleId}-saves-" +
+                            SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".zip"
+                    )
+                },
+            ),
+            SettingItem(
+                context.getString(R.string.saves_game_import),
+                context.getString(R.string.saves_game_import_desc),
+                onConfirm = { importOneSaves.launch(arrayOf("application/zip", "application/octet-stream")) },
+            ),
             SettingItem(
                 context.getString(R.string.reset_game_settings), context.getString(R.string.reset_game_settings_desc),
                 danger = true,
