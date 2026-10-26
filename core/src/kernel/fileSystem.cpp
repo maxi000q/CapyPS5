@@ -813,18 +813,14 @@ int64_t KYTY_SYSV_ABI KernelWrite(int d, const void* buf, size_t nbytes) {
 		return KERNEL_ERROR_EINVAL;
 	}
 
-	if (nbytes > UINT_MAX) {
-		return KERNEL_ERROR_EINVAL;
-	}
-
 	file->mutex.Lock();
 
 	bool     is_invalid    = file->f.IsInvalid();
-	uint32_t bytes_written = 0;
+	uint64_t bytes_written = 0;
 	if (file->append) {
 		file->f.Seek(file->f.Size());
 	}
-	file->f.Write(buf, static_cast<uint32_t>(nbytes), &bytes_written);
+	bytes_written = WriteFileChunked(&file->f, buf, nbytes);
 	if (file->sync_writes) {
 		file->f.Flush();
 	}
@@ -836,9 +832,10 @@ int64_t KYTY_SYSV_ABI KernelWrite(int d, const void* buf, size_t nbytes) {
 		return KERNEL_ERROR_EIO;
 	}
 
-	LOGF("\tWrite %u bytes to: %s\n", bytes_written, Common::PathToString(file->real_name).c_str());
+	LOGF("\tWrite %" PRIu64 " bytes to: %s\n", bytes_written,
+	     Common::PathToString(file->real_name).c_str());
 
-	return bytes_written;
+	return static_cast<int64_t>(bytes_written);
 }
 
 int64_t KYTY_SYSV_ABI KernelPread(int d, void* buf, size_t nbytes, int64_t offset) {
@@ -931,6 +928,26 @@ static int ValidateIovecs(const KernelIovec* iov, int iovcnt, int64_t offset,
 		*total += buffer.iov_len;
 	}
 	return OK;
+}
+
+// Console Five Pro fix (v0.0.8pro): File::Write takes a uint32_t length, so a guest write
+// larger than 4 GiB used to be either rejected outright (EINVAL, losing the whole
+// transfer) or silently narrowed on the iovec path. Write in 1 GiB chunks instead and
+// report the true number of bytes written.
+static uint64_t WriteFileChunked(Common::File* file, const void* buf, uint64_t nbytes) {
+	constexpr uint64_t kChunkSize = 1024ull * 1024ull * 1024ull; // 1 GiB, well inside uint32_t
+	const auto*       data       = static_cast<const uint8_t*>(buf);
+	uint64_t          total      = 0;
+	while (total < nbytes) {
+		const auto chunk = static_cast<uint32_t>(std::min<uint64_t>(kChunkSize, nbytes - total));
+		uint32_t   wrote = 0;
+		file->Write(data + total, chunk, &wrote);
+		total += wrote;
+		if (wrote < chunk) {
+			break;
+		}
+	}
+	return total;
 }
 
 int64_t KYTY_SYSV_ABI KernelPreadv(int d, const KernelIovec* iov, int iovcnt, int64_t offset) {
@@ -1038,17 +1055,13 @@ int64_t KYTY_SYSV_ABI KernelPwrite(int d, const void* buf, size_t nbytes, int64_
 		return KERNEL_ERROR_EINVAL;
 	}
 
-	if (nbytes > UINT_MAX) {
-		return KERNEL_ERROR_EINVAL;
-	}
-
 	file->mutex.Lock();
 
 	bool     is_invalid    = file->f.IsInvalid();
 	auto     pos           = file->f.Tell();
-	uint32_t bytes_written = 0;
+	uint64_t bytes_written = 0;
 	file->f.Seek(file->append ? file->f.Size() : static_cast<uint64_t>(offset));
-	file->f.Write(buf, static_cast<uint32_t>(nbytes), &bytes_written);
+	bytes_written = WriteFileChunked(&file->f, buf, nbytes);
 	if (file->sync_writes) {
 		file->f.Flush();
 	}
@@ -1061,10 +1074,10 @@ int64_t KYTY_SYSV_ABI KernelPwrite(int d, const void* buf, size_t nbytes, int64_
 		return KERNEL_ERROR_EIO;
 	}
 
-	LOGF("\tWrite %u bytes (pos = %" PRId64 ") to: %s\n", bytes_written, offset,
+	LOGF("\tWrite %" PRIu64 " bytes (pos = %" PRId64 ") to: %s\n", bytes_written, offset,
 	     Common::PathToString(file->real_name).c_str());
 
-	return bytes_written;
+	return static_cast<int64_t>(bytes_written);
 }
 
 int64_t KYTY_SYSV_ABI KernelPwritev(int d, const KernelIovec* iov, int iovcnt, int64_t offset) {
@@ -1116,10 +1129,11 @@ int64_t KYTY_SYSV_ABI KernelPwritev(int d, const KernelIovec* iov, int iovcnt, i
 		if (buffer.iov_len == 0) {
 			continue;
 		}
-		uint32_t bytes = 0;
-		file->f.Write(buffer.iov_base, static_cast<uint32_t>(buffer.iov_len), &bytes);
-		bytes_written += bytes;
-		if (bytes < buffer.iov_len) {
+		// Console Five Pro fix (v0.0.8pro): an iovec longer than 4 GiB used to be narrowed
+		// to uint32_t here, silently truncating the write; write it in chunks.
+		const uint64_t wrote = WriteFileChunked(&file->f, buffer.iov_base, buffer.iov_len);
+		bytes_written += static_cast<int64_t>(wrote);
+		if (wrote < buffer.iov_len) {
 			break;
 		}
 	}
