@@ -264,6 +264,11 @@ static bool is_mapped(void* ptr, size_t length) {
 #else
 static bool is_mapped(void* ptr, size_t length) {
 	FILE* file = fopen("/proc/self/maps", "r");
+	if (file == nullptr) {
+		// Console Five Pro fix (v0.0.8pro): feof(nullptr) is undefined behaviour and
+		// crashed when procfs was unavailable; treat the range as unmapped instead.
+		return false;
+	}
 	char  line[1024];
 	bool  ret  = false;
 	auto  addr = reinterpret_cast<uintptr_t>(ptr);
