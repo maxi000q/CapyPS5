@@ -236,6 +236,7 @@
     <string name="whats_new_title">What\'s new in v%1$s</string>
     <string-array name="whats_new_items">
         <item>Stability: a wave of hard crashes is fixed — malformed GPU packets, corrupted ELF/SELF images, bad cheat files and null config reads no longer close the emulator (status 321).</item>
+        <item>Fixed: games that reserve memory through the kernel memory pool (Unreal Engine titles, e.g. Enotria) no longer crash at boot with a LowLevelFatalError — pool memory now maps directly, exactly like on the console.</item>
         <item>Stability: page faults are resolved on a dedicated fault thread, thread creation/join races are gone, and a stuck detached thread can no longer freeze new thread creation.</item>
         <item>Data safety: writes larger than 4 GB are no longer dropped, and PthreadJoin reports EFAULT instead of crashing on a bad pointer.</item>
         <item>New: auto-save — a snapshot of your in-game saves is taken every 5 minutes and when you exit (Settings → Game saves to turn it off).</item>

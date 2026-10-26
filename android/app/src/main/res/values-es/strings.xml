@@ -233,6 +233,7 @@
     <string name="whats_new_title">Lo nuevo en la v%1$s</string>
     <string-array name="whats_new_items">
         <item>Estabilidad: una oleada de cierres repentinos está corregida — paquetes GPU malformados, imágenes ELF/SELF corruptas, archivos de trucos dañados y lecturas de configuración nulas ya no cierran el emulador (estado 321).</item>
+        <item>Corregido: los juegos que reservan memoria mediante el grupo de memoria del kernel (títulos de Unreal Engine, p. ej. Enotria) ya no fallan al arrancar con un LowLevelFatalError — la memoria del grupo ahora se mapea directamente, igual que en la consola.</item>
         <item>Estabilidad: los fallos de página se resuelven en un hilo dedicado, se eliminaron las carreras de creación/unión de hilos, y un hilo desvinculado atascado ya no puede congelar la creación de hilos nuevos.</item>
         <item>Seguridad de datos: las escrituras de más de 4 GB ya no se pierden, y PthreadJoin devuelve EFAULT en lugar de fallar con un puntero inválido.</item>
         <item>Nuevo: autoguardado — se toma una instantánea de tus partidas cada 5 minutos y al salir (Ajustes → Partidas guardadas para desactivarlo).</item>

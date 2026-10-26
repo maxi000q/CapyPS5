@@ -217,6 +217,7 @@ jobs:
           - **Guest page faults resolve on a dedicated fault thread**: the old path took locks and logged from inside the SIGSEGV handler, which self-deadlocked when the faulting thread held one of those locks; now the handler only queues the fault and a worker performs the cache invalidation.
           - **Thread lifecycle races closed**: reference-counted file descriptors (use-after-free, racing close), thread-safe lazy singleton initialization, a synchronized stubbed-import registry, serialized game-patch state, and second game launch no longer `std::terminate`s.
           - **Destroying a still-running host thread no longer terminates the emulator**, and the Windows high-resolution-timer HANDLE leak is closed.
+          - **Unreal Engine games no longer die at boot with LowLevelFatalError (sceKernelBatchMap 0x8002000c)**: memory reserved through the kernel memory pool (sceKernelMemoryPoolExpand — e.g. Enotria) is now a legal direct-memory source. Borrowed pool pages cannot be double-owned by a pool commit, are returned when the last direct view goes away, and pool expansion release keeps working unchanged.
           - **A slow detached thread can no longer stall new thread creation**: the reaper joins outside the pool mutex.
           - **Config reads outside the config lifetime fall back to defaults** instead of dereferencing null.
           - **`PthreadJoin` writes the exit value through a verified-writable pointer**, reporting EFAULT like the real kernel instead of SIGSEGV on a wild guest pointer.
