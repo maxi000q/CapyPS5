@@ -48,7 +48,7 @@ static AndroidGpuDriver   g_gpu_driver;
 
 extern "C" {
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeInit(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeInit(
     JNIEnv* env, jclass /*clazz*/, jstring filesDir, jstring cacheDir) {
 #if defined(__ANDROID__) && defined(__aarch64__)
 #if defined(M_BIONIC_SET_HEAP_TAGGING_LEVEL) && defined(M_HEAP_TAGGING_LEVEL_NONE)
@@ -77,7 +77,7 @@ JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeInit(
 	      g_files_dir.c_str(), g_cache_dir.c_str());
 }
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSetSurface(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSetSurface(
     JNIEnv* env, jclass /*clazz*/, jobject surface) {
 	if (g_native_window != nullptr) {
 		ANativeWindow_release(g_native_window);
@@ -91,7 +91,7 @@ JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSetSurface(
 	}
 }
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeDestroySurface(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeDestroySurface(
     JNIEnv* /*env*/, jclass /*clazz*/) {
 	if (g_native_window != nullptr) {
 		ANativeWindow_release(g_native_window);
@@ -100,7 +100,7 @@ JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeDestroySurfa
 	}
 }
 
-JNIEXPORT jboolean JNICALL Java_org_capyps5_emulator_NativeBridge_nativeStartGame(
+JNIEXPORT jboolean JNICALL Java_com_consolefivepro_NativeBridge_nativeStartGame(
     JNIEnv* env, jclass /*clazz*/, jstring gamePath, jstring elfPath) {
 	if (g_is_running.load()) {
 		ALOGW("nativeStartGame: Emulator already running");
@@ -164,7 +164,7 @@ JNIEXPORT jboolean JNICALL Java_org_capyps5_emulator_NativeBridge_nativeStartGam
 
 // Frontend settings for this session (see Common::DebugFlags::SetFrontendOption). Called before
 // nativeStartGame; `name` is the property name, e.g. "debug.capy.res_scale".
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSetOption(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSetOption(
     JNIEnv* env, jclass /*clazz*/, jstring name, jlong value) {
 	if (name == nullptr) {
 		return;
@@ -177,7 +177,7 @@ JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSetOption(
 
 // Called before nativeStartGame. An empty `library` keeps the system Vulkan driver;
 // `driverDir` must be app-private storage (dlopen refuses world-writable locations).
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSetGpuDriver(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSetGpuDriver(
     JNIEnv* env, jclass /*clazz*/, jstring nativeLibraryDir, jstring driverDir, jstring library) {
 	const auto read = [env](jstring value) {
 		std::string result;
@@ -196,7 +196,7 @@ JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSetGpuDriver
 	                           : (g_gpu_driver.driver_dir + "/" + g_gpu_driver.library).c_str());
 }
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeStopGame(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeStopGame(
     JNIEnv* /*env*/, jclass /*clazz*/) {
 	if (!g_is_running.load()) {
 		return;
@@ -217,7 +217,7 @@ static bool                   g_touchpad_click = false;
 
 static void SubmitPad(jint buttons, jfloat lx, jfloat ly, jfloat rx, jfloat ry, jfloat l2, jfloat r2);
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSendControllerInput(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSendControllerInput(
     JNIEnv* /*env*/, jclass /*clazz*/, jint buttons, jfloat lx, jfloat ly,
     jfloat rx, jfloat ry, jfloat l2, jfloat r2) {
 	std::lock_guard lock(g_pad_mutex);
@@ -226,7 +226,7 @@ JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSendControll
 	SubmitPad(buttons, lx, ly, rx, ry, l2, r2);
 }
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSetTouchpadClick(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSetTouchpadClick(
     JNIEnv* /*env*/, jclass /*clazz*/, jboolean down) {
 	std::lock_guard lock(g_pad_mutex);
 	g_touchpad_click = down != JNI_FALSE;
@@ -254,13 +254,13 @@ static void SubmitPad(jint buttons, jfloat lx, jfloat ly, jfloat rx, jfloat ry, 
 }
 
 // On-screen touchpad: finger 0 or 1, coordinates normalized to the pad (0..1).
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSendTouch(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSendTouch(
     JNIEnv* /*env*/, jclass /*clazz*/, jint finger, jboolean down, jfloat x, jfloat y) {
 	Libs::Controller::SetTouchPad(Libs::Controller::HOST_INPUT_CONTROLLER_ID, finger, down != JNI_FALSE, x, y);
 }
 
 // Layout must match NativeBridge.STAT_* in Kotlin.
-JNIEXPORT jlongArray JNICALL Java_org_capyps5_emulator_NativeBridge_nativeGetStats(
+JNIEXPORT jlongArray JNICALL Java_com_consolefivepro_NativeBridge_nativeGetStats(
     JNIEnv* env, jclass /*clazz*/) {
 	using namespace Common::Telemetry;
 	const jlong values[] = {
@@ -281,7 +281,7 @@ JNIEXPORT jlongArray JNICALL Java_org_capyps5_emulator_NativeBridge_nativeGetSta
 }
 
 // Five longs per pass: pixel shader address, width << 32 | height, draws, targets, skipped.
-JNIEXPORT jlongArray JNICALL Java_org_capyps5_emulator_NativeBridge_nativeGetPasses(
+JNIEXPORT jlongArray JNICALL Java_com_consolefivepro_NativeBridge_nativeGetPasses(
     JNIEnv* env, jclass /*clazz*/) {
 	const auto         passes = Common::PassInspector::Snapshot();
 	std::vector<jlong> values;
@@ -300,17 +300,17 @@ JNIEXPORT jlongArray JNICALL Java_org_capyps5_emulator_NativeBridge_nativeGetPas
 	return array;
 }
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSetPassSkipped(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSetPassSkipped(
     JNIEnv* /*env*/, jclass /*clazz*/, jlong pixel_shader, jboolean skipped) {
 	Common::PassInspector::SetSkipped(static_cast<uint64_t>(pixel_shader), skipped == JNI_TRUE);
 }
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeClearSkippedPasses(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeClearSkippedPasses(
     JNIEnv* /*env*/, jclass /*clazz*/) {
 	Common::PassInspector::ClearSkipped();
 }
 
-JNIEXPORT jstring JNICALL Java_org_capyps5_emulator_NativeBridge_nativeGetVersion(
+JNIEXPORT jstring JNICALL Java_com_consolefivepro_NativeBridge_nativeGetVersion(
     JNIEnv* env, jclass /*clazz*/) {
 	const std::string version = "CapyPS5 v0.0.3-alpha (ARM64 Android)";
 	return env->NewStringUTF(version.c_str());

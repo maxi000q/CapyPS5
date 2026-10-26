@@ -13,29 +13,29 @@ extern "C" {
 #endif
 
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeInit(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeInit(
     JNIEnv* env, jclass clazz, jstring filesDir, jstring cacheDir);
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSetSurface(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSetSurface(
     JNIEnv* env, jclass clazz, jobject surface);
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeDestroySurface(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeDestroySurface(
     JNIEnv* env, jclass clazz);
 
-JNIEXPORT jboolean JNICALL Java_org_capyps5_emulator_NativeBridge_nativeStartGame(
+JNIEXPORT jboolean JNICALL Java_com_consolefivepro_NativeBridge_nativeStartGame(
     JNIEnv* env, jclass clazz, jstring gamePath, jstring elfPath);
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeStopGame(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeStopGame(
     JNIEnv* env, jclass clazz);
 
-JNIEXPORT void JNICALL Java_org_capyps5_emulator_NativeBridge_nativeSendControllerInput(
+JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSendControllerInput(
     JNIEnv* env, jclass clazz, jint buttons, jfloat lx, jfloat ly, jfloat rx, jfloat ry,
     jfloat l2, jfloat r2);
 
-JNIEXPORT jlongArray JNICALL Java_org_capyps5_emulator_NativeBridge_nativeGetStats(
+JNIEXPORT jlongArray JNICALL Java_com_consolefivepro_NativeBridge_nativeGetStats(
     JNIEnv* env, jclass clazz);
 
-JNIEXPORT jstring JNICALL Java_org_capyps5_emulator_NativeBridge_nativeGetVersion(
+JNIEXPORT jstring JNICALL Java_com_consolefivepro_NativeBridge_nativeGetVersion(
     JNIEnv* env, jclass clazz);
 
 ANativeWindow* AndroidGetNativeWindow();
