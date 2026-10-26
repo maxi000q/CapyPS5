@@ -14,7 +14,33 @@
 #include <algorithm>
 #include <chrono>
 
+#if defined(__linux__)
+#include <cerrno>
+#include <pthread.h>
+#include <sched.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
+#endif
+
 namespace Libs::Graphics {
+
+namespace {
+
+// Slot lifecycle: Free -> Filling (handler claimed it) -> Queued (payload
+// published) -> Resolving (worker claimed it) -> Handled/Unhandled (verdict,
+// the waiting handler resets the slot back to Free).
+constexpr uint32_t kFaultSlotFree      = 0;
+constexpr uint32_t kFaultSlotFilling   = 1;
+constexpr uint32_t kFaultSlotQueued    = 2;
+constexpr uint32_t kFaultSlotResolving = 3;
+constexpr uint32_t kFaultSlotHandled   = 4;
+constexpr uint32_t kFaultSlotUnhandled = 5;
+
+// Set on the fault-worker thread: a fault raised while resolving one must not
+// recursively queue onto itself (the worker would wait for itself).
+thread_local bool t_in_fault_worker = false;
+
+} // namespace
 
 RenderContext::RenderContext(GraphicContext& graphics)
     : m_graphics(graphics), m_render_executor(*this), m_command_scheduler(*this, graphics),
@@ -23,11 +49,74 @@ RenderContext::RenderContext(GraphicContext& graphics)
       m_buffer_cache(graphics, m_command_scheduler, m_page_manager, m_texture_cache),
       m_texture_cache(graphics, m_command_scheduler, m_page_manager, m_buffer_cache) {
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
+	StartFaultThread();
 }
 
 RenderContext::~RenderContext() {
+	// Join the fault worker first: it touches the caches shut down below.
+	StopFaultThread();
 	ShutdownGpu();
 	m_command_scheduler.Shutdown();
+}
+
+void RenderContext::StartFaultThread() {
+#if defined(__linux__)
+	m_fault_wakeup_fd = ::eventfd(0, EFD_CLOEXEC);
+	if (m_fault_wakeup_fd < 0) {
+		return; // fall back to inline fault resolution
+	}
+	try {
+		m_fault_thread = std::thread(&RenderContext::FaultThreadMain, this);
+	} catch (...) {
+		::close(m_fault_wakeup_fd);
+		m_fault_wakeup_fd = -1;
+	}
+#endif
+}
+
+void RenderContext::StopFaultThread() {
+#if defined(__linux__)
+	if (m_fault_wakeup_fd < 0) {
+		return;
+	}
+	if (m_fault_thread.joinable()) {
+		m_fault_thread_stop.store(true, std::memory_order_release);
+		const uint64_t one = 1;
+		(void)! ::write(m_fault_wakeup_fd, &one, sizeof(one));
+		m_fault_thread.join();
+	}
+	::close(m_fault_wakeup_fd);
+	m_fault_wakeup_fd = -1;
+#endif
+}
+
+void RenderContext::FaultThreadMain() {
+#if defined(__linux__)
+	t_in_fault_worker = true;
+	pthread_setname_np(pthread_self(), "CapyFaultWorker");
+	while (!m_fault_thread_stop.load(std::memory_order_acquire)) {
+		uint64_t wakeup = 0;
+		const auto read_bytes = ::read(m_fault_wakeup_fd, &wakeup, sizeof(wakeup));
+		if (read_bytes != static_cast<ssize_t>(sizeof(wakeup))) {
+			if (read_bytes >= 0 || errno == EINTR) {
+				continue;
+			}
+			break;
+		}
+		for (auto& slot: m_fault_slots) {
+			uint32_t expected = kFaultSlotQueued;
+			if (!slot.state.compare_exchange_strong(expected, kFaultSlotResolving,
+			                                          std::memory_order_acquire)) {
+				continue;
+			}
+			const auto access = static_cast<PageFaultAccess>(slot.access);
+			const auto vaddr  = slot.vaddr;
+			const bool handled = HandleFaultDeferred(access, vaddr);
+			slot.state.store(handled ? kFaultSlotHandled : kFaultSlotUnhandled,
+			                  std::memory_order_release);
+		}
+	}
+#endif
 }
 
 void RenderContext::InitializeGpu(VideoOut::VideoOutDriver* video_out) {
@@ -61,6 +150,73 @@ VideoOut::VideoOutDriver& RenderContext::GetVideoOut() const {
 }
 
 bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) noexcept {
+#if defined(__linux__)
+	// Console Five Pro fix (v0.0.8pro): this runs inside the SIGSEGV/SIGBUS handler.
+	// Taking the range-set or cache mutexes, or logging, dead-locks when the
+	// faulting thread itself holds one of those locks, so none of that happens
+	// here: queue the fault into an async-signal-safe slot, kick the worker via
+	// eventfd (write() is async-signal-safe) and wait for its verdict. Only
+	// atomics, sched_yield() and clock_gettime are used on this path.
+	if (t_in_fault_worker) {
+		return false; // a fault raised while resolving one: do not recurse
+	}
+	if (m_fault_wakeup_fd < 0) {
+		return HandleFaultDeferred(access, fault_vaddr); // no worker: inline fallback
+	}
+
+	size_t slot_index = kFaultSlotCount;
+	for (size_t spin = 0; slot_index == kFaultSlotCount && spin < 65536; spin++) {
+		for (size_t i = 0; i < kFaultSlotCount; i++) {
+			uint32_t expected = kFaultSlotFree;
+			if (m_fault_slots[i].state.compare_exchange_strong(
+			        expected, kFaultSlotFilling, std::memory_order_relaxed)) {
+				slot_index = i;
+				break;
+			}
+		}
+	}
+	if (slot_index == kFaultSlotCount) {
+		return false; // queue saturated: fall through to the crash report
+	}
+
+	auto& slot = m_fault_slots[slot_index];
+	slot.access = static_cast<uint32_t>(access);
+	slot.vaddr  = fault_vaddr;
+	slot.state.store(kFaultSlotQueued, std::memory_order_release);
+
+	const uint64_t one = 1;
+	(void)! ::write(m_fault_wakeup_fd, &one, sizeof(one));
+
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
+	uint32_t state = slot.state.load(std::memory_order_acquire);
+	while (state == kFaultSlotQueued || state == kFaultSlotResolving) {
+		if (std::chrono::steady_clock::now() > deadline) {
+			break;
+		}
+		sched_yield();
+		state = slot.state.load(std::memory_order_acquire);
+	}
+
+	if (state == kFaultSlotHandled || state == kFaultSlotUnhandled) {
+		slot.state.store(kFaultSlotFree, std::memory_order_release);
+		return state == kFaultSlotHandled;
+	}
+	if (state == kFaultSlotQueued) {
+		// Timed out before the worker claimed it: retract the request so the
+		// slot stays usable. A slot still stuck in Resolving is left alone -
+		// the worker owns it and the session is about to terminate anyway.
+		uint32_t expected = kFaultSlotQueued;
+		(void) slot.state.compare_exchange_strong(expected, kFaultSlotFree,
+		                                         std::memory_order_relaxed);
+	}
+	return false;
+#else
+	// Vectored-exception dispatch (normal thread context): resolve inline.
+	return HandleFaultDeferred(access, fault_vaddr);
+#endif
+}
+
+bool RenderContext::HandleFaultDeferred(PageFaultAccess access, uint64_t fault_vaddr) noexcept {
 	// The host reports the faulting byte, not the instruction's access width. Both caches
 	// resolve its page; guessing a width can cross the end of a valid guest mapping.
 	constexpr uint64_t fault_size = 1;

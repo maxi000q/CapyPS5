@@ -19,8 +19,12 @@
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 #include "kernel/eventQueue.h"
 
+#include <array>
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <shared_mutex>
+#include <thread>
 #include <vector>
 
 namespace Libs::VideoOut {
@@ -95,6 +99,26 @@ private:
 
 	Common::Mutex                        m_interrupt_mutex;
 	std::vector<InterruptEqRegistration> m_interrupt_eqs;
+
+	// Console Five Pro fix (v0.0.8pro): HandleFault is invoked from the host
+	// SIGSEGV/SIGBUS handler. Locks, logging and lazy initialization are not
+	// safe in that context, so the handler only queues the fault into one of
+	// these slots and a dedicated worker thread performs the actual cache
+	// invalidation while the faulting thread waits for the verdict.
+	static constexpr size_t kFaultSlotCount = 64;
+	struct FaultSlot {
+		std::atomic<uint32_t> state{0}; // see kFaultSlot* in the .cpp
+		uint32_t              access = 0;
+		uint64_t              vaddr  = 0;
+	};
+	void StartFaultThread();
+	void StopFaultThread();
+	void FaultThreadMain();
+	[[nodiscard]] bool HandleFaultDeferred(PageFaultAccess access, uint64_t fault_vaddr) noexcept;
+	std::array<FaultSlot, kFaultSlotCount> m_fault_slots;
+	std::atomic_bool                       m_fault_thread_stop{false};
+	std::thread                            m_fault_thread;
+	int                                    m_fault_wakeup_fd = -1;
 };
 
 } // namespace Libs::Graphics
