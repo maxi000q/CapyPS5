@@ -704,6 +704,26 @@ int KYTY_SYSV_ABI KernelFcntl(int d, int command, int arg) {
 	}
 }
 
+// Console Five Pro fix (v0.0.8pro): File::Write takes a uint32_t length, so a guest write
+// larger than 4 GiB used to be either rejected outright (EINVAL, losing the whole
+// transfer) or silently narrowed on the iovec path. Write in 1 GiB chunks instead and
+// report the true number of bytes written.
+static uint64_t WriteFileChunked(Common::File* file, const void* buf, uint64_t nbytes) {
+	constexpr uint64_t kChunkSize = 1024ull * 1024ull * 1024ull; // 1 GiB, well inside uint32_t
+	const auto*       data       = static_cast<const uint8_t*>(buf);
+	uint64_t          total      = 0;
+	while (total < nbytes) {
+		const auto chunk = static_cast<uint32_t>(std::min<uint64_t>(kChunkSize, nbytes - total));
+		uint32_t   wrote = 0;
+		file->Write(data + total, chunk, &wrote);
+		total += wrote;
+		if (wrote < chunk) {
+			break;
+		}
+	}
+	return total;
+}
+
 int64_t KYTY_SYSV_ABI KernelRead(int d, void* buf, size_t nbytes) {
 	PRINT_NAME();
 
@@ -928,26 +948,6 @@ static int ValidateIovecs(const KernelIovec* iov, int iovcnt, int64_t offset,
 		*total += buffer.iov_len;
 	}
 	return OK;
-}
-
-// Console Five Pro fix (v0.0.8pro): File::Write takes a uint32_t length, so a guest write
-// larger than 4 GiB used to be either rejected outright (EINVAL, losing the whole
-// transfer) or silently narrowed on the iovec path. Write in 1 GiB chunks instead and
-// report the true number of bytes written.
-static uint64_t WriteFileChunked(Common::File* file, const void* buf, uint64_t nbytes) {
-	constexpr uint64_t kChunkSize = 1024ull * 1024ull * 1024ull; // 1 GiB, well inside uint32_t
-	const auto*       data       = static_cast<const uint8_t*>(buf);
-	uint64_t          total      = 0;
-	while (total < nbytes) {
-		const auto chunk = static_cast<uint32_t>(std::min<uint64_t>(kChunkSize, nbytes - total));
-		uint32_t   wrote = 0;
-		file->Write(data + total, chunk, &wrote);
-		total += wrote;
-		if (wrote < chunk) {
-			break;
-		}
-	}
-	return total;
 }
 
 int64_t KYTY_SYSV_ABI KernelPreadv(int d, const KernelIovec* iov, int iovcnt, int64_t offset) {
