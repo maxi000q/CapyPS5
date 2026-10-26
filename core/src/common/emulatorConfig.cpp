@@ -5,6 +5,7 @@
 #include "common/emulatorConfig.h"
 
 #include "common/assert.h"
+#include "common/debugFlags.h"
 
 #include <algorithm>
 #include <memory>
@@ -65,6 +66,18 @@ uint32_t GetControllerVibrationIntensity() {
 }
 
 PresentMode GetPresentMode() {
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+	// Console Five Pro tweak (v0.0.7pro): frontend option (Settings -> Performance).
+	// 0 keeps the built-in low-latency default (mailbox), 1 asks for classic VSync
+	// (fifo, smoothest pacing) and 2 uncaps presenting entirely (immediate, may tear).
+	// The swapchain falls back to fifo when the driver lacks the requested mode.
+	static Common::DebugFlags::CachedValue mode("debug.capy.present_mode", 0);
+	switch (mode.Get()) {
+		case 1: return PresentMode::Fifo;
+		case 2: return PresentMode::Immediate;
+		default: break;
+	}
+#endif
 	return g_config->present_mode;
 }
 

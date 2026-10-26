@@ -110,6 +110,11 @@
     <string name="adaptive_resolution">Resolución adaptativa</string>
     <string name="option_perf_cores">Núcleos de rendimiento</string>
     <string name="option_perf_cores_desc">Mantiene los hilos de emulación y gráficos en los núcleos de CPU más rápidos (big.LITTLE).</string>
+    <string name="option_present_mode">Modo de presentación</string>
+    <string name="option_present_mode_desc">Baja latencia mantiene el triple búfer (por defecto); VSync se sincroniza con la pantalla para la imagen más fluida; Sin límite presenta cada imagen terminada para la mayor tasa (puede producir tearing). Se aplica desde el próximo inicio del juego.</string>
+    <string name="present_mode_low">Baja latencia</string>
+    <string name="present_mode_vsync">VSync</string>
+    <string name="present_mode_uncapped">Sin límite</string>
     <string name="reset_game_settings">Restablecer ajustes globales</string>
     <string name="reset_game_settings_desc">Borra las anulaciones de este juego (opciones y controlador de GPU).</string>
     <string name="reset_game_settings_done">Anulaciones del juego borradas.</string>

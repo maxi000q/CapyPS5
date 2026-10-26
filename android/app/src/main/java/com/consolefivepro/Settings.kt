@@ -129,6 +129,17 @@ enum class CoreOption(
         listOf(1L to R.string.enabled, 0L to R.string.disabled),
         1L,
     ),
+    PresentMode(
+        R.string.option_present_mode,
+        R.string.option_present_mode_desc,
+        "debug.capy.present_mode",
+        listOf(
+            0L to R.string.present_mode_low,
+            1L to R.string.present_mode_vsync,
+            2L to R.string.present_mode_uncapped,
+        ),
+        0L,
+    ),
     ;
 
     fun title(context: Context) = context.getString(titleRes)

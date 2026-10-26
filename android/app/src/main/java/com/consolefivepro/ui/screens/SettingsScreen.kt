@@ -184,6 +184,7 @@ fun SettingsScreen(
                     coreItem(CoreOption.FenceFallback),
                     coreItem(CoreOption.GuestReadCache),
                     coreItem(CoreOption.PerfCores),
+                    coreItem(CoreOption.PresentMode),
                     SettingItem(
                         context.getString(R.string.perf_overlay), context.getString(R.string.perf_overlay_desc),
                         settings.overlayMode.label(context),
