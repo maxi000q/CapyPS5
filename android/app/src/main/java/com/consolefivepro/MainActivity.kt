@@ -136,6 +136,16 @@ class MainActivity : CapyActivity() {
                 LaunchedEffect(settings.libraryPaths, storageCheck) {
                     // Folder walks + param.sfo reads per game stay off the main thread;
                     // swap the list in one go so the grid does not flicker while scanning.
+                    // v0.0.9proQ1: reclaim the partial-import leftovers failed imports of
+                    // older versions left behind (up to one multi-GB file per failed retry).
+                    val freed = withContext(Dispatchers.IO) { sweepPartialImports() }
+                    if (freed >= 1L * 1024 * 1024 * 1024) {
+                        android.widget.Toast.makeText(
+                            this@MainActivity,
+                            getString(R.string.import_cleaned, freed / (1L * 1024 * 1024 * 1024)),
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
                     val found = withContext(Dispatchers.IO) { scanLibrary() }
                     games.clear()
                     games.addAll(found)
@@ -333,69 +343,146 @@ class MainActivity : CapyActivity() {
         }
     }.getOrDefault(false)
 
+    /** v0.0.9proQ1: a copy that ran out of space stops itself instead of filling the disk. */
+    private class ImportOutOfSpace : Exception()
+
     /**
-     * Copies a picked document into filesDir/imported. The file must really be a game
+     * Copies a picked document next to the game library. The file must really be a game
      * executable (ELF/SELF magic): a picked .pkg used to be copied for minutes and then
-     * failed to boot, so anything else is rejected before a byte is written. Space is
-     * checked when the provider reports a size, and [onProgress] receives the display
-     * name plus the percent (or -1 when unknown) for the import card.
+     * failed to boot, so anything else is rejected before a byte is written.
+     *
+     * v0.0.9proQ1 fixes a storage leak that made a 7 GB import "need" 17+ GB: the copy went
+     * to internal filesDir while the library lives on shared storage, a failed copy left the
+     * partial multi-GB file behind (every retry added another one), and when the provider
+     * reported no size there was no space check at all. Now the copy lands in the library's
+     * own "imported" folder (falling back to filesDir only when that is unwritable), it is
+     * staged as ".part" and published by rename, any failure deletes the partial file, stale
+     * ".part" leftovers from older versions are swept on entry, and free space is verified
+     * up front (when a size is known) and re-verified every 256 MB of the real destination.
+     * [onProgress] receives the display name plus the percent (or -1 when unknown).
      */
-    private fun copyUriToLocal(uri: android.net.Uri, onProgress: (String?, Int) -> Unit): File? = try {
-        var name = "eboot.bin"
-        var size = -1L
-        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME).let { idx ->
-                    if (idx != -1) cursor.getString(idx)?.let { name = it }
+    private fun copyUriToLocal(uri: android.net.Uri, onProgress: (String?, Int) -> Unit): File? {
+        var staging: File? = null
+        return try {
+            var name = "eboot.bin"
+            var size = -1L
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME).let { idx ->
+                        if (idx != -1) cursor.getString(idx)?.let { name = sanitizeFileName(it) }
+                    }
+                    cursor.getColumnIndex(android.provider.OpenableColumns.SIZE).let { idx ->
+                        if (idx != -1 && !cursor.isNull(idx)) size = cursor.getLong(idx)
+                    }
                 }
-                cursor.getColumnIndex(android.provider.OpenableColumns.SIZE).let { idx ->
-                    if (idx != -1 && !cursor.isNull(idx)) size = cursor.getLong(idx)
+            }
+            // The library folder (usually shared storage / SD card) is where the game belongs;
+            // internal storage stays untouched unless every library folder is unwritable.
+            val targetDir = importDestinationDir()
+            // Partial files from failed imports of every earlier version are pure garbage.
+            targetDir.listFiles()?.forEach {
+                if (it.isFile && it.name.endsWith(".part")) runCatching { it.delete() }
+            }
+            val targetFile = File(targetDir, name)
+            val partFile = File(targetDir, "$name.part")
+            contentResolver.openInputStream(uri)?.use { input ->
+                val head = ByteArray(16)
+                var headLen = 0
+                while (headLen < head.size) {
+                    val n = input.read(head, headLen, head.size - headLen)
+                    if (n < 0) break
+                    headLen += n
                 }
-            }
-        }
-        val targetDir = File(filesDir, "imported").apply { mkdirs() }
-        val targetFile = File(targetDir, name)
-        contentResolver.openInputStream(uri)?.use { input ->
-            val head = ByteArray(16)
-            var headLen = 0
-            while (headLen < head.size) {
-                val n = input.read(head, headLen, head.size - headLen)
-                if (n < 0) break
-                headLen += n
-            }
-            if (!isGameExecutableMagic(head, headLen)) {
-                importReject = R.string.import_not_game
-                return null
-            }
-            if (size > 0) {
-                val free = android.os.StatFs(filesDir.absolutePath).availableBytes
-                if (size > free - 64L * 1024 * 1024) {
-                    importReject = R.string.import_no_space
+                if (!isGameExecutableMagic(head, headLen)) {
+                    importReject = R.string.import_not_game
                     return null
                 }
-            }
-            onProgress(name, if (size > 0) 0 else -1)
-            targetFile.outputStream().use { output ->
-                if (headLen > 0) output.write(head, 0, headLen)
                 if (size > 0) {
+                    val free = android.os.StatFs(targetDir.absolutePath).availableBytes
+                    if (size > free - 64L * 1024 * 1024) {
+                        importReject = R.string.import_no_space
+                        return null
+                    }
+                }
+                onProgress(name, if (size > 0) 0 else -1)
+                staging = partFile
+                partFile.outputStream().use { output ->
+                    if (headLen > 0) output.write(head, 0, headLen)
                     var done = headLen.toLong()
+                    var nextSpaceCheck = 0L
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         val n = input.read(buffer)
                         if (n < 0) break
                         output.write(buffer, 0, n)
                         done += n
-                        onProgress(name, ((done * 100) / size).toInt().coerceIn(0, 100))
+                        // Providers often report no size (or a wrong one): re-check the real
+                        // destination while copying so the disk never fills completely.
+                        if (done >= nextSpaceCheck) {
+                            nextSpaceCheck = done + 256L * 1024 * 1024
+                            val free = android.os.StatFs(targetDir.absolutePath).availableBytes
+                            if (free < 320L * 1024 * 1024) {
+                                throw ImportOutOfSpace()
+                            }
+                        }
+                        if (size > 0) {
+                            onProgress(name, ((done * 100) / size).toInt().coerceIn(0, 100))
+                        }
                     }
-                } else {
-                    input.copyTo(output, 64 * 1024)
+                }
+            }
+            // Publish atomically: a rename keeps a half-written file from ever being booted.
+            if (!partFile.renameTo(targetFile)) {
+                partFile.copyTo(targetFile, overwrite = true)
+                partFile.delete()
+            }
+            staging = null
+            targetFile
+        } catch (_: ImportOutOfSpace) {
+            staging?.let { runCatching { it.delete() } }
+            importReject = R.string.import_no_space
+            null
+        } catch (_: Exception) {
+            staging?.let { runCatching { it.delete() } }
+            importReject = R.string.import_failed
+            null
+        }
+    }
+
+    /** The first writable library folder's "imported" subfolder, or internal storage. */
+    private fun importDestinationDir(): File {
+        settings.libraryPaths.asSequence().map { File(File(it), "imported") }
+            .firstOrNull { dir ->
+                runCatching {
+                    (dir.isDirectory || dir.mkdirs()) && dir.canWrite()
+                }.getOrDefault(false)
+            }
+            ?.let { return it }
+        return File(filesDir, "imported").apply { mkdirs() }
+    }
+
+    /** Deletes ".part" staging files of failed imports from every import destination; bytes freed. */
+    private fun sweepPartialImports(): Long = runCatching {
+        val dirs = settings.libraryPaths.map { File(File(it), "imported") } +
+            listOf(File(filesDir, "imported"))
+        var freed = 0L
+        dirs.forEach { dir ->
+            dir.listFiles()?.forEach {
+                if (it.isFile && it.name.endsWith(".part")) {
+                    val size = it.length()
+                    if (it.delete()) freed += size
                 }
             }
         }
-        targetFile
-    } catch (_: Exception) {
-        importReject = R.string.import_failed
-        null
+        freed
+    }.getOrDefault(0L)
+
+    /** Keeps a provider display name from escaping the import folder ("a/../b", slashes). */
+    private fun sanitizeFileName(name: String): String {
+        val clean = name.substringAfterLast('/').substringAfterLast('\\')
+            .filter { !it.isWhitespace() || it == ' ' }
+            .trim().trim('.', ' ')
+        return clean.ifEmpty { "eboot.bin" }
     }
 }
 
