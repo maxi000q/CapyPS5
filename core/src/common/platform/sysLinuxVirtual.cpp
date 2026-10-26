@@ -288,6 +288,55 @@ static bool is_mapped(void* ptr, size_t length) {
 }
 #endif
 
+// Console Five Pro fix (v0.0.8pro): exported so kernel syscalls can fail with EFAULT
+// instead of crashing when a guest hands them a wild pointer.
+bool IsMappedWritable(const void* address, size_t size) {
+#if defined(__APPLE__)
+	// Mach has no /proc/self/maps; query the region directly. A range that is not fully
+	// covered by the first region is conservatively treated as writable (the guest heap
+	// normally is), so a multi-region span never produces a false EFAULT.
+	auto                           query_addr  = reinterpret_cast<mach_vm_address_t>(address);
+	mach_vm_address_t              region_addr = query_addr;
+	mach_vm_size_t                 region_size = 0;
+	vm_region_basic_info_data_64_t info {};
+	mach_msg_type_number_t         count       = VM_REGION_BASIC_INFO_COUNT_64;
+	mach_port_t                    object_name = MACH_PORT_NULL;
+	const kern_return_t            kr          =
+	    mach_vm_region(mach_task_self(), &region_addr, &region_size, VM_REGION_BASIC_INFO_64,
+	                   reinterpret_cast<vm_region_info_t>(&info), &count, &object_name);
+	if (kr != KERN_SUCCESS) {
+		return false; // nothing mapped at or above the address
+	}
+	if (region_addr > query_addr || query_addr + size > region_addr + region_size) {
+		return true;
+	}
+	return (info.protection & VM_PROT_WRITE) != 0;
+#else
+	FILE* file = fopen("/proc/self/maps", "r");
+	if (file == nullptr) {
+		return true; // cannot verify: assume the guest pointer is fine
+	}
+	char        line[1024];
+	const auto  addr = reinterpret_cast<uintptr_t>(address);
+	bool        ret  = false;
+	while (fgets(line, sizeof(line), file) != nullptr) {
+		uint64_t start = 0;
+		uint64_t end   = 0;
+		char     perms[8] {};
+		// NOLINTNEXTLINE(cert-err34-c)
+		if (sscanf(line, "%" SCNx64 "-%" SCNx64 " %7s", &start, &end, perms) != 3) {
+			continue;
+		}
+		if (addr >= start && addr + size <= end) {
+			ret = (perms[1] == 'w');
+			break;
+		}
+	}
+	fclose(file);
+	return ret;
+#endif
+}
+
 bool AllocFixed(uint64_t address, uint64_t size, Mode mode) {
 	EXIT_IF(g_allocs == nullptr);
 

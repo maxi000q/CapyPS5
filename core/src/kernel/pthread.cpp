@@ -19,6 +19,7 @@
 #include "common/stringUtils.h"
 #include "common/threads.h"
 #include "common/timer.h"
+#include "common/virtualMemory.h"
 #include "kernel/memory.h"
 #include "libs/errno.h"
 #include "libs/libs.h"
@@ -3427,7 +3428,12 @@ int KYTY_SYSV_ABI PthreadJoin(Pthread thread, void** value) {
 		return KERNEL_ERROR_EINVAL;
 	}
 
-	int result = pthread_join(thread->p, value);
+	// Console Five Pro fix (v0.0.8pro): pthread_join() used to write the exit value
+	// straight through the guest pointer; a bogus address killed the host with SIGSEGV.
+	// Collect the value locally and store it only through a verified-writable
+	// destination, reporting EFAULT like the real kernel does.
+	void* exit_value = nullptr;
+	int   result     = pthread_join(thread->p, value != nullptr ? &exit_value : nullptr);
 
 	if (PRINT_NAME_ENABLED) {
 		LOGF("\tthread join: %s, %d\n", thread->name.c_str(), result);
@@ -3438,6 +3444,14 @@ int KYTY_SYSV_ABI PthreadJoin(Pthread thread, void** value) {
 
 		thread->almost_done = false;
 		thread->free        = true;
+
+		if (value != nullptr) {
+			if (Common::VirtualMemory::IsMappedWritable(value, sizeof(*value))) {
+				*value = exit_value;
+			} else {
+				result = EFAULT; // joined fine, but the guest pointer is bad
+			}
+		}
 	}
 
 	switch (result) {
@@ -3445,6 +3459,7 @@ int KYTY_SYSV_ABI PthreadJoin(Pthread thread, void** value) {
 		case ESRCH: return KERNEL_ERROR_ESRCH;
 		case EDEADLK: return KERNEL_ERROR_EDEADLK;
 		case EOPNOTSUPP: return KERNEL_ERROR_EOPNOTSUPP;
+		case EFAULT: return KERNEL_ERROR_EFAULT;
 		default: return KERNEL_ERROR_EINVAL;
 	}
 }

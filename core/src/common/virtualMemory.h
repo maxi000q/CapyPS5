@@ -42,6 +42,10 @@ bool     FreeRange(uint64_t address, uint64_t size);
 bool     Protect(uint64_t address, uint64_t size, Mode mode);
 bool     FlushInstructionCache(uint64_t address, uint64_t size);
 
+// Console Five Pro fix (v0.0.8pro): kernel syscalls use this to fail with EFAULT
+// instead of crashing when a guest hands them a wild pointer.
+bool     IsMappedWritable(const void* address, size_t size);
+
 } // namespace VirtualMemory
 
 } // namespace Common

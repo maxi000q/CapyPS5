@@ -339,6 +339,29 @@ bool FlushInstructionCache(uint64_t address, uint64_t size) {
 	return true;
 }
 
+// Console Five Pro fix (v0.0.8pro): exported so kernel syscalls can fail with EFAULT
+// instead of crashing when a guest hands them a wild pointer.
+bool IsMappedWritable(const void* address, size_t size) {
+	const uint8_t* cursor = static_cast<const uint8_t*>(address);
+	const uint8_t* end    = cursor + size;
+	while (cursor < end) {
+		MEMORY_BASIC_INFORMATION mbi {};
+		if (VirtualQuery(cursor, &mbi, sizeof(mbi)) == 0 || mbi.State != MEM_COMMIT) {
+			return false;
+		}
+		if ((mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY |
+		                    PAGE_EXECUTE_WRITECOPY)) == 0) {
+			return false;
+		}
+		const uint8_t* region_end = static_cast<const uint8_t*>(mbi.BaseAddress) + mbi.RegionSize;
+		if (region_end <= cursor) {
+			return false;
+		}
+		cursor = region_end;
+	}
+	return true;
+}
+
 } // namespace Common::VirtualMemory
 
 #endif
