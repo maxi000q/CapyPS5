@@ -344,6 +344,19 @@ static bool HasWindowsForbiddenFilenameCharacter(const std::string& relative_pat
 }
 #endif
 
+static bool ContainsParentDirectorySegment(const std::string& relative_path) {
+	size_t pos = 0;
+	while (pos < relative_path.size()) {
+		const auto end = relative_path.find('/', pos);
+		const auto len = (end == std::string::npos ? relative_path.size() : end) - pos;
+		if (len == 2 && relative_path.compare(pos, 2, "..") == 0) {
+			return true;
+		}
+		pos = (end == std::string::npos ? relative_path.size() : end + 1);
+	}
+	return false;
+}
+
 std::filesystem::path MountPoints::ResolvePath(const std::string& mounted_name) {
 	Common::LockGuard lock(m_mutex);
 
@@ -357,6 +370,13 @@ std::filesystem::path MountPoints::ResolvePath(const std::string& mounted_name) 
 		auto rel_path = Common::RemoveFirst(Common::FixFilenameSlash(mounted_name), p.point.size());
 		while (rel_path.starts_with('/')) {
 			rel_path = Common::RemoveFirst(rel_path, 1);
+		}
+
+		// Console Five Pro fix (v0.0.8pro): '..' segments used to be passed to the host
+		// path untouched, so /app0/../../etc/passwd escaped the mount root.
+		if (ContainsParentDirectorySegment(rel_path)) {
+			LOGF("FileSystem: guest path escapes the mount point: %s\n", mounted_name.c_str());
+			return {};
 		}
 
 		const auto native_rel_path = Common::PathFromUtf8(rel_path);
