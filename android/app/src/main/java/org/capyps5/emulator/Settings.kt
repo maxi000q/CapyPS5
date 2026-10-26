@@ -245,6 +245,15 @@ class Settings(context: Context) {
         coreOptionsVersion++
     }
 
+    /** v0.0.6proplus: clears every per-game override (options and GPU driver) for one title. */
+    fun clearGameOverrides(titleId: String) {
+        val editor = prefs.edit()
+        CoreOption.entries.forEach { editor.remove("game_${titleId}_${it.name}") }
+        editor.remove("game_${titleId}_gpu_driver")
+        editor.apply()
+        coreOptionsVersion++
+    }
+
     fun effectiveGpuDriver(titleId: String): String = gameGpuDriver(titleId) ?: gpuDriver()
 
     /**

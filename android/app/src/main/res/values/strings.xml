@@ -112,6 +112,9 @@
     <string name="adaptive_resolution">Adaptive resolution</string>
     <string name="option_perf_cores">Performance cores</string>
     <string name="option_perf_cores_desc">Keep the emulation and graphics threads on the fastest CPU cores (big.LITTLE).</string>
+    <string name="reset_game_settings">Reset to global settings</string>
+    <string name="reset_game_settings_desc">Clear this game\'s overrides (options and GPU driver).</string>
+    <string name="reset_game_settings_done">Game overrides cleared.</string>
     <string name="adaptive_resolution_desc">Lower the render scale while the game cannot hold its frame rate and raise it back when there is headroom. Applies without restarting.</string>
     <string name="overlay_off">Off</string>
     <string name="overlay_compact">Compact</string>

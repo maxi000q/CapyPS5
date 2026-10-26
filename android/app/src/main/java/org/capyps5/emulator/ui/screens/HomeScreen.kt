@@ -489,6 +489,14 @@ private fun GameOptionsPanel(
                 SettingItem(context.getString(R.string.trophies), context.getString(R.string.trophies_desc), onConfirm = onTrophies)
             } else null,
             SettingItem(
+                context.getString(R.string.reset_game_settings), context.getString(R.string.reset_game_settings_desc),
+                danger = true,
+                onConfirm = {
+                    settings.clearGameOverrides(game.titleId)
+                    message = context.getString(R.string.reset_game_settings_done)
+                },
+            ),
+            SettingItem(
                 context.getString(R.string.clear_game_shader_cache), context.getString(R.string.clear_shader_cache_desc),
                 danger = true,
                 onConfirm = { message = onClearShaderCache() },
