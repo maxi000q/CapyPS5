@@ -6,6 +6,7 @@
 #include "common/common.h"
 #include "common/file.h"
 #include "common/debugFlags.h"
+#include "common/perfCores.h"
 #include "common/logging/log.h"
 #include "common/passInspector.h"
 #include "common/stringUtils.h"
@@ -150,6 +151,9 @@ JNIEXPORT jboolean JNICALL Java_org_capyps5_emulator_NativeBridge_nativeStartGam
 		} else {
 			ALOGI("Emulator thread: priority raised (nice -4)");
 		}
+		// Console Five Pro tweak (v0.0.6proplus): keep the guest main loop on the big
+		// cores of big.LITTLE SoCs (best effort, toggle debug.capy.perf_cores).
+		Common::PinToPerformanceCores("Emulator thread");
 		Emulator::Run(options);
 		g_is_running.store(false);
 		ALOGI("Emulator thread finished");
