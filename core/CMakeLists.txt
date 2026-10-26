@@ -60,6 +60,11 @@ if(ANDROID)
 	# logcat); nothing executes from the stack - the JIT writes anonymous code pages - so
 	# pin PT_GNU_STACK to NX for every library linked from this tree.
 	add_link_options(-Wl,-z,noexecstack)
+	# Console Five Pro fix (v0.0.6proplus): the newest devices run 16 KB pages; a library
+	# with 4 KB-aligned LOAD segments cannot load there. Pin every Android library to
+	# 16 KB alignment (NDK r28 default, made explicit so a toolchain change cannot
+	# regress it).
+	add_link_options(-Wl,-z,max-page-size=16384)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)

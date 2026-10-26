@@ -104,6 +104,32 @@ jobs:
           done
           ls -la "$JNI"
 
+      - name: Verify 16 KB alignment and non-execstack (Android 15+/16 devices)
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          READELF="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          JNI="android/app/src/main/jniLibs/arm64-v8a"
+          fail=0
+          for SO in "$JNI"/*.so; do
+            name=$(basename "$SO")
+            align_hex=$("$READELF" -lW "$SO" | awk '$1=="LOAD" {print $NF; exit}')
+            align_dec=$((align_hex))
+            if [ "${align_dec:-0}" -lt 16384 ]; then
+              echo "::error::$name LOAD alignment is $align_hex (expected >= 0x4000)"
+              fail=1
+            else
+              echo "$name: LOAD aligned to $align_dec bytes"
+            fi
+            if "$READELF" -lW "$SO" | grep -q 'GNU_STACK.*RWE'; then
+              echo "::error::$name requests an executable stack (GNU_STACK RWE)"
+              fail=1
+            else
+              echo "$name: GNU_STACK is non-executable"
+            fi
+          done
+          exit $fail
+
       - name: Cache Gradle dependencies
         uses: actions/cache@v4
         with:
