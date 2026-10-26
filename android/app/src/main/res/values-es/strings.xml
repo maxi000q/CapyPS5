@@ -115,6 +115,11 @@
     <string name="present_mode_low">Baja latencia</string>
     <string name="present_mode_vsync">VSync</string>
     <string name="present_mode_uncapped">Sin límite</string>
+    <string name="option_mali_profile">Optimización GPU Mali</string>
+    <string name="option_mali_profile_desc">Valores predeterminados ajustados al ancho de banda de las GPU Mali (misma imagen): borrado por hardware que conserva la compresión AFBC, un búfer de streaming de 128 MB y un trabajador de compilación más. Auto la activa solo en GPU Mali; se aplica desde el próximo inicio del juego.</string>
+    <string name="mali_profile_auto">Auto</string>
+    <string name="mali_profile_on">Activado</string>
+    <string name="mali_profile_off">Desactivado</string>
     <string name="reset_game_settings">Restablecer ajustes globales</string>
     <string name="reset_game_settings_desc">Borra las anulaciones de este juego (opciones y controlador de GPU).</string>
     <string name="reset_game_settings_done">Anulaciones del juego borradas.</string>
@@ -250,11 +255,7 @@
     <string name="trophies_card_next">Por conseguir</string>
     <string name="whats_new_title">Lo nuevo en la v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Corregido: los controladores Vulkan personalizados (Turnip, PanVk) sin funciones opcionales ya no fallan al iniciar con estado 321 — el emulador arranca con funciones reducidas en lugar de negarse a crear el dispositivo GPU.</item>
-        <item>Corregido: elegir un .pkg u otro archivo que no es un ejecutable ya no congela la app durante minutos — las importaciones se validan antes y una tarjeta muestra el progreso.</item>
-        <item>Nuevo: ajuste Formato de pantalla (Predeterminado / 16:9 / 5:4) con barras negras, aplicado en vivo mientras juegas (Ajustes → Gráficos).</item>
-        <item>Nuevo: exporta e importa las partidas de cada juego desde sus propias opciones — sin necesidad de saber a qué juego pertenece cada partida.</item>
-        <item>Corregido: la barra lateral de Ajustes ahora se desplaza en pantallas pequeñas, así que Acerca de siempre es accesible.</item>
-        <item>Informes de errores más claros: cuando el propio juego desreferencia un puntero nulo, el informe lo dice en lugar de mostrar una excepción del host.</item>
+        <item>Nuevo: optimización para GPU Mali (Ajustes → Rendimiento, Auto por defecto). En GPU Mali (clase Mali-G76 y posteriores) el emulador pasa a borrado por hardware que conserva la compresión AFBC de Arm, un búfer de streaming de 128 MB y un trabajador de compilación más — la misma imagen con mucho menos tráfico de memoria. Las demás GPU mantienen los valores actuales sin cambios.</item>
+        <item>Nuevo: el panel de opciones de cada juego («Elegir opciones para este juego») ahora se desplaza, así que exportar/importar partidas, restablecer y Jugar siempre son accesibles en pantallas pequeñas (y el foco del mando sigue las filas).</item>
     </string-array>
 </resources>

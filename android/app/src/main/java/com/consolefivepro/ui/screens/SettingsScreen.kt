@@ -50,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.consolefivepro.ButtonLayout
 import androidx.compose.ui.res.stringResource
 import com.consolefivepro.GpuDrivers
+import com.consolefivepro.GpuInfo
 import com.consolefivepro.R
 import com.consolefivepro.CoreOption
 import com.consolefivepro.GameSaves
@@ -228,7 +229,22 @@ fun SettingsScreen(
                 )
             },
             SettingsCategory(context.getString(R.string.category_performance), Icons.Outlined.Speed) {
+                // v0.0.9pro: bandwidth-tuned defaults for Mali GPUs; the value names the detected
+                // GPU so it is obvious whether Auto applies the profile.
+                val maliValues = listOf(2L, 1L, 0L)
+                val maliCurrent = settings.coreOption(CoreOption.MaliProfile)
+                val maliLabel = (when (maliCurrent) {
+                    1L -> context.getString(R.string.mali_profile_on)
+                    0L -> context.getString(R.string.mali_profile_off)
+                    else -> context.getString(R.string.mali_profile_auto)
+                }) + " \u00B7 " + GpuInfo.label
                 listOf(
+                    SettingItem(
+                        context.getString(R.string.option_mali_profile),
+                        context.getString(R.string.option_mali_profile_desc),
+                        maliLabel,
+                        onStep = { settings.updateCoreOption(CoreOption.MaliProfile, cycle(maliValues, maliCurrent, it)) },
+                    ),
                     coreItem(CoreOption.AsyncShaders),
                     coreItem(CoreOption.StreamingBuffer),
                     coreItem(CoreOption.ReadAhead),

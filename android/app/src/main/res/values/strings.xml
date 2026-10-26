@@ -117,6 +117,11 @@
     <string name="present_mode_low">Low latency</string>
     <string name="present_mode_vsync">VSync</string>
     <string name="present_mode_uncapped">Uncapped</string>
+    <string name="option_mali_profile">Mali GPU optimization</string>
+    <string name="option_mali_profile_desc">Bandwidth-tuned defaults for Mali GPUs (same graphics): hardware render-target clears that keep AFBC compression alive, a 128 MB streaming buffer and one more pipeline worker. Auto applies it only on Mali GPUs; applies from the next game start.</string>
+    <string name="mali_profile_auto">Auto</string>
+    <string name="mali_profile_on">On</string>
+    <string name="mali_profile_off">Off</string>
     <string name="reset_game_settings">Reset to global settings</string>
     <string name="reset_game_settings_desc">Clear this game\'s overrides (options and GPU driver).</string>
     <string name="reset_game_settings_done">Game overrides cleared.</string>
@@ -253,11 +258,7 @@
     <string name="trophies_card_next">Still to earn</string>
     <string name="whats_new_title">What\'s new in v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Fixed: custom Vulkan drivers (Turnip, PanVk) that lack optional features no longer fail at startup with status 321 — the emulator starts with reduced features instead of refusing to create the GPU device.</item>
-        <item>Fixed: picking a .pkg or other non-executable file no longer freezes the app for minutes — imports are validated up front and a card shows the progress.</item>
-        <item>New: Screen format setting (Default / 16:9 / 5:4) letterboxes the game image with black bars, applied live while playing (Settings → Graphics).</item>
-        <item>New: per-game save export and import from each game\'s options — no need to know which game a save belongs to.</item>
-        <item>Fixed: the Settings sidebar now scrolls on small screens, so the About entry is always reachable.</item>
-        <item>Clearer crash reports: when the game itself dereferences a null pointer, the report says so instead of showing a raw host exception.</item>
+        <item>New: Mali GPU optimization (Settings → Performance, Auto by default). On Mali GPUs (Mali-G76 class and newer) the emulator switches to hardware render-target clears that keep Arm\'s AFBC compression alive, a 128 MB streaming buffer and one more pipeline-compile worker — the same graphics with far less memory traffic. Other GPUs keep the current defaults untouched.</item>
+        <item>New: the per-game options panel ("Choose options for this game") now scrolls, so save export / import, reset and Play are always reachable on small screens (and gamepad focus follows the rows).</item>
     </string-array>
 </resources>
