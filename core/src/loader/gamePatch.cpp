@@ -14,8 +14,8 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <exception>
 #include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -55,6 +55,22 @@ bool Fail(std::string* error, std::string message) {
 	return false;
 }
 
+static bool HexNibble(char c, uint8_t* out) {
+	if (c >= '0' && c <= '9') {
+		*out = static_cast<uint8_t>(c - '0');
+		return true;
+	}
+	if (c >= 'a' && c <= 'f') {
+		*out = static_cast<uint8_t>(c - 'a' + 10);
+		return true;
+	}
+	if (c >= 'A' && c <= 'F') {
+		*out = static_cast<uint8_t>(c - 'A' + 10);
+		return true;
+	}
+	return false;
+}
+
 bool ParseBytes(const std::string& text, std::vector<uint8_t>* bytes) {
 	if (text.empty() || (text.size() % 2) != 0) {
 		return false;
@@ -62,8 +78,35 @@ bool ParseBytes(const std::string& text, std::vector<uint8_t>* bytes) {
 
 	bytes->resize(text.size() / 2);
 	for (size_t index = 0; index < bytes->size(); index++) {
-		(*bytes)[index] = static_cast<uint8_t>(std::stoul(text.substr(index * 2, 2), nullptr, 16));
+		uint8_t hi = 0;
+		uint8_t lo = 0;
+		if (!HexNibble(text[index * 2], &hi) || !HexNibble(text[index * 2 + 1], &lo)) {
+			return false;
+		}
+		(*bytes)[index] = static_cast<uint8_t>((hi << 4u) | lo);
 	}
+	return true;
+}
+
+static bool JsonStr(const Json& j, const char* key, std::string* out) {
+	auto it = j.find(key);
+	if (it == j.end() || !it->is_string()) {
+		return false;
+	}
+	*out = it->get_ref<const std::string&>();
+	return true;
+}
+
+static bool ParseHexU64(const std::string& text, uint64_t* out) {
+	if (text.empty() || text.size() > 16) {
+		return false;
+	}
+	char* end            = nullptr;
+	const auto value     = std::strtoull(text.c_str(), &end, 16);
+	if (end != text.c_str() + text.size()) {
+		return false;
+	}
+	*out = value;
 	return true;
 }
 
@@ -73,42 +116,61 @@ bool LoadPlan(const std::filesystem::path& path, Plan* plan, std::string* error)
 		return Fail(error, "could not read cheat file");
 	}
 
-	// Console Five Pro fix (v0.0.8pro): every get<std::string>() and std::stoull below
-	// throws on a malformed value and used to abort the whole emulator process; a
-	// broken cheat file is now just a load error.
-	try {
-		const auto root = Json::parse(file, nullptr, false);
-		if (!root.is_object() || !root.contains("id") || !root.contains("version") ||
-		    !root.contains("process") || !root.contains("mods")) {
-			return Fail(error, "expected a GoldHEN-style mods JSON file");
-		}
-		plan->title_id = root["id"].get<std::string>();
-		plan->version  = root["version"].get<std::string>();
-		plan->process  = root["process"].get<std::string>();
-
-		for (const auto& mod: root["mods"]) {
-			if (!mod.value("enabled", true)) {
-				continue;
-			}
-			const auto name = mod["name"].get<std::string>();
-			plan->mod_names.push_back(name);
-			for (const auto& entry: mod["memory"]) {
-				Write write;
-				write.source_address = std::stoull(entry["offset"].get<std::string>(), nullptr, 16);
-				if (!ParseBytes(entry["off"].get<std::string>(), &write.off) ||
-				    !ParseBytes(entry["on"].get<std::string>(), &write.on) ||
-				    write.off.size() != write.on.size()) {
-					return Fail(error, "invalid mod memory bytes");
-				}
-				plan->writes.push_back(std::move(write));
-			}
-		}
-		return true;
-	} catch (const std::exception& e) {
-		return Fail(error, std::string("malformed cheat file: ") + e.what());
-	} catch (...) {
-		return Fail(error, "malformed cheat file");
+	// Console Five Pro (v0.0.8pro): the core is built with -fno-exceptions, so the
+	// throwing calls that used to be here aborted the whole emulator process on a
+	// malformed value. Every read is type-checked first and parsed without exceptions.
+	const auto root = Json::parse(file, nullptr, false);
+	if (!root.is_object() || !root.contains("mods")) {
+		return Fail(error, "expected a GoldHEN-style mods JSON file");
 	}
+	if (!JsonStr(root, "id", &plan->title_id) || !JsonStr(root, "version", &plan->version) ||
+	    !JsonStr(root, "process", &plan->process)) {
+		return Fail(error, "expected a GoldHEN-style mods JSON file");
+	}
+
+	for (const auto& mod: root["mods"]) {
+		if (!mod.is_object()) {
+			return Fail(error, "invalid mod entry");
+		}
+		bool enabled = true;
+		auto flag    = mod.find("enabled");
+		if (flag != mod.end()) {
+			if (!flag->is_boolean()) {
+				return Fail(error, "invalid mod enabled flag");
+			}
+			enabled = flag->get<bool>();
+		}
+		if (!enabled) {
+			continue;
+		}
+		std::string name;
+		if (!JsonStr(mod, "name", &name)) {
+			return Fail(error, "invalid mod name");
+		}
+		plan->mod_names.push_back(name);
+		auto memory = mod.find("memory");
+		if (memory == mod.end() || !memory->is_array()) {
+			return Fail(error, "invalid mod memory list");
+		}
+		for (const auto& entry: *memory) {
+			if (!entry.is_object()) {
+				return Fail(error, "invalid mod memory entry");
+			}
+			Write      write;
+			std::string offset_text;
+			std::string off_text;
+			std::string on_text;
+			if (!JsonStr(entry, "offset", &offset_text) ||
+			    !ParseHexU64(offset_text, &write.source_address) ||
+			    !JsonStr(entry, "off", &off_text) || !ParseBytes(off_text, &write.off) ||
+			    !JsonStr(entry, "on", &on_text) || !ParseBytes(on_text, &write.on) ||
+			    write.off.size() != write.on.size()) {
+				return Fail(error, "invalid mod memory bytes");
+			}
+			plan->writes.push_back(std::move(write));
+		}
+	}
+	return true;
 }
 
 bool ValidateGame(const Plan& plan, const Program* main_program, std::string* error) {
