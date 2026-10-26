@@ -272,6 +272,13 @@ class Settings(context: Context) {
         gameOption(titleId, option)
             ?: if (unreal && option == CoreOption.ResolutionScale) ueResolution() else coreOption(option)
 
+    /** v0.0.6proplus: directory of the last launched game (pre-selected on the home screen). */
+    var lastGameDir: String
+        get() = prefs.getString("last_game_dir", "").orEmpty()
+        set(value) {
+            prefs.edit().putString("last_game_dir", value).apply()
+        }
+
     /** v0.0.6proplus: lower the render scale under sustained frame drops, recover on headroom. */
     var adaptiveResolution by mutableStateOf(prefs.getBoolean("adaptive_resolution", false))
         private set

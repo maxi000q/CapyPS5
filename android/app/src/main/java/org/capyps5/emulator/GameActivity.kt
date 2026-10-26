@@ -31,6 +31,8 @@ class GameActivity : CapyActivity() {
         fun errorFile(context: Context) = File(context.filesDir, "last_error.txt")
 
         fun launch(context: Context, game: GameItem) {
+            // v0.0.6proplus: remember what was played; the home screen pre-selects it.
+            Settings(context).lastGameDir = game.directoryPath
             context.startActivity(
                 Intent(context, GameActivity::class.java)
                     .putExtra(EXTRA_TITLE_ID, game.titleId)

@@ -117,6 +117,15 @@ fun HomeScreen(
 ) {
     var tab by remember { mutableIntStateOf(0) }
     var selected by remember { mutableIntStateOf(0) }
+    // v0.0.6proplus: pre-select the last played game once the library has loaded.
+    var lastGameApplied by remember { mutableStateOf(false) }
+    LaunchedEffect(games) {
+        if (!lastGameApplied && games.isNotEmpty()) {
+            lastGameApplied = true
+            val index = games.indexOfFirst { it.directoryPath == settings.lastGameDir }
+            if (index > 0) selected = index
+        }
+    }
     var showSettings by remember { mutableStateOf(false) }
     var optionsFor by remember { mutableStateOf<GameItem?>(null) }
     var trophiesFor by remember { mutableStateOf<GameItem?>(null) }
