@@ -37,6 +37,10 @@
 
 static JavaVM*            g_jvm           = nullptr;
 static ANativeWindow*     g_native_window = nullptr;
+// Console Five Pro fix (v0.0.8pro): the window pointer is shared between the UI thread
+// (attach/detach) and the emulator thread (Vulkan surface creation); every access goes
+// through this mutex now.
+static std::mutex         g_window_mutex;
 static std::thread        g_emulator_thread;
 static std::atomic<bool>  g_is_running{false};
 static std::mutex         g_lifecycle_mutex;
@@ -80,6 +84,8 @@ JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeInit(
 
 JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSetSurface(
     JNIEnv* env, jclass /*clazz*/, jobject surface) {
+	std::lock_guard lock(g_window_mutex);
+
 	if (g_native_window != nullptr) {
 		ANativeWindow_release(g_native_window);
 		g_native_window = nullptr;
@@ -94,6 +100,8 @@ JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSetSurface(
 
 JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeDestroySurface(
     JNIEnv* /*env*/, jclass /*clazz*/) {
+	std::lock_guard lock(g_window_mutex);
+
 	if (g_native_window != nullptr) {
 		ANativeWindow_release(g_native_window);
 		g_native_window = nullptr;
@@ -331,6 +339,16 @@ JNIEXPORT jstring JNICALL Java_com_consolefivepro_NativeBridge_nativeGetVersion(
 }
 
 ANativeWindow* AndroidGetNativeWindow() {
+	// Console Five Pro fix (v0.0.8pro): hand out a strong reference so the UI thread can
+	// detach the surface without freeing the window while the emulator thread is still
+	// building its Vulkan surface from it. The caller drops the extra reference once the
+	// surface is created.
+	std::lock_guard lock(g_window_mutex);
+
+	if (g_native_window == nullptr) {
+		return nullptr;
+	}
+	ANativeWindow_acquire(g_native_window);
 	return g_native_window;
 }
 

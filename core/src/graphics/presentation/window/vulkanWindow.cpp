@@ -1027,8 +1027,13 @@ static vk::SurfaceKHR CreatePlatformSurface(vk::Instance instance, SDL_Window* w
 	                                 nullptr, &native_surface);
 	if (res != VK_SUCCESS) {
 		LOGF("Could not create Android Vulkan surface: %d\n", static_cast<int>(res));
+		ANativeWindow_release(native_win);
 		return nullptr;
 	}
+	// Console Five Pro fix (v0.0.8pro): AndroidGetNativeWindow() handed us a strong
+	// reference so the UI thread could not free the window mid-call; the Vulkan loader
+	// holds its own reference to the surface now, drop ours.
+	ANativeWindow_release(native_win);
 	return native_surface;
 #else
 	vk::SurfaceKHR::CType native_surface = VK_NULL_HANDLE;
