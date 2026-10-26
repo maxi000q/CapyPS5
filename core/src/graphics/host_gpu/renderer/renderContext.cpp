@@ -65,12 +65,7 @@ void RenderContext::StartFaultThread() {
 	if (m_fault_wakeup_fd < 0) {
 		return; // fall back to inline fault resolution
 	}
-	try {
-		m_fault_thread = std::thread(&RenderContext::FaultThreadMain, this);
-	} catch (...) {
-		::close(m_fault_wakeup_fd);
-		m_fault_wakeup_fd = -1;
-	}
+	m_fault_thread = std::thread(&RenderContext::FaultThreadMain, this);
 #endif
 }
 
