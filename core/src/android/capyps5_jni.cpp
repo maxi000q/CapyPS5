@@ -39,6 +39,7 @@ static JavaVM*            g_jvm           = nullptr;
 static ANativeWindow*     g_native_window = nullptr;
 static std::thread        g_emulator_thread;
 static std::atomic<bool>  g_is_running{false};
+static std::mutex         g_lifecycle_mutex;
 static std::string        g_files_dir;
 static std::string        g_cache_dir;
 static AndroidGpuDriver   g_gpu_driver;
@@ -102,6 +103,8 @@ JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeDestroySurface
 
 JNIEXPORT jboolean JNICALL Java_com_consolefivepro_NativeBridge_nativeStartGame(
     JNIEnv* env, jclass /*clazz*/, jstring gamePath, jstring elfPath) {
+	std::lock_guard lock(g_lifecycle_mutex);
+
 	if (g_is_running.load()) {
 		ALOGW("nativeStartGame: Emulator already running");
 		return JNI_FALSE;
@@ -137,6 +140,15 @@ JNIEXPORT jboolean JNICALL Java_com_consolefivepro_NativeBridge_nativeStartGame(
 	options.config.screen_width       = 1280;
 	options.config.screen_height      = 720;
 	options.config.fullscreen_enabled = true;
+
+	// Console Five Pro fix (v0.0.8pro): after a previous game finished on its own
+	// (Emulator::Run returned), the thread object is finished but still joinable, and
+	// assigning to a joinable std::thread calls std::terminate - so the second game
+	// launch from the same process killed the app. Join the finished run first; this
+	// never blocks, because g_is_running is false here.
+	if (g_emulator_thread.joinable()) {
+		g_emulator_thread.join();
+	}
 
 	g_is_running.store(true);
 	g_emulator_thread = std::thread([options]() {
@@ -198,6 +210,8 @@ JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSetGpuDriver(
 
 JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeStopGame(
     JNIEnv* /*env*/, jclass /*clazz*/) {
+	std::lock_guard lock(g_lifecycle_mutex);
+
 	if (!g_is_running.load()) {
 		return;
 	}
