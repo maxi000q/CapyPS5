@@ -275,8 +275,13 @@ void UpdateChecker::Download() {
 	connect(reply, &QNetworkReply::readyRead, this, [this, reply]() { ReadDownload(reply); });
 	connect(reply, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64) {
 		if (m_progress) {
-			m_progress->setValue(
-			    static_cast<int>(qMin<qint64>(99, received * 100 / m_release.size)));
+			// Console Five Pro fix (v0.0.8pro): an unknown release size (0) divided the
+			// progress computation by zero and killed the launcher with SIGFPE; show a
+			// busy 99% state instead.
+			const int percent = (m_release.size > 0
+			                          ? static_cast<int>(qMin<qint64>(99, received * 100 / m_release.size))
+			                          : 99);
+			m_progress->setValue(percent);
 		}
 	});
 	connect(reply, &QNetworkReply::finished, this, [this, reply]() {
