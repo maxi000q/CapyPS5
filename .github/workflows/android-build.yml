@@ -207,13 +207,18 @@ jobs:
           cat > /tmp/release_notes.md <<'NOTES'
           **Console Five Pro v0.0.9pro** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
 
-          ## New in v0.0.9pro — Mali GPU optimization, scrollable game options
+          ## New in v0.0.9pro — deep GPU optimization, scrollable game options
 
           - **Mali GPU optimization (Settings → Performance, Auto by default)**: on Mali GPUs (Mali-G76 class and newer) the emulator now detects the GPU at Vulkan device creation and applies bandwidth-tuned defaults — **with exactly the same graphics**:
             - **Hardware render-target clears**: pass clears now use Vulkan `loadOp CLEAR` instead of loading the previous contents and clearing inside the pass. On Mali, loading a render target forces an AFBC (Arm Frame Buffer Compression) decompress of data that is immediately overwritten; hardware clears are free and keep AFBC compression alive — far less memory traffic on a GPU family that is bandwidth-bound.
             - **128 MB streaming buffer** (up from 64 MB): the upload ring wraps half as often, so games that stream geometry and textures heavily wait on the GPU less.
             - **One more pipeline-compile worker**: Mali shader compiles are slower, so material warm-up finishes sooner and streaming games hitch less.
-          - The profile is per-game overridable like every core option, and non-Mali GPUs (Adreno, PowerVR, ...) keep the existing defaults untouched. The setting value names the detected GPU (e.g. "Auto · Mali-G76 MC4").
+          - The profile is per-game overridable like every core option, and the setting value names the detected GPU (e.g. "Auto · Mali-G76 MC4").
+          - **Deep performance pass for every GPU (same graphics, same pixels)**:
+            - **Render passes are no longer split by game events**: game partial-flush and cache-writeback events used to end the open render pass just to record a barrier. Unreal and Unity titles emit them after every batch and occlusion query — hundreds of times per frame — and on tile-based GPUs (Mali, Adreno) every split stores all render targets to memory and reloads them. The barrier now fires at the pass end with the same scope, so ordering is unchanged while the pass stays open.
+            - **Cache reclamation at a fixed cadence**: texture/buffer garbage collection ran after every completed guest submission (Unity titles complete ~590/s); it now runs at most every 8 ms, cutting CPU and mutex traffic on weak SoCs with identical memory behaviour.
+            - **More pipeline-compile workers**: 5 on 12+-core devices, 4 on 8+-core (was 4/3), plus the extra Mali worker — shader warm-up finishes sooner.
+            - **96 MB streaming ring on non-Mali GPUs** (was 64 MB): the upload ring wraps less often, so streaming-heavy games wait on the GPU less.
           - **The per-game options panel ("Choose options for this game") now scrolls**: on small screens the lower rows — save export / import, reset, Play — were cut off. The header and hint bar stay pinned, touch scrolling works, and gamepad focus brings the selected row into view.
 
           ## From v0.0.8proplus

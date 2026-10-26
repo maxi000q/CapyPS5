@@ -381,8 +381,21 @@ void RenderContext::RunGarbageCollector() {
 		m_buffer_cache.ProcessFaultBuffer();
 	}
 	m_texture_cache.ProcessDownloadImages();
-	m_texture_cache.RunGarbageCollector();
-	m_buffer_cache.RunGarbageCollector();
+	// v0.0.9pro: this runs at guest submission cadence - Unity and UE titles
+	// complete hundreds of small submissions per second (Castlevania ~590/s), and
+	// every call took both cache mutexes and queried device memory usage, usually
+	// to do nothing. Throttling the reclamation walk keeps the same memory
+	// behaviour (it still runs whenever usage exceeds the collection trigger)
+	// with far less CPU and mutex traffic on weak SoCs.
+	// `setprop debug.capy.gc_min_ms N` (0 = every call).
+	static Common::DebugFlags::CachedValue gc_min_ms("debug.capy.gc_min_ms", 8);
+	const auto   now    = std::chrono::steady_clock::now();
+	const int64_t min_us = gc_min_ms.Get() * 1000;
+	if (min_us <= 0 || now >= m_gc_next) {
+		m_gc_next = now + std::chrono::microseconds(min_us);
+		m_texture_cache.RunGarbageCollector();
+		m_buffer_cache.RunGarbageCollector();
+	}
 }
 
 void RenderContext::AddInterruptEq(LibKernel::EventQueue::KernelEqueue eq, int event_id) {

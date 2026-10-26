@@ -131,6 +131,9 @@ public:
 	void EmitGlobalBarrier();
 	// RELEASE_MEM barrier: inside a render pass it waits for the pass to end instead of ending it.
 	void EmitReleaseBarrier();
+	// v0.0.9pro: partial-flush / writeback event barrier - inside a render pass it
+	// waits for the pass to end instead of splitting it (tile-GPU bandwidth).
+	void EmitEventBarrier();
 	void TriggerEopEventAtEndOfPipe(uint32_t interrupt_context_id);
 	void DispatchDirect(uint32_t thread_group_x, uint32_t thread_group_y, uint32_t thread_group_z,
 	                    uint32_t mode);

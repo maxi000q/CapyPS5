@@ -585,7 +585,7 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
     : m_graphics(graphics), m_program_cache(std::make_unique<ProgramCache>(graphics.device)) {
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 	InitializeDriverCache();
-	// Background PSO compilation workers. Two on smaller SoCs, one more on 8+-core devices
+	// Background PSO compilation workers. Two on smaller SoCs, two more on 8+-core devices
 	// (Snapdragon 8/Dimensity class) and two more on 12+-core devices (big mid-range SoCs
 	// ship 4x A7x + 8x A5x), so shader warm-up during material streaming finishes sooner,
 	// while the emulated game threads keep at least eight cores to themselves.
@@ -595,7 +595,7 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	// streams new materials.
 	const uint32_t mali_extra = Common::GpuProfile::MaliProfileEnabled() ? 1 : 0;
 	const uint32_t worker_count =
-		std::min(5u, (host_cores >= 12 ? 4u : host_cores >= 8 ? 3u : 2u) + mali_extra);
+		std::min(6u, (host_cores >= 12 ? 5u : host_cores >= 8 ? 4u : 2u) + mali_extra);
 	for (uint32_t i = 0; i < worker_count; i++) {
 		m_async_workers.emplace_back([this] { AsyncWorker(); });
 	}

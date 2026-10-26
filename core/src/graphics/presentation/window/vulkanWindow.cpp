@@ -1299,7 +1299,8 @@ void WindowContext::CreateVulkan() {
 	if (Common::GpuProfile::MaliProfileEnabled()) {
 		Log::WriteToConsoleAndLog(fmt::format(
 			"GPU: {} - Mali performance profile enabled: hardware render-target clears "
-			"(AFBC-friendly), 128 MiB streaming buffer, +1 pipeline worker\n",
+			"(AFBC-friendly), 128 MiB streaming buffer, +1 pipeline worker, "
+			"pass-split-free event barriers\n",
 			device_properties.deviceName.data()));
 	}
 

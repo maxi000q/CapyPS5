@@ -51,9 +51,9 @@ constexpr uint64_t GdsBufferSize = 64 * 1024;
 // every frame and waits for the GPU (20 FPS); 128+ MiB reaches 30 FPS but breaks its floor and
 // distant buildings (cause unknown, see HANDOFF). `setprop debug.capy.stream_mb N` (read at start).
 uint64_t StreamBufferSize() {
-	// v0.0.9pro: the Mali profile defaults to 128 MiB - the ring wraps half as often,
+	// v0.0.9pro: the Mali profile defaults to 128 MiB and other GPUs to 96 MiB (was 64) -
 	// so streaming-heavy games wait on the GPU less. Explicit values still win.
-	const int64_t fallback = Common::GpuProfile::MaliProfileEnabled() ? 128 : 64;
+	const int64_t fallback = Common::GpuProfile::MaliProfileEnabled() ? 128 : 96;
 	Common::DebugFlags::CachedValue mb("debug.capy.stream_mb", fallback);
 	return static_cast<uint64_t>(std::clamp<int64_t>(mb.Get(), 16, 1024)) * MiB;
 }

@@ -1916,6 +1916,24 @@ void CommandProcessor::EmitGlobalBarrier() {
 	CurrentBuffer().Handle().pipelineBarrier2(dependency);
 }
 
+// v0.0.9pro: the partial-flush and writeback events below used to end the open render
+// pass for their barrier. UE titles emit them after every batch and occlusion query,
+// so the pass (with up to 8 render targets) split hundreds of times per frame, and
+// every split stores and reloads all attachments on tile-based GPUs (Mali, Adreno) -
+// exactly the bandwidth those GPUs lack. The barrier is still recorded with the same
+// full scope, it just fires at the pass end before any later work, exactly like
+// defer_release_barrier. `setprop debug.capy.defer_event_barrier 0` restores it.
+void CommandProcessor::EmitEventBarrier() {
+	if (CurrentBuffer().IsRendering()) {
+		static Common::DebugFlags::CachedValue defer("debug.capy.defer_event_barrier", 1);
+		if (defer.Get() != 0) {
+			CurrentBuffer().DeferGlobalBarrier();
+			return;
+		}
+	}
+	EmitGlobalBarrier();
+}
+
 // Partial flushes, cache writebacks and releases only order GPU work, which the renderer's
 // resource barriers (compute write hazards, draw write barriers, texture cache transitions)
 // already order; KytyPS5 dropped these global barriers (70668fb). Experimental here:
@@ -1969,7 +1987,7 @@ void CommandProcessor::TriggerEvent(uint32_t event_type, uint32_t event_index,
 		case 0x0000000f:
 		case 0x00000010:
 		case 0x00000026:
-			if (EventBarriers()) EmitGlobalBarrier();
+			if (EventBarriers()) EmitEventBarrier();
 			break;
 		// CbDbDataWritebackInvalidate, CbDataWritebackInvalidate.
 		case 0x00000016:
@@ -1978,7 +1996,7 @@ void CommandProcessor::TriggerEvent(uint32_t event_type, uint32_t event_index,
 		case 0x0000002a:
 		case 0x0000002c:
 		case 0x0000002e:
-			if (EventBarriers()) EmitGlobalBarrier();
+			if (EventBarriers()) EmitEventBarrier();
 			break;
 		case 0x0000000d:
 		case 0x0000000e:
@@ -2021,7 +2039,7 @@ void CommandProcessor::TriggerEvent(uint32_t event_type, uint32_t event_index,
 		}
 		default:
 			LOGF_COLOR(Log::Color::Yellow, "unknown event type: 0x%08" PRIx32 ", 0x%08" PRIx32 "\n", event_type, event_index);
-			EmitGlobalBarrier();
+			EmitEventBarrier();
 			break;
 	}
 }

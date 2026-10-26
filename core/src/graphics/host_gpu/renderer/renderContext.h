@@ -21,6 +21,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <shared_mutex>
@@ -92,6 +93,8 @@ private:
 	RangeSet                  m_mapped_ranges;
 	std::unique_ptr<GuestGpu> m_gpu;
 	VideoOut::VideoOutDriver* m_video_out = nullptr;
+	// v0.0.9pro: earliest allowed reclamation walk - see RunGarbageCollector().
+	std::chrono::steady_clock::time_point m_gc_next {};
 	bool                      m_fault_process_pending = false;
 	bool                      m_bda_logged = false;
 	bool                      m_bda_synced_once = false;

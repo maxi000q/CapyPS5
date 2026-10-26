@@ -255,7 +255,8 @@
     <string name="trophies_card_next">Por conseguir</string>
     <string name="whats_new_title">Lo nuevo en la v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Nuevo: optimización para GPU Mali (Ajustes → Rendimiento, Auto por defecto). En GPU Mali (clase Mali-G76 y posteriores) el emulador pasa a borrado por hardware que conserva la compresión AFBC de Arm, un búfer de streaming de 128 MB y un trabajador de compilación más — la misma imagen con mucho menos tráfico de memoria. Las demás GPU mantienen los valores actuales sin cambios.</item>
+        <item>Nuevo: optimización para GPU Mali (Ajustes → Rendimiento, Auto por defecto). En GPU Mali (clase Mali-G76 y posteriores) el emulador pasa a borrado por hardware que conserva la compresión AFBC de Arm, un búfer de streaming de 128 MB, un trabajador de compilación más y pases de render que los eventos del juego ya no dividen — la misma imagen con mucho menos tráfico de memoria.</item>
+        <item>Nuevo: pasada profunda de rendimiento para todas las GPU — misma imagen, mismos píxeles. Los eventos de parcial-flush y writeback del juego ya no dividen el pase de render abierto (su barrera se ejecuta al final del pase), eliminando cientos de ciclos de guardado+carga de los render targets por fotograma en GPU basadas en tiles (Mali, Adreno). La recolección de basura corre a ritmo fijo en vez de tras cada envío, la precarga de shaders tiene más trabajadores en dispositivos de 8+ núcleos y el anillo de streaming sube a 96 MB en GPU que no son Mali.</item>
         <item>Nuevo: el panel de opciones de cada juego («Elegir opciones para este juego») ahora se desplaza, así que exportar/importar partidas, restablecer y Jugar siempre son accesibles en pantallas pequeñas (y el foco del mando sigue las filas).</item>
     </string-array>
 </resources>
