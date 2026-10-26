@@ -13,6 +13,7 @@
 #include "common/assert.h"
 #include "common/common.h"
 #include "common/dateTime.h"
+#include "common/debugFlags.h"
 #include "common/emulatorConfig.h"
 #include "common/file.h"
 #include "common/hash.h"
@@ -506,10 +507,13 @@ int KYTY_SYSV_ABI KernelOpen(const char* path, int flags, uint16_t mode) {
 	if (!creat && !dir_exist && !file_exist) {
 		g_files->DeleteDescriptor(descriptor);
 #if defined(__ANDROID__)
-		static std::atomic<uint32_t> logged {0};
-		if (logged.fetch_add(1) < 200) {
-			__android_log_print(ANDROID_LOG_WARN, "CapyPS5-File", "open missing: %s", path);
+		// Console Five Pro fix (v0.0.6proplus): games retry the same missing files; report
+		// each path once instead of the first 200 opens verbatim.
+		uint64_t path_key = 0xcbf29ce484222325ull;
+		for (const char* p = path; p != nullptr && *p != '\0'; ++p) {
+			path_key = (path_key ^ static_cast<uint8_t>(*p)) * 0x100000001b3ull;
 		}
+		Common::DebugFlags::NoteOnce("CapyPS5-File", path_key, "open missing: %s", path);
 #endif
 		return KERNEL_ERROR_ENOENT;
 	}
