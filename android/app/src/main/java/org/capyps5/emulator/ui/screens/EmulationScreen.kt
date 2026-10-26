@@ -39,6 +39,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,6 +97,8 @@ fun EmulationScreen(
     var loadError by remember { mutableStateOf<String?>(null) }
     var gamepadConnected by remember { mutableStateOf(hasPhysicalGamepad()) }
     var snapshot by remember { mutableStateOf(PerfSnapshot()) }
+    // v0.0.6proplus: live render scale while adaptive resolution is active (0 = hidden).
+    var adaptiveScale by remember { mutableLongStateOf(0L) }
     val fpsHistory = remember { mutableStateListOf<Float>() }
     // Probing /sys and /sys/class/thermal costs ~130 file reads (see cpuThermalZones);
     // keep one monitor for the whole screen instead of rebuilding it on every overlay
@@ -145,6 +148,7 @@ fun EmulationScreen(
             .also { perfMonitor = it }
         val maxScale = settings.effectiveOption(game.titleId, CoreOption.ResolutionScale, game.isUnreal)
         var scale = maxScale
+        adaptiveScale = scale
         var belowFrames = 0
         var aboveFrames = 0
         while (isActive) {
@@ -164,10 +168,12 @@ fun EmulationScreen(
             if (belowFrames >= 4 && scale > 250L) {
                 scale = (scale - 125L).coerceAtLeast(250L)
                 NativeBridge.nativeSetOption(CoreOption.ResolutionScale.property, scale)
+                adaptiveScale = scale
                 belowFrames = 0
             } else if (aboveFrames >= 8 && scale < maxScale) {
                 scale = (scale + 125L).coerceAtMost(maxScale)
                 NativeBridge.nativeSetOption(CoreOption.ResolutionScale.property, scale)
+                adaptiveScale = scale
                 aboveFrames = 0
             }
         }
@@ -259,6 +265,7 @@ fun EmulationScreen(
             mode = settings.overlayMode,
             snapshot = snapshot,
             fpsHistory = fpsHistory,
+            adaptiveScale = if (settings.adaptiveResolution) adaptiveScale else 0L,
             modifier = Modifier.align(Alignment.TopStart).padding(10.dp),
         )
 

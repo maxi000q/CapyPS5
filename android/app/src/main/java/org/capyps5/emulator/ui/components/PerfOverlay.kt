@@ -48,7 +48,13 @@ private fun tempColor(c: Float?) = when {
 }
 
 @Composable
-fun PerfOverlay(mode: OverlayMode, snapshot: PerfSnapshot, fpsHistory: List<Float>, modifier: Modifier = Modifier) {
+fun PerfOverlay(
+    mode: OverlayMode,
+    snapshot: PerfSnapshot,
+    fpsHistory: List<Float>,
+    adaptiveScale: Long = 0L,
+    modifier: Modifier = Modifier,
+) {
     if (mode == OverlayMode.Off) return
     val mono = FontFamily.Monospace
     Column(
@@ -74,6 +80,10 @@ fun PerfOverlay(mode: OverlayMode, snapshot: PerfSnapshot, fpsHistory: List<Floa
                         if (snapshot.hostFps > 0f) {
                             withStyle(SpanStyle(color = Label)) { append("  host ") }
                             append("%.0f".format(snapshot.hostFps))
+                        }
+                        if (adaptiveScale > 0L) {
+                            withStyle(SpanStyle(color = Label)) { append("  scale ") }
+                            append("%d%%".format(adaptiveScale / 10))
                         }
                     }
                 },
