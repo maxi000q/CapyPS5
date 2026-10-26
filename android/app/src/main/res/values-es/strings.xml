@@ -211,10 +211,9 @@
     <string name="trophies_card_next">Por conseguir</string>
     <string name="whats_new_title">Lo nuevo en la v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Corrección de cierre: los juegos que colocan memoria en direcciones altas fijas (My First Gran Turismo en varios dispositivos) ya no terminan con estado 321 — la ventana del host que falta se adopta bajo demanda y una escritura huérfana se recupera en lugar de cerrar el emulador.</item>
-        <item>Funciona en los dispositivos más recientes: todas las librerías nativas se enlazan sin pila ejecutable y alineadas a páginas de 16 KB (requisito de Android 16 y del hardware de páginas de 16 KB), verificado automáticamente en cada compilación.</item>
-        <item>Nuevo ajuste — Resolución adaptativa: la escala de render baja cuando el juego no mantiene los FPS y se recupera cuando hay margen, en vivo y sin reiniciar (Ajustes → Rendimiento).</item>
-        <item>Rendimiento: los hilos de emulación y gráficos se fijan a los núcleos grandes en SoCs big.LITTLE, junto a sus prioridades (interruptor: debug.capy.perf_cores).</item>
-        <item>Higiene del logcat: los avisos de imports sin resolver y de archivos que faltan aparecen una vez por símbolo/ruta en vez de cientos de veces, y la línea de arranque del almacén de respaldo ya no imprime un errno caducado.</item>
+        <item>Nueva identidad: la app ahora es Console Five Pro con su propio nombre de paquete com.consolefivepro — instálala junto a cualquier versión anterior (sus partidas guardadas viven en una carpeta de datos nueva).</item>
+        <item>Nuevo ajuste — Modo de presentación: mantén el modo por defecto de baja latencia (Mailbox), o cambia al VSync clásico o a la presentación sin límite para la máxima tasa de imágenes (Ajustes → Rendimiento).</item>
+        <item>Rendimiento: los hilos de compilación de shaders en segundo plano ahora también usan los núcleos grandes, así que el calentamiento durante la carga de materiales termina antes y provoca menos tirones.</item>
+        <item>Rendimiento: los archivos del juego se abren con una pista de acceso secuencial que duplica la ventana de lectura anticipada del kernel — carga de recursos más fluida en almacenamiento lento y tarjetas SD.</item>
     </string-array>
 </resources>

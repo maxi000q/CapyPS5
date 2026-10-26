@@ -214,10 +214,9 @@
     <string name="trophies_card_next">Still to earn</string>
     <string name="whats_new_title">What\'s new in v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Crash fix: games that place memory at high fixed addresses (My First Gran Turismo on several devices) no longer terminate with status 321 — the missing host window is adopted on demand, and a stray guest write into it is recovered instead of closing the emulator.</item>
-        <item>Works on the newest devices: every native library is linked non-execstack and 16 KB-page aligned (required by Android 16 and 16 KB-page hardware), verified automatically on every build.</item>
-        <item>New setting — Adaptive resolution: the render scale steps down while the game cannot hold its frame rate and recovers when there is headroom, live, without restarting (Settings → Performance).</item>
-        <item>Performance: the emulation and graphics threads are pinned to the big cores on big.LITTLE SoCs, next to their priority boosts (toggle: debug.capy.perf_cores).</item>
-        <item>Logcat hygiene: unresolved-import and missing-file reports now appear once per symbol/path instead of hundreds of times, and the backing-store startup line no longer prints a stale errno.</item>
+        <item>New identity: the app is now Console Five Pro with its own package name com.consolefivepro — install it fresh alongside any older build (its saves live in a new data folder).</item>
+        <item>New setting — Present mode: keep the low-latency default (Mailbox), or switch to classic VSync or fully uncapped presenting for maximum frame rate (Settings → Performance).</item>
+        <item>Performance: background pipeline (shader) workers now run on the big cores too, so material streaming finishes warming-up sooner and causes fewer hitches.</item>
+        <item>Performance: game files are opened with a sequential-access hint, doubling the kernel read-ahead window — smoother asset streaming on slow storage and SD cards.</item>
     </string-array>
 </resources>
