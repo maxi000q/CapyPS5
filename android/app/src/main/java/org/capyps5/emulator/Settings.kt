@@ -122,6 +122,13 @@ enum class CoreOption(
         listOf(1L to R.string.enabled, 0L to R.string.disabled),
         1L,
     ),
+    PerfCores(
+        R.string.option_perf_cores,
+        R.string.option_perf_cores_desc,
+        "debug.capy.perf_cores",
+        listOf(1L to R.string.enabled, 0L to R.string.disabled),
+        1L,
+    ),
     ;
 
     fun title(context: Context) = context.getString(titleRes)
