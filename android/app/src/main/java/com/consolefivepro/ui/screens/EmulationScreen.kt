@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -64,6 +65,7 @@ import com.consolefivepro.GameSaves
 import com.consolefivepro.InputRouter
 import com.consolefivepro.NativeBridge
 import com.consolefivepro.OverlayMode
+import com.consolefivepro.ScreenAspect
 import com.consolefivepro.Settings
 import com.consolefivepro.TouchControlsMode
 import com.consolefivepro.model.GameItem
@@ -208,8 +210,16 @@ fun EmulationScreen(
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
+        // v0.0.8proplus: optional letterboxing. aspectRatio with the incoming max constraints
+        // picks the largest area with the chosen ratio, centered by align; Default fills the
+        // screen. The core re-creates its swapchain when the surface changes size.
+        val surfaceModifier = when (settings.screenAspect) {
+            ScreenAspect.Default -> Modifier.fillMaxSize()
+            ScreenAspect.R16_9 -> Modifier.align(Alignment.Center).aspectRatio(16f / 9f)
+            ScreenAspect.R5_4 -> Modifier.align(Alignment.Center).aspectRatio(5f / 4f)
+        }
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = surfaceModifier,
             factory = { ctx ->
                 SurfaceView(ctx).apply {
                     holder.addCallback(object : SurfaceHolder.Callback {

@@ -54,6 +54,7 @@ import com.consolefivepro.R
 import com.consolefivepro.CoreOption
 import com.consolefivepro.GameSaves
 import com.consolefivepro.OverlayMode
+import com.consolefivepro.ScreenAspect
 import com.consolefivepro.Settings
 import com.consolefivepro.TouchControlsMode
 import com.consolefivepro.ui.NavKey
@@ -174,7 +175,7 @@ fun SettingsScreen(
 
     val categories = remember(
         optionsVersion, settings.libraryPaths, message, driverMessage, settings.updateChecks,
-        settings.adaptiveResolution, settings.autoSave, savesMessage,
+        settings.adaptiveResolution, settings.autoSave, savesMessage, settings.screenAspect,
     ) {
         listOf(
             SettingsCategory(context.getString(R.string.category_graphics), Icons.Outlined.Image) {
@@ -190,6 +191,12 @@ fun SettingsScreen(
                         context.getString(R.string.ue_resolution_desc),
                         CoreOption.ResolutionScale.label(context, ueScale),
                         onStep = { settings.updateUeResolution(cycle(scales, ueScale, it)) },
+                    ),
+                    SettingItem(
+                        context.getString(R.string.screen_aspect),
+                        context.getString(R.string.screen_aspect_desc),
+                        settings.screenAspect.label(context),
+                        onStep = { settings.updateScreenAspect(cycle(ScreenAspect.entries, settings.screenAspect, it)) },
                     ),
                     SettingItem(
                         context.getString(R.string.gpu_driver),
@@ -399,7 +406,14 @@ fun SettingsScreen(
     }
     Row(Modifier.fillMaxSize().background(Capy.Background)) {
         Column(
-            Modifier.width(260.dp).fillMaxHeight().background(Capy.Surface).padding(vertical = 22.dp),
+            // Scrollable: with the system bars hidden and seven categories, small screens cut
+            // the list off around About (v0.0.8proplus) — now the column scrolls instead.
+            Modifier
+                .width(260.dp)
+                .fillMaxHeight()
+                .background(Capy.Surface)
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = 22.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             // The system bars are hidden, so touch users need their own way back.

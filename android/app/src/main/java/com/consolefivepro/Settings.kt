@@ -32,6 +32,13 @@ enum class ButtonLayout(@StringRes val labelRes: Int) {
     fun label(context: Context) = context.getString(labelRes)
 }
 
+/** Shape of the game image on screen; anything but Default letterboxes with black bars. */
+enum class ScreenAspect(@StringRes val labelRes: Int) {
+    Default(R.string.aspect_default), R16_9(R.string.aspect_16_9), R5_4(R.string.aspect_5_4);
+
+    fun label(context: Context) = context.getString(labelRes)
+}
+
 /**
  * Emulator core option, passed to the core as its debug.capy.* property before a game starts.
  * Each has a global value and an optional per-game override.
@@ -297,6 +304,18 @@ class Settings(context: Context) {
     fun updateAdaptiveResolution(value: Boolean) {
         adaptiveResolution = value
         prefs.edit().putBoolean("adaptive_resolution", value).apply()
+    }
+
+    /** v0.0.8proplus: shape of the game image (letterboxed unless Default). */
+    var screenAspect by mutableStateOf(
+        runCatching { ScreenAspect.valueOf(prefs.getString("screen_aspect", null)!!) }
+            .getOrDefault(ScreenAspect.Default)
+    )
+        private set
+
+    fun updateScreenAspect(value: ScreenAspect) {
+        screenAspect = value
+        prefs.edit().putString("screen_aspect", value.name).apply()
     }
 
     /** Periodic safety copies of the running game's save data (kept under filesDir). */
