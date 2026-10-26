@@ -133,7 +133,11 @@ struct StubbedImportRecord {
 };
 
 static std::vector<StubbedImportRecord> g_stubbed_imports;
-static std::atomic_uint32_t             g_unresolved_stub_call_log_count {0};
+// Console Five Pro fix (v0.0.8pro): modules relocate (registering stubs) while
+// guest threads already call unresolved-import thunks, so the registry is
+// shared mutable state and needs a lock.
+static Common::Mutex        g_stubbed_imports_mutex;
+static std::atomic_uint32_t g_unresolved_stub_call_log_count {0};
 static std::vector<uint64_t>            g_unresolved_stub_thunk_pages;
 static uint64_t                         g_unresolved_stub_thunk_offset = 0;
 static constexpr uint64_t               UNRESOLVED_STUB_PAGE_SIZE      = 4096;
@@ -187,6 +191,8 @@ static uint64_t AllocateUnresolvedImportThunk(uint64_t record_id) {
 
 static uint64_t RegisterStubbedImport(uint32_t index, const Program* program,
                                       const RelocationInfo& ri) {
+	Common::LockGuard lock(g_stubbed_imports_mutex);
+
 	for (const auto& record: g_stubbed_imports) {
 		if (record.patch_vaddr == ri.vaddr) {
 			return record.thunk_vaddr;
@@ -208,6 +214,7 @@ static uint64_t RegisterStubbedImport(uint32_t index, const Program* program,
 }
 
 static KYTY_SYSV_ABI uint64_t UnresolvedImportStub(uint64_t record_id) {
+	Common::LockGuard lock(g_stubbed_imports_mutex);
 	// Console Five Pro fix (v0.0.6proplus): some games poll an unresolved import in a tight
 	// loop (Mewgenics: 230+ calls into Mouse_v1 in four seconds). Report each symbol once
 	// and a running total instead of the first 1024 calls verbatim.
