@@ -101,9 +101,29 @@ class MainActivity : CapyActivity() {
             }
         }
         // `adb shell am start ... --es launch_elf <path> [--es launch_dir <dir>]` starts a game directly.
-        intent?.getStringExtra("launch_elf")?.takeIf { File(it).exists() }?.let { elf ->
-            val dir = File(intent.getStringExtra("launch_dir") ?: File(elf).parent ?: "")
-            GameActivity.launch(this, GameItem.fromGameDir(dir, File(elf)))
+        // The launcher activity is exported, so any app on the device could feed an arbitrary
+        // path into the native loader (v0.0.8pro): only files inside a user-chosen library
+        // folder are accepted now, and a launch_dir outside them is ignored.
+        intent?.getStringExtra("launch_elf")?.let { elfPath ->
+            val elf = File(elfPath)
+            val libraryRoots = settings.libraryPaths.mapNotNull { root ->
+                runCatching { File(root).canonicalFile }.getOrNull()
+            }
+            val canonicalElf = runCatching { elf.canonicalFile }.getOrNull()
+            fun insideLibrary(candidate: File?): Boolean =
+                candidate != null && libraryRoots.any { root ->
+                    candidate == root || candidate.path.startsWith(root.path + File.separator)
+                }
+            val requestedDir = intent.getStringExtra("launch_dir")?.let(::File)
+            val canonicalDir = runCatching { requestedDir?.canonicalFile }.getOrNull()
+            if (canonicalElf != null && canonicalElf.isFile && insideLibrary(canonicalElf)) {
+                val dir = when {
+                    canonicalDir != null && (insideLibrary(canonicalDir) ||
+                        canonicalDir == canonicalElf.parentFile) -> canonicalDir
+                    else -> canonicalElf.parentFile
+                } ?: return@let
+                GameActivity.launch(this, GameItem.fromGameDir(dir, canonicalElf))
+            }
         }
 
         setContent {
