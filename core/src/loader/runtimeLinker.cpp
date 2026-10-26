@@ -714,6 +714,13 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 		if (Libs::LibKernel::Memory::HandleGpuFault(access, info->access_violation_vaddr)) {
 			return true;
 		}
+		// Console Five Pro fix (v0.0.6proplus): a data fault from guest code on an unmapped
+		// window above the guest reservation (see Memory::AdoptFaultingGuestWindow) used to
+		// end the session; recover it instead.
+		if (access != GpuAccess::Execute && Cpu::GuestRipFromHostPc(info->exception_address) != 0 &&
+		    Libs::LibKernel::Memory::AdoptFaultingGuestWindow(info->access_violation_vaddr)) {
+			return true;
+		}
 	}
 	// Report whatever guest context can be read safely before terminating: which guest thread
 	// faulted, the register file, the faulting code bytes and the top of its stack.

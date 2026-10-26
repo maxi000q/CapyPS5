@@ -1050,6 +1050,43 @@ bool HandleGpuFault(Graphics::PageFaultAccess access, uint64_t fault_vaddr) noex
 	return g_gpu_resources != nullptr && g_gpu_resources->HandleFault(access, fault_vaddr);
 }
 
+bool AdoptFaultingGuestWindow(uint64_t fault_vaddr) noexcept {
+	// Console Five Pro fix (v0.0.6proplus): last-chance recovery for guest data faults in
+	// the band above HOST_USER_MAX. Games keep PS5-style pointers (0xe3ffffc000) that
+	// guest-address folding redirects onto host windows no startup reservation covers;
+	// when the matching map failed or was never made, the first touch terminated the
+	// emulator (status 321). Zero-fill the faulting guest page and let execution resume.
+#if defined(__ANDROID__) && defined(MAP_FIXED_NOREPLACE)
+	constexpr uint64_t GuestPage     = 0x4000;
+	constexpr uint64_t GuestVaCeiling = 1ull << 48u;
+	if (fault_vaddr < GuestPage || fault_vaddr > GuestVaCeiling - GuestPage) {
+		return false;
+	}
+	const uint64_t page = fault_vaddr & ~(GuestPage - 1u);
+	if (page <= HOST_USER_MAX) {
+		return false;
+	}
+	if (g_guest_address_space == nullptr || g_guest_address_space->Owns(page, GuestPage)) {
+		return false;
+	}
+	if (g_virtual_ranges != nullptr && g_virtual_ranges->HasOverlap(page, GuestPage)) {
+		return false;
+	}
+	void* ptr = mmap(reinterpret_cast<void*>(page), GuestPage, PROT_READ | PROT_WRITE,
+	                 MAP_PRIVATE | MAP_ANON | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+	if (ptr == MAP_FAILED || reinterpret_cast<uint64_t>(ptr) != page) {
+		return false;
+	}
+	Common::DebugFlags::NoteOnce("CapyPS5-Mem", page ^ 0x5a45524full,
+	                             "guest data fault recovered: adopted zero page 0x%llx",
+	                             static_cast<unsigned long long>(page));
+	return true;
+#else
+	(void)fault_vaddr;
+	return false;
+#endif
+}
+
 struct PrtAperture {
 	uint64_t address = 0;
 	uint64_t size    = 0;
