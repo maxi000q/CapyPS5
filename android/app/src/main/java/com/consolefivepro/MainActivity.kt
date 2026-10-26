@@ -152,13 +152,23 @@ class MainActivity : CapyActivity() {
                 }
                 Box(Modifier.fillMaxSize()) {
                     HomeScreen(
-                        games = games,
+                        // v0.0.9proQ1: LazyGrid keys crash the app on duplicates - the
+                        // library is deduped here no matter what produced the list.
+                        games = games.distinctBy { it.elfPath },
                         libraryPath = settings.libraryPath,
                         settings = settings,
                         versionText = versionText,
                         onGameSelected = { GameActivity.launch(this@MainActivity, it) },
                         onAddGameFile = { uriString ->
                             lifecycleScope.launch {
+                                // v0.0.9proQ1: one import at a time. A second pick while a
+                                // multi-GB copy is still running raced the first for the same
+                                // destination and could add a duplicate library entry - the
+                                // v0.0.9pro game-grid crash.
+                                if (importStatus != null) {
+                                    return@launch
+                                }
+                                importStatus = ""
                                 // A picked eboot can be hundreds of megabytes; the copy stays on
                                 // IO, is validated before any byte is written and reports progress
                                 // (v0.0.8proplus: package files are rejected up front instead of
@@ -177,7 +187,12 @@ class MainActivity : CapyActivity() {
                                         val picked = File(uriString)
                                         if (picked.isFile && hasGameExecutableMagic(picked)) picked
                                         else {
-                                            importReject = R.string.import_not_game
+                                            importReject =
+                                                if (picked.isFile && hasPackageMagic(picked)) {
+                                                    R.string.import_pkg_not_supported
+                                                } else {
+                                                    R.string.import_not_game
+                                                }
                                             null
                                         }
                                     }
@@ -196,8 +211,11 @@ class MainActivity : CapyActivity() {
                                         directoryPath = localFile.parent ?: filesDir.absolutePath,
                                         elfPath = localFile.absolutePath,
                                     )
-                                    games.add(newGame)
-                                    GameActivity.launch(this@MainActivity, newGame)
+                                    // The same executable picked twice (a retry after a
+                                    // crash) must not create a second entry with the same grid key.
+                                    val toLaunch = games.firstOrNull { it.elfPath == newGame.elfPath }
+                                        ?: newGame.also { games.add(it) }
+                                    GameActivity.launch(this@MainActivity, toLaunch)
                                 }
                             }
                         },
@@ -329,6 +347,25 @@ class MainActivity : CapyActivity() {
         return selfA || selfB
     }
 
+    /** True when [head] is a PS4/PS5 package header (0x7F "CNT") - the core cannot load those. */
+    private fun isPackageMagic(head: ByteArray, length: Int): Boolean =
+        length >= 4 && head[0] == 0x7f.toByte() && head[1] == 'C'.code.toByte() &&
+            head[2] == 'N'.code.toByte() && head[3] == 'T'.code.toByte()
+
+    /** True when [file] starts with the PS4/PS5 package magic (0x7F "CNT"). */
+    private fun hasPackageMagic(file: File): Boolean = runCatching {
+        java.io.FileInputStream(file).use { input ->
+            val head = ByteArray(4)
+            var len = 0
+            while (len < head.size) {
+                val n = input.read(head, len, head.size - len)
+                if (n < 0) break
+                len += n
+            }
+            isPackageMagic(head, len)
+        }
+    }.getOrDefault(false)
+
     /** True when [file] starts with a game-executable magic (the core's ELF/SELF idents). */
     private fun hasGameExecutableMagic(file: File): Boolean = runCatching {
         java.io.FileInputStream(file).use { input ->
@@ -394,7 +431,13 @@ class MainActivity : CapyActivity() {
                     headLen += n
                 }
                 if (!isGameExecutableMagic(head, headLen)) {
-                    importReject = R.string.import_not_game
+                    // A real .pkg is the most common wrong pick (multi-GB): say what to
+                    // import instead of a generic rejection - the core loads extracted games.
+                    importReject = if (isPackageMagic(head, headLen)) {
+                        R.string.import_pkg_not_supported
+                    } else {
+                        R.string.import_not_game
+                    }
                     return null
                 }
                 if (size > 0) {
@@ -410,7 +453,9 @@ class MainActivity : CapyActivity() {
                     if (headLen > 0) output.write(head, 0, headLen)
                     var done = headLen.toLong()
                     var nextSpaceCheck = 0L
-                    val buffer = ByteArray(64 * 1024)
+                    var lastPercent = -1
+                    // v0.0.9proQ1: a 1 MB buffer keeps the copy fast on flash storage.
+                    val buffer = ByteArray(1024 * 1024)
                     while (true) {
                         val n = input.read(buffer)
                         if (n < 0) break
@@ -426,7 +471,13 @@ class MainActivity : CapyActivity() {
                             }
                         }
                         if (size > 0) {
-                            onProgress(name, ((done * 100) / size).toInt().coerceIn(0, 100))
+                            // One redraw per percent, not per chunk: a 7 GB import used to
+                            // recompose the progress card over a hundred thousand times.
+                            val percent = ((done * 100) / size).toInt().coerceIn(0, 100)
+                            if (percent != lastPercent) {
+                                lastPercent = percent
+                                onProgress(name, percent)
+                            }
                         }
                     }
                 }
