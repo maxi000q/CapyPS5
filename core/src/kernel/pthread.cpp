@@ -1618,12 +1618,23 @@ Pthread PthreadPool::Create() {
 }
 
 void PthreadPool::FreeDetachedThreads() {
-	Common::LockGuard lock(m_mutex);
-
-	for (auto* p: m_threads) {
-		if (p->detached && p->almost_done && !p->free) {
-			PthreadJoin(p, nullptr);
+	// Console Five Pro fix (v0.0.8pro): the joins used to run under the pool mutex, so a
+	// detached thread that was slow to exit stalled every PthreadCreate until it did.
+	// Claim the reapable slots under the lock, then join them after releasing it; a
+	// claimed slot is never handed out by Create(), so the pool stays consistent while
+	// the join blocks.
+	std::vector<Pthread> reapable;
+	{
+		Common::LockGuard lock(m_mutex);
+		for (auto* p: m_threads) {
+			if (p->detached && p->almost_done && !p->free) {
+				p->almost_done = false; // claim: a second reaper must not join it again
+				reapable.push_back(p);
+			}
 		}
+	}
+	for (auto* p: reapable) {
+		PthreadJoin(p, nullptr);
 	}
 }
 
