@@ -60,6 +60,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import com.consolefivepro.CoreOption
+import com.consolefivepro.GameSaves
 import com.consolefivepro.InputRouter
 import com.consolefivepro.NativeBridge
 import com.consolefivepro.OverlayMode
@@ -78,6 +79,8 @@ import com.consolefivepro.ui.components.VirtualGamepad
 import com.consolefivepro.ui.theme.Capy
 import com.consolefivepro.R
 import androidx.compose.ui.res.stringResource
+
+private const val AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000L
 
 private fun hasPhysicalGamepad(): Boolean = InputDevice.getDeviceIds().any { id ->
     val device = InputDevice.getDevice(id) ?: return@any false
@@ -180,10 +183,28 @@ fun EmulationScreen(
         }
     }
 
+    // Console Five Pro (v0.0.8pro): safety copies of the running game's saves. The core
+    // writes them under filesDir/_SaveData; a crash mid-write or a corrupted game save
+    // would otherwise be unrecoverable, so a fresh copy is kept every few minutes.
+    var autoSaveNote by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(settings.autoSave, game.titleId) {
+        if (!settings.autoSave) return@LaunchedEffect
+        while (isActive) {
+            delay(AUTO_SAVE_INTERVAL_MS)
+            val note = withContext(Dispatchers.IO) { GameSaves.snapshot(context, game.titleId) }
+            if (note != null) autoSaveNote = note
+        }
+    }
+
     val showTouch = when (settings.touchControls) {
         TouchControlsMode.Always -> true
         TouchControlsMode.Never -> false
         TouchControlsMode.Auto -> !gamepadConnected
+    }
+
+    val exitWithBackup: () -> Unit = {
+        if (settings.autoSave) runCatching { GameSaves.snapshot(context, game.titleId) }
+        onExit()
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -273,13 +294,14 @@ fun EmulationScreen(
         AnimatedVisibility(visible = showPauseMenu && !showSettings && !showLayers, enter = fadeIn(), exit = fadeOut()) {
             PauseMenu(
                 game = game,
+                autoSaveNote = if (settings.autoSave) autoSaveNote else null,
                 onResume = { showPauseMenu = false },
                 onSettings = { showSettings = true },
                 onLayers = {
                     showPauseMenu = false
                     showLayers = true
                 },
-                onExit = onExit,
+                onExit = exitWithBackup,
             )
         }
 
@@ -297,7 +319,7 @@ fun EmulationScreen(
         }
 
         loadError?.let { message ->
-            ErrorCard(message, onExit)
+            ErrorCard(message, exitWithBackup)
         }
     }
 }
@@ -305,6 +327,7 @@ fun EmulationScreen(
 @Composable
 private fun PauseMenu(
     game: GameItem,
+    autoSaveNote: String?,
     onResume: () -> Unit,
     onSettings: () -> Unit,
     onLayers: () -> Unit,
@@ -357,6 +380,13 @@ private fun PauseMenu(
                         game.titleId,
                         game.version?.let { "v$it" },
                     ).joinToString("  ·  "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Capy.TextSecondary,
+                )
+            }
+            autoSaveNote?.let {
+                Text(
+                    stringResource(R.string.autosave_last, it),
                     style = MaterialTheme.typography.bodySmall,
                     color = Capy.TextSecondary,
                 )

@@ -299,6 +299,15 @@ class Settings(context: Context) {
         prefs.edit().putBoolean("adaptive_resolution", value).apply()
     }
 
+    /** Periodic safety copies of the running game's save data (kept under filesDir). */
+    var autoSave by mutableStateOf(prefs.getBoolean("auto_save", true))
+        private set
+
+    fun updateAutoSave(value: Boolean) {
+        autoSave = value
+        prefs.edit().putBoolean("auto_save", value).apply()
+    }
+
     /** Whether the launcher looks for a newer release on start. */
     var updateChecks by mutableStateOf(prefs.getBoolean("update_checks", true))
         private set

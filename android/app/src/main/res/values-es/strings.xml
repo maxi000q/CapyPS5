@@ -194,6 +194,12 @@
     <string name="update_failed">La descarga ha fallado. Comprueba tu conexión e inténtalo de nuevo.</string>
     <string name="update_permission">Permite a Console Five Pro instalar aplicaciones en la pantalla que se acaba de abrir y vuelve a pulsar Instalar.</string>
 
+    <!-- Game saves -->
+    <string name="category_saves">Partidas guardadas</string>
+    <string name="auto_save">Autoguardado</string>
+    <string name="auto_save_desc">Mantiene copias de seguridad de las partidas mientras juegas</string>
+    <string name="autosave_last">Autoguardado %1$s</string>
+
     <!-- Apoyo -->
     <string name="support_title">¿Te gusta Console Five Pro?</string>
     <string name="support_description">Console Five Pro es software gratuito hecho en tiempo libre. Únete a la comunidad en Discord para informar de juegos, pedir ayuda y seguir los avances.</string>

@@ -196,6 +196,12 @@
     <string name="update_failed">The download failed. Check your connection and try again.</string>
     <string name="update_permission">Allow Console Five Pro to install apps in the screen that just opened, then press Install.</string>
 
+    <!-- Game saves -->
+    <string name="category_saves">Game saves</string>
+    <string name="auto_save">Auto-save</string>
+    <string name="auto_save_desc">Keeps safety copies of the current game saves while playing</string>
+    <string name="autosave_last">Auto-saved %1$s</string>
+
     <!-- Support -->
     <string name="support_title">Enjoying Console Five Pro?</string>
     <string name="support_description">Console Five Pro is free software made in spare time. Join the community on Discord to report games, get help and follow progress.</string>

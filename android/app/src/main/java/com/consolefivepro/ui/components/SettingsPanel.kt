@@ -51,7 +51,7 @@ fun SettingsPanel(
     onPickLibrary: (() -> Unit)? = null,
 ) {
     var focused by remember { mutableIntStateOf(0) }
-    val rows = if (onPickLibrary != null) 4 else 3
+    val rows = if (onPickLibrary != null) 5 else 4
 
     fun <T> cycle(values: Array<T>, current: T, delta: Int): T =
         values[(values.indexOf(current) + delta).mod(values.size)]
@@ -60,6 +60,7 @@ fun SettingsPanel(
         0 -> settings.updateOverlayMode(cycle(OverlayMode.entries.toTypedArray(), settings.overlayMode, delta))
         1 -> settings.updateTouchControls(cycle(TouchControlsMode.entries.toTypedArray(), settings.touchControls, delta))
         2 -> settings.updateControlsOpacity((settings.controlsOpacity + delta * 0.1f).coerceIn(0.1f, 1f))
+        3 -> settings.updateAutoSave(!settings.autoSave)
         else -> Unit
     }
 
@@ -68,7 +69,7 @@ fun SettingsPanel(
             NavKey.Up -> focused = (focused - 1).mod(rows)
             NavKey.Down -> focused = (focused + 1).mod(rows)
             NavKey.Left -> adjust(focused, -1)
-            NavKey.Confirm -> if (focused == 3) onPickLibrary?.invoke() else adjust(focused, 1)
+            NavKey.Confirm -> if (focused == 4) onPickLibrary?.invoke() else adjust(focused, 1)
             NavKey.Right -> adjust(focused, 1)
             NavKey.Back, NavKey.Menu, NavKey.Secondary -> onClose()
             else -> Unit
@@ -120,8 +121,20 @@ fun SettingsPanel(
                 colors = SliderDefaults.colors(thumbColor = Capy.Accent, activeTrackColor = Capy.Accent),
             )
         }
+        SettingRow(stringResource(R.string.auto_save), stringResource(R.string.auto_save_desc), focused == 3) {
+            Segmented(
+                listOf(
+                    stringResource(R.string.enabled),
+                    stringResource(R.string.disabled),
+                ),
+                if (settings.autoSave) 0 else 1,
+            ) {
+                focused = 3
+                settings.updateAutoSave(it == 0)
+            }
+        }
         if (onPickLibrary != null) {
-            SettingRow(stringResource(R.string.category_folders), stringResource(R.string.folder_add_desc), focused == 3) {
+            SettingRow(stringResource(R.string.category_folders), stringResource(R.string.folder_add_desc), focused == 4) {
                 settings.libraryPaths.forEach { path ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
