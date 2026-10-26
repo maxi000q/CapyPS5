@@ -209,6 +209,24 @@
     <string name="saves_imported">%1$d juego(s) restaurados</string>
     <string name="saves_import_empty">El zip no contiene partidas</string>
     <string name="saves_import_failed">Error al importar las partidas</string>
+    <!-- v0.0.8proplus: partidas por juego, validación de importación, formato de pantalla -->
+    <string name="saves_game_export">Exportar partidas de este juego</string>
+    <string name="saves_game_export_desc">Escribe solo las partidas de este juego en un zip que eliges</string>
+    <string name="saves_game_import">Importar partidas para este juego</string>
+    <string name="saves_game_import_desc">Restaura las partidas de este juego desde su zip, reemplazándolas</string>
+    <string name="saves_game_imported">Las partidas del juego se restauraron</string>
+    <string name="saves_game_import_empty">El zip no contiene partidas de este juego</string>
+    <string name="saves_game_import_failed">Error al restaurar las partidas</string>
+    <string name="import_not_game">Ese archivo no es un ejecutable de juego. Elige el eboot.bin de la carpeta del juego; los paquetes .pkg deben extraerse antes en un PC.</string>
+    <string name="import_no_space">No hay espacio suficiente para importar este archivo.</string>
+    <string name="import_failed">Error al importar el archivo.</string>
+    <string name="importing_game">Importando %1$s…</string>
+    <string name="importing_progress">Importando %1$s… %2$d%%</string>
+    <string name="screen_aspect">Formato de pantalla</string>
+    <string name="screen_aspect_desc">Forma de la imagen del juego; otros formatos añaden barras negras</string>
+    <string name="aspect_default">Predeterminado (pantalla completa)</string>
+    <string name="aspect_16_9">16:9</string>
+    <string name="aspect_5_4">5:4</string>
 
     <!-- Apoyo -->
     <string name="support_title">¿Te gusta Console Five Pro?</string>
