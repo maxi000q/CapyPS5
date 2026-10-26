@@ -14,13 +14,17 @@ template <class T>
 class Singleton {
 public:
 	static T* Instance() {
-		if (!g_m_instance) {
+		// Console Five Pro fix (v0.0.8pro): the old check-then-construct race let
+		// two concurrent callers build two instances (one leaked, different
+		// pointers handed out). A function-local static is initialized exactly
+		// once by the C++11 thread-safe static initialization rules.
+		static T* const instance = []() {
 			// NOLINTNEXTLINE(cppcoreguidelines-no-malloc,hicpp-no-malloc)
-			g_m_instance = static_cast<T*>(std::malloc(sizeof(T)));
-			new (g_m_instance) T;
-		}
-
-		return g_m_instance;
+			auto* storage = static_cast<T*>(std::malloc(sizeof(T)));
+			new (storage) T;
+			return storage;
+		}();
+		return instance;
 	}
 
 	KYTY_CLASS_NO_COPY(Singleton);
@@ -28,9 +32,6 @@ public:
 protected:
 	Singleton();
 	~Singleton();
-
-private:
-	static inline T* g_m_instance = nullptr;
 };
 
 } // namespace Common
