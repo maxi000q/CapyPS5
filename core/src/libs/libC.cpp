@@ -6,6 +6,7 @@
 #include "common/assert.h"
 #include "common/common.h"
 #include "common/debugFlags.h"
+#include "common/hash.h"
 #include "common/logging/log.h"
 #include "cpu/cpuBackend.h"
 #include "common/singleton.h"
@@ -1079,17 +1080,20 @@ FILE* KYTY_SYSV_ABI fopen(const char* pathname, const char* mode) {
 	if (real_path.empty() && pathname[0] != '/') {
 		real_path = LibKernel::FileSystem::GetRealFilename(std::string("/") + pathname);
 	}
-	std::string target_str;
-	const char* target = nullptr;
-	if (!real_path.empty()) {
-		target_str = real_path.string();
-		target = target_str.c_str();
-		if (mode && (std::strchr(mode, 'w') != nullptr || std::strchr(mode, 'a') != nullptr)) {
-			std::error_code ec;
-			std::filesystem::create_directories(real_path.parent_path(), ec);
-		}
-	} else {
-		target = pathname;
+	if (real_path.empty()) {
+		// Console Five Pro fix (v0.0.8pro): a guest path that resolves to no mount point
+		// used to be opened on the host file system directly. It fails with ENOENT now,
+		// exactly like the kernel open path treats unmounted paths.
+		Common::DebugFlags::NoteOnce("CapyPS5-LibC", Common::hash(pathname, 512),
+		                            "fopen: unmatched guest path rejected: %s", pathname);
+		errno = ENOENT;
+		return nullptr;
+	}
+	std::string target_str = real_path.string();
+	const char* target     = target_str.c_str();
+	if (mode && (std::strchr(mode, 'w') != nullptr || std::strchr(mode, 'a') != nullptr)) {
+		std::error_code ec;
+		std::filesystem::create_directories(real_path.parent_path(), ec);
 	}
 	FILE* f = ::fopen(target, mode);
 #if defined(__ANDROID__)
