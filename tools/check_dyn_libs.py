@@ -1,10 +1,15 @@
 # SPDX-FileCopyrightText: Copyright 2026 CapyPS5 Project
 # SPDX-License-Identifier: GPL-2.0-only
 
-import os, re, struct
+import argparse
+import re
+import struct
 
-path = r"C:\Users\LeYJa\Downloads\Dead.Cells.PS5-DUPLEX\Dead.Cells.PS5-DUPLEX\PPSA15552-app0\eboot.bin"
-with open(path, 'rb') as f:
+parser = argparse.ArgumentParser(description="List the dynamic entries of a SELF/ELF eboot")
+parser.add_argument("eboot", help="path to the game's eboot.bin")
+args = parser.parse_args()
+
+with open(args.eboot, 'rb') as f:
     data = f.read()
 
 ehdr_pos = 32 + 12 * 32
