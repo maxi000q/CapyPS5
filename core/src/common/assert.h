@@ -35,16 +35,8 @@ void DbgExit(int status);
 
 #define EXIT_HALT() (Common::DbgExit(321), 1)
 
-#ifndef KYTY_FINAL
 #define EXIT_IF(x)                                                                                 \
 	((void)((x) && Common::DbgExitIfHandler(#x, __FILE__, __LINE__) != 0 && (EXIT_HALT(), 1) != 0))
-#else
-#define EXIT_IF(x)                                                                                 \
-	do {                                                                                           \
-		constexpr bool kyty_exit_if_disabled = false && (x);                                       \
-		(void)kyty_exit_if_disabled;                                                               \
-	} while (0)
-#endif
 
 #define EXIT(...)                                                                                  \
 	do {                                                                                           \
