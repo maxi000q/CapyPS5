@@ -9,3 +9,14 @@ ConsoleFivePro is an open-source research and educational project aimed at emula
 - **Trademark Notice:** "PlayStation", "PS5", and "Sony Interactive Entertainment" are registered trademarks of Sony Interactive Entertainment Inc. ConsoleFivePro is an independent project and is NOT affiliated with, authorized, maintained, sponsored, or endorsed by Sony or any of its affiliates.
 
 discord https://discord.gg/NQgP9JxtU3
+
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=maxi000q%2Fconsolefivepro&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=maxi000q/consolefivepro&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=maxi000q/consolefivepro&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=maxi000q/consolefivepro&type=date&legend=top-left" />
+ </picture>
+</a>
