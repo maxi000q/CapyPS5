@@ -59,6 +59,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import org.capyps5.emulator.CoreOption
 import org.capyps5.emulator.InputRouter
 import org.capyps5.emulator.NativeBridge
 import org.capyps5.emulator.OverlayMode
