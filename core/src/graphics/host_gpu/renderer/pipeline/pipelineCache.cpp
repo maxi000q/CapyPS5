@@ -17,6 +17,7 @@
 #include "common/file.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
+#include "common/perfCores.h"
 #include "common/threads.h"
 #include "graphics/guest_gpu/hardwareContext.h"
 #include "graphics/host_gpu/renderer/colorRenderTarget.h"
@@ -1283,6 +1284,14 @@ void PipelineCache::AsyncWorker() {
 	if (setpriority(PRIO_PROCESS, 0, 4) != 0) {
 		PipelineCacheLog("Vulkan pipeline cache: could not lower worker priority");
 	}
+#endif
+#if defined(__ANDROID__)
+	// Console Five Pro tweak (v0.0.7pro): the scheduler tends to park background-niced
+	// threads on the little cores entirely, which makes shader warm-up crawl exactly when
+	// the game streams new materials. Keep the workers on the big cores; their low nice
+	// value already yields to the game threads, so they only use spare big-core time
+	// (best effort, toggle debug.capy.perf_cores).
+	Common::PinToPerformanceCores("Pipeline worker");
 #endif
 	for (;;) {
 		std::shared_ptr<AsyncCompile> job;
