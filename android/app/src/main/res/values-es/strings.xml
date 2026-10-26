@@ -107,6 +107,8 @@
     <!-- Rendimiento -->
     <string name="perf_overlay">Monitor de rendimiento</string>
     <string name="perf_overlay_desc">FPS, CPU, GPU, RAM y temperaturas en pantalla</string>
+    <string name="adaptive_resolution">Resolución adaptativa</string>
+    <string name="adaptive_resolution_desc">Baja la escala de render cuando el juego no mantiene los FPS y la sube cuando hay margen. Se aplica sin reiniciar.</string>
     <string name="overlay_off">Desactivado</string>
     <string name="overlay_compact">Compacto</string>
     <string name="overlay_full">Completo</string>

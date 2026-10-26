@@ -109,6 +109,8 @@
     <!-- Performance -->
     <string name="perf_overlay">Performance monitor</string>
     <string name="perf_overlay_desc">FPS, CPU, GPU, RAM and temperatures on screen</string>
+    <string name="adaptive_resolution">Adaptive resolution</string>
+    <string name="adaptive_resolution_desc">Lower the render scale while the game cannot hold its frame rate and raise it back when there is headroom. Applies without restarting.</string>
     <string name="overlay_off">Off</string>
     <string name="overlay_compact">Compact</string>
     <string name="overlay_full">Full</string>

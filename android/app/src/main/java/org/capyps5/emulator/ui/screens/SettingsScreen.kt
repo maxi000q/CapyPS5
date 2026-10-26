@@ -126,7 +126,10 @@ fun SettingsScreen(
         )
     }
 
-    val categories = remember(optionsVersion, settings.libraryPaths, message, driverMessage, settings.updateChecks) {
+    val categories = remember(
+        optionsVersion, settings.libraryPaths, message, driverMessage, settings.updateChecks,
+        settings.adaptiveResolution,
+    ) {
         listOf(
             SettingsCategory(context.getString(R.string.category_graphics), Icons.Outlined.Image) {
                 val drivers = GpuDrivers.list(context)
@@ -184,6 +187,12 @@ fun SettingsScreen(
                         context.getString(R.string.perf_overlay), context.getString(R.string.perf_overlay_desc),
                         settings.overlayMode.label(context),
                         onStep = { settings.updateOverlayMode(cycle(OverlayMode.entries, settings.overlayMode, it)) },
+                    ),
+                    SettingItem(
+                        context.getString(R.string.adaptive_resolution),
+                        context.getString(R.string.adaptive_resolution_desc),
+                        context.getString(if (settings.adaptiveResolution) R.string.enabled else R.string.disabled),
+                        onStep = { settings.updateAdaptiveResolution(!settings.adaptiveResolution) },
                     ),
                 )
             },
