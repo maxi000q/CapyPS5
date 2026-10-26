@@ -253,13 +253,11 @@
     <string name="trophies_card_next">Still to earn</string>
     <string name="whats_new_title">What\'s new in v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Stability: a wave of hard crashes is fixed — malformed GPU packets, corrupted ELF/SELF images, bad cheat files and null config reads no longer close the emulator (status 321).</item>
-        <item>Fixed: games that reserve memory through the kernel memory pool (Unreal Engine titles, e.g. Enotria) no longer crash at boot with a LowLevelFatalError — pool memory now maps directly, exactly like on the console.</item>
-        <item>Stability: page faults are resolved on a dedicated fault thread, thread creation/join races are gone, and a stuck detached thread can no longer freeze new thread creation.</item>
-        <item>Data safety: writes larger than 4 GB are no longer dropped, and PthreadJoin reports EFAULT instead of crashing on a bad pointer.</item>
-        <item>New: auto-save — a snapshot of your in-game saves is taken every 5 minutes and when you exit (Settings → Game saves to turn it off).</item>
-        <item>New: import and export all game saves as a single zip (Settings → Game saves) — move your progress between devices.</item>
-        <item>Fixed: the Exit button in the pause menu now really exits on the second tap — touch users are no longer forced to use the gamepad Confirm key.</item>
-        <item>Android: detaching the view mid-frame can no longer crash the renderer (the native window hand-off is synchronized and reference-counted).</item>
+        <item>Fixed: custom Vulkan drivers (Turnip, PanVk) that lack optional features no longer fail at startup with status 321 — the emulator starts with reduced features instead of refusing to create the GPU device.</item>
+        <item>Fixed: picking a .pkg or other non-executable file no longer freezes the app for minutes — imports are validated up front and a card shows the progress.</item>
+        <item>New: Screen format setting (Default / 16:9 / 5:4) letterboxes the game image with black bars, applied live while playing (Settings → Graphics).</item>
+        <item>New: per-game save export and import from each game\'s options — no need to know which game a save belongs to.</item>
+        <item>Fixed: the Settings sidebar now scrolls on small screens, so the About entry is always reachable.</item>
+        <item>Clearer crash reports: when the game itself dereferences a null pointer, the report says so instead of showing a raw host exception.</item>
     </string-array>
 </resources>
