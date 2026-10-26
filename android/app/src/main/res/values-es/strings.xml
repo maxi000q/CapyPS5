@@ -223,10 +223,11 @@
     <string name="saves_game_import_empty">El zip no contiene partidas de este juego</string>
     <string name="saves_game_import_failed">Error al restaurar las partidas</string>
     <string name="import_not_game">Ese archivo no es un ejecutable de juego. Elige el eboot.bin de la carpeta del juego; los paquetes .pkg deben extraerse antes en un PC.</string>
-    <string name="import_no_space">No hay espacio suficiente para importar este archivo.</string>
+    <string name="import_no_space">No hay espacio libre suficiente en la carpeta de la biblioteca para importar este juego. Libera almacenamiento (los restos de importaciones fallidas se limpian automáticamente) e inténtalo de nuevo.</string>
     <string name="import_failed">Error al importar el archivo.</string>
     <string name="importing_game">Importando %1$s…</string>
     <string name="importing_progress">Importando %1$s… %2$d%%</string>
+    <string name="import_cleaned">Se liberaron %1$d GB de importaciones parciales que quedaron de intentos fallidos.</string>
     <string name="screen_aspect">Formato de pantalla</string>
     <string name="screen_aspect_desc">Forma de la imagen del juego; otros formatos añaden barras negras</string>
     <string name="aspect_default">Predeterminado (pantalla completa)</string>
@@ -255,6 +256,9 @@
     <string name="trophies_card_next">Por conseguir</string>
     <string name="whats_new_title">Lo nuevo en la v%1$s</string>
     <string-array name="whats_new_items">
+        <item>Corregido: importar un juego grande (un eboot de 7 GB) ya no consume 17+ GB de almacenamiento y falla con "no hay espacio". Las importaciones van a la carpeta de la biblioteca en vez del almacenamiento interno, un fallo borra su archivo parcial (las versiones anteriores dejaban restos de varios GB en cada intento — se limpian automáticamente al abrir), y el espacio libre se vuelve a comprobar durante la copia.</item>
+        <item>Nuevo: optimización de Mali mucho más profunda, misma imagen. Los render targets conservan la compresión sin pérdida AFBC de Arm (una lista de un solo formato en vez de una lista mutable abierta, que forzaba al driver a desactivar la compresión) — mucho menos tráfico de memoria por fotograma. Los juegos que reinterpretan la memoria hacen una copia única y siguen correctos. También beneficia a Adreno (UBWC).</item>
+        <item>Nuevo: los envíos de async-compute se agrupan como los de gráficos mientras haya trabajo en cola (menos vkQueueSubmit por fotograma), y la salida hace una copia 1:1 en vez de un escalado cuando el fotograma coincide con la pantalla.</item>
         <item>Nuevo: optimización para GPU Mali (Ajustes → Rendimiento, Auto por defecto). En GPU Mali (clase Mali-G76 y posteriores) el emulador pasa a borrado por hardware que conserva la compresión AFBC de Arm, un búfer de streaming de 128 MB, un trabajador de compilación más y pases de render que los eventos del juego ya no dividen — la misma imagen con mucho menos tráfico de memoria.</item>
         <item>Nuevo: pasada profunda de rendimiento para todas las GPU — misma imagen, mismos píxeles. Los eventos de parcial-flush y writeback del juego ya no dividen el pase de render abierto (su barrera se ejecuta al final del pase), eliminando cientos de ciclos de guardado+carga de los render targets por fotograma en GPU basadas en tiles (Mali, Adreno). La recolección de basura corre a ritmo fijo en vez de tras cada envío, la precarga de shaders tiene más trabajadores en dispositivos de 8+ núcleos y el anillo de streaming sube a 96 MB en GPU que no son Mali.</item>
         <item>Nuevo: el panel de opciones de cada juego («Elegir opciones para este juego») ahora se desplaza, así que exportar/importar partidas, restablecer y Jugar siempre son accesibles en pantallas pequeñas (y el foco del mando sigue las filas).</item>

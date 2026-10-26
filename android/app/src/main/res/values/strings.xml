@@ -225,10 +225,11 @@
     <string name="saves_game_import_empty">The zip contains no saves for this game</string>
     <string name="saves_game_import_failed">Restoring the saves failed</string>
     <string name="import_not_game">That file is not a game executable. Pick the game folder\'s eboot.bin — .pkg packages must be extracted on a PC first.</string>
-    <string name="import_no_space">Not enough storage space to import this file.</string>
+    <string name="import_no_space">Not enough free space in the library folder to import this game. Free up storage (leftover partial imports are cleaned automatically) and try again.</string>
     <string name="import_failed">Importing the file failed.</string>
     <string name="importing_game">Importing %1$s…</string>
     <string name="importing_progress">Importing %1$s… %2$d%%</string>
+    <string name="import_cleaned">Removed %1$d GB of leftover partial imports.</string>
     <string name="screen_aspect">Screen format</string>
     <string name="screen_aspect_desc">Shape of the game image; other formats add black bars</string>
     <string name="aspect_default">Default (full screen)</string>
@@ -258,6 +259,9 @@
     <string name="trophies_card_next">Still to earn</string>
     <string name="whats_new_title">What\'s new in v%1$s</string>
     <string-array name="whats_new_items">
+        <item>Fixed: importing a large game (a 7 GB eboot) no longer eats 17+ GB of storage and fails with "not enough space". Imports now land in the library folder instead of internal storage, a failed import deletes its partial file (older versions left a multi-GB leftover behind on every retry — left overs are cleaned automatically on start), and free space is re-checked while copying.</item>
+        <item>New: much deeper Mali optimization, same graphics. Render targets now keep Arm's AFBC lossless compression alive (a single-format view list instead of an open-ended mutable format list, which had forced the driver to disable compression) — far less memory traffic per frame. Games that reinterpret target memory get a one-time copy and stay correct. Also benefits Adreno (UBWC).</item>
+        <item>New: async-compute submissions are batched like graphics ones while more work is queued (fewer vkQueueSubmit per frame), and the output stage takes a 1:1 copy instead of a scaled blit when the frame matches the screen exactly.</item>
         <item>New: Mali GPU optimization (Settings → Performance, Auto by default). On Mali GPUs (Mali-G76 class and newer) the emulator switches to hardware render-target clears that keep Arm\'s AFBC compression alive, a 128 MB streaming buffer, one more pipeline-compile worker and render passes that are no longer split by game events — the same graphics with far less memory traffic.</item>
         <item>New: deep performance pass for every GPU — same graphics, same pixels. Game partial-flush and writeback events no longer split the open render pass (their barrier now fires at the pass end), removing hundreds of full render-target store+reload cycles per frame on tile-based GPUs (Mali, Adreno). Cache reclamation runs at a fixed cadence instead of after every submission, shader warm-up gets more compile workers on 8+-core devices, and the streaming ring grows to 96 MB on non-Mali GPUs.</item>
         <item>New: the per-game options panel ("Choose options for this game") now scrolls, so save export / import, reset and Play are always reachable on small screens (and gamepad focus follows the rows).</item>

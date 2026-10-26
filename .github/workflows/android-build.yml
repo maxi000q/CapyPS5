@@ -205,21 +205,19 @@ jobs:
           VERSION="$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)"
           TAG="${GITHUB_REF_NAME}"
           cat > /tmp/release_notes.md <<'NOTES'
-          **Console Five Pro v0.0.9pro** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
+          **Console Five Pro v0.0.9proQ1** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
 
-          ## New in v0.0.9pro — deep GPU optimization, scrollable game options
+          ## v0.0.9proQ1 — storage fix + much deeper GPU optimization (same graphics)
 
-          - **Mali GPU optimization (Settings → Performance, Auto by default)**: on Mali GPUs (Mali-G76 class and newer) the emulator now detects the GPU at Vulkan device creation and applies bandwidth-tuned defaults — **with exactly the same graphics**:
-            - **Hardware render-target clears**: pass clears now use Vulkan `loadOp CLEAR` instead of loading the previous contents and clearing inside the pass. On Mali, loading a render target forces an AFBC (Arm Frame Buffer Compression) decompress of data that is immediately overwritten; hardware clears are free and keep AFBC compression alive — far less memory traffic on a GPU family that is bandwidth-bound.
-            - **128 MB streaming buffer** (up from 64 MB): the upload ring wraps half as often, so games that stream geometry and textures heavily wait on the GPU less.
-            - **One more pipeline-compile worker**: Mali shader compiles are slower, so material warm-up finishes sooner and streaming games hitch less.
-          - The profile is per-game overridable like every core option, and the setting value names the detected GPU (e.g. "Auto · Mali-G76 MC4").
-          - **Deep performance pass for every GPU (same graphics, same pixels)**:
-            - **Render passes are no longer split by game events**: game partial-flush and cache-writeback events used to end the open render pass just to record a barrier. Unreal and Unity titles emit them after every batch and occlusion query — hundreds of times per frame — and on tile-based GPUs (Mali, Adreno) every split stores all render targets to memory and reloads them. The barrier now fires at the pass end with the same scope, so ordering is unchanged while the pass stays open.
-            - **Cache reclamation at a fixed cadence**: texture/buffer garbage collection ran after every completed guest submission (Unity titles complete ~590/s); it now runs at most every 8 ms, cutting CPU and mutex traffic on weak SoCs with identical memory behaviour.
-            - **More pipeline-compile workers**: 5 on 12+-core devices, 4 on 8+-core (was 4/3), plus the extra Mali worker — shader warm-up finishes sooner.
-            - **96 MB streaming ring on non-Mali GPUs** (was 64 MB): the upload ring wraps less often, so streaming-heavy games wait on the GPU less.
-          - **The per-game options panel ("Choose options for this game") now scrolls**: on small screens the lower rows — save export / import, reset, Play — were cut off. The header and hint bar stay pinned, touch scrolling works, and gamepad focus brings the selected row into view.
+          - **Fixed: large game imports no longer eat the whole disk.** Importing a 7 GB eboot used to copy into internal storage (while the library lives on shared storage), leave a partial multi-GB file behind on every failed retry, and skip the space check entirely when the file provider reported no size — so a 7 GB game "needed" 17+ GB and then failed with "not enough space". Imports now land in the library's own `imported` folder, are staged as `.part` and published by rename (a half-written file can never be booted), every failure deletes its partial file, leftovers from older versions are swept automatically on start, and free space is verified up front and re-checked every 256 MB while copying.
+          - **Deeper Mali optimization — AFBC stays alive on render targets (the big one).** Every colour render target was created with an open-ended mutable-format list, which forces Mali drivers to disable AFBC (Arm Frame Buffer Compression) — the lossless compressor that halves render-target memory traffic. Targets are now created with a single-format view list so AFBC (and UBWC on Adreno) stays active. Games that reinterpret target memory (writing RGBA16F and reading it back as R32G32, the classic post-processing pattern) trigger a one-time in-place recreation with the contents copied — pixel-identical, no corruption — and that memory is remembered so its images are created fully mutable from then on. On a bandwidth-bound Mali this is the single largest same-graphics win available; combined with v0.0.9pro's pass and barrier work it targets another large FPS step on Mali-G76-class devices.
+          - **Async-compute batching.** Unity and Unreal titles interleave many small async-compute batches with graphics; each one used to end the command buffer (one `vkQueueSubmit` per batch). Compute now follows the same drain policy as graphics: while more work is queued, recording continues in the same command buffer. Explicit sync points (EOP events, flips, waits) still flush immediately. Fewer submissions per frame = less driver and kernel overhead on every GPU.
+          - **1:1 present path.** When the game's frame already matches the screen exactly (native resolution, 100% scale), the output stage takes a plain `vkCmdCopyImage` instead of a sampler-driven scaled blit — cheaper on every GPU, identical pixels.
+          - All of it is same-graphics: AFBC/UBWC are lossless, and every new path is guarded by debug properties (`debug.capy.rt_format_list`, `debug.capy.batch_submits`) that restore the previous behaviour.
+
+          ## From v0.0.9pro
+
+          Mali GPU optimization with GPU detection (hardware render-target clears that keep AFBC alive, 128 MB streaming buffer, one more pipeline-compile worker), render passes no longer split by game events (hundreds fewer full render-target store+reload cycles per frame on tile-based GPUs), cache reclamation at a fixed cadence, more pipeline-compile workers, 96 MB streaming ring on non-Mali GPUs, scrollable per-game options panel.
 
           ## From v0.0.8proplus
 
@@ -242,7 +240,7 @@ jobs:
           - Upstream **CapyPS5 v0.0.3** by Ghael-V; this project is an independent rebranded build of it.
           - KytyPS5 and the original Kyty by InoriRus, and the FEX project.
 
-          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.9pro)
+          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.9proQ1)
           NOTES
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets."
