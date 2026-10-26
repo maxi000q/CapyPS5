@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -72,33 +73,42 @@ bool LoadPlan(const std::filesystem::path& path, Plan* plan, std::string* error)
 		return Fail(error, "could not read cheat file");
 	}
 
-	const auto root = Json::parse(file, nullptr, false);
-	if (!root.is_object() || !root.contains("id") || !root.contains("version") ||
-	    !root.contains("process") || !root.contains("mods")) {
-		return Fail(error, "expected a GoldHEN-style mods JSON file");
-	}
-	plan->title_id = root["id"].get<std::string>();
-	plan->version  = root["version"].get<std::string>();
-	plan->process  = root["process"].get<std::string>();
+	// Console Five Pro fix (v0.0.8pro): every get<std::string>() and std::stoull below
+	// throws on a malformed value and used to abort the whole emulator process; a
+	// broken cheat file is now just a load error.
+	try {
+		const auto root = Json::parse(file, nullptr, false);
+		if (!root.is_object() || !root.contains("id") || !root.contains("version") ||
+		    !root.contains("process") || !root.contains("mods")) {
+			return Fail(error, "expected a GoldHEN-style mods JSON file");
+		}
+		plan->title_id = root["id"].get<std::string>();
+		plan->version  = root["version"].get<std::string>();
+		plan->process  = root["process"].get<std::string>();
 
-	for (const auto& mod: root["mods"]) {
-		if (!mod.value("enabled", true)) {
-			continue;
-		}
-		const auto name = mod["name"].get<std::string>();
-		plan->mod_names.push_back(name);
-		for (const auto& entry: mod["memory"]) {
-			Write write;
-			write.source_address = std::stoull(entry["offset"].get<std::string>(), nullptr, 16);
-			if (!ParseBytes(entry["off"].get<std::string>(), &write.off) ||
-			    !ParseBytes(entry["on"].get<std::string>(), &write.on) ||
-			    write.off.size() != write.on.size()) {
-				return Fail(error, "invalid mod memory bytes");
+		for (const auto& mod: root["mods"]) {
+			if (!mod.value("enabled", true)) {
+				continue;
 			}
-			plan->writes.push_back(std::move(write));
+			const auto name = mod["name"].get<std::string>();
+			plan->mod_names.push_back(name);
+			for (const auto& entry: mod["memory"]) {
+				Write write;
+				write.source_address = std::stoull(entry["offset"].get<std::string>(), nullptr, 16);
+				if (!ParseBytes(entry["off"].get<std::string>(), &write.off) ||
+				    !ParseBytes(entry["on"].get<std::string>(), &write.on) ||
+				    write.off.size() != write.on.size()) {
+					return Fail(error, "invalid mod memory bytes");
+				}
+				plan->writes.push_back(std::move(write));
+			}
 		}
+		return true;
+	} catch (const std::exception& e) {
+		return Fail(error, std::string("malformed cheat file: ") + e.what());
+	} catch (...) {
+		return Fail(error, "malformed cheat file");
 	}
-	return true;
 }
 
 bool ValidateGame(const Plan& plan, const Program* main_program, std::string* error) {

@@ -237,7 +237,10 @@ void Psf::OpenJson(const std::filesystem::path& file_name) {
 
 	if (auto kernel = param_json.find("kernel");
 	    kernel != param_json.end() && kernel->is_object()) {
-		if (auto it = kernel->find("flexibleMemorySize"); it != kernel->end()) {
+		// Console Five Pro fix (v0.0.8pro): get<uint64_t> throws on a non-number value;
+		// only read it when the JSON actually holds an unsigned number.
+		if (auto it = kernel->find("flexibleMemorySize");
+		    it != kernel->end() && it->is_number_unsigned()) {
 			m_flexible_memory_size = it->get<uint64_t>();
 		}
 	}
