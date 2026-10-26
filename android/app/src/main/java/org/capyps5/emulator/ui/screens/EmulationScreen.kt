@@ -42,6 +42,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -129,6 +130,46 @@ fun EmulationScreen(
             fpsHistory.add(sample.fps)
             if (fpsHistory.size > 60) fpsHistory.removeAt(0)
             delay(500)
+        }
+    }
+
+    // Console Five Pro (v0.0.6proplus): adaptive resolution. Sustained frame drops step
+    // the render scale down (never below 250 per mille); sustained headroom steps it back
+    // up to the scale the game started with. The core picks option changes up within
+    // ~250 ms (see Common::DebugFlags::CachedValue), so no restart is needed. The
+    // thresholds skip 30-fps-capped games: they sit between 26 and 54 and never trigger.
+    val menusOpenForAdaptive = rememberUpdatedState(uiHasInput)
+    LaunchedEffect(settings.adaptiveResolution, game.titleId) {
+        if (!settings.adaptiveResolution) return@LaunchedEffect
+        val monitor = perfMonitor ?: withContext(Dispatchers.IO) { PerfMonitor(context) }
+            .also { perfMonitor = it }
+        val maxScale = settings.effectiveOption(game.titleId, CoreOption.ResolutionScale, game.isUnreal)
+        var scale = maxScale
+        var belowFrames = 0
+        var aboveFrames = 0
+        while (isActive) {
+            delay(1000)
+            if (menusOpenForAdaptive.value) {
+                belowFrames = 0
+                aboveFrames = 0
+                continue
+            }
+            val fps = withContext(Dispatchers.IO) { monitor.sample() }.fps
+            if (fps <= 0f) continue
+            when {
+                fps < 26f -> { belowFrames++; aboveFrames = 0 }
+                fps > 54f -> { aboveFrames++; belowFrames = 0 }
+                else -> { belowFrames = 0; aboveFrames = 0 }
+            }
+            if (belowFrames >= 4 && scale > 250L) {
+                scale = (scale - 125L).coerceAtLeast(250L)
+                NativeBridge.nativeSetOption(CoreOption.ResolutionScale.property, scale)
+                belowFrames = 0
+            } else if (aboveFrames >= 8 && scale < maxScale) {
+                scale = (scale + 125L).coerceAtMost(maxScale)
+                NativeBridge.nativeSetOption(CoreOption.ResolutionScale.property, scale)
+                aboveFrames = 0
+            }
         }
     }
 

@@ -256,6 +256,15 @@ class Settings(context: Context) {
         gameOption(titleId, option)
             ?: if (unreal && option == CoreOption.ResolutionScale) ueResolution() else coreOption(option)
 
+    /** v0.0.6proplus: lower the render scale under sustained frame drops, recover on headroom. */
+    var adaptiveResolution by mutableStateOf(prefs.getBoolean("adaptive_resolution", false))
+        private set
+
+    fun updateAdaptiveResolution(value: Boolean) {
+        adaptiveResolution = value
+        prefs.edit().putBoolean("adaptive_resolution", value).apply()
+    }
+
     /** Whether the launcher looks for a newer release on start. */
     var updateChecks by mutableStateOf(prefs.getBoolean("update_checks", true))
         private set
