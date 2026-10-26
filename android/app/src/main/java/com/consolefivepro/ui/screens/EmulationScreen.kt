@@ -324,7 +324,7 @@ private fun PauseMenu(
         ),
         Triple(
             stringResource(R.string.exit), Icons.AutoMirrored.Outlined.Logout,
-            { confirmingExit = true },
+            { if (confirmingExit) onExit() else confirmingExit = true },
         ),
     )
     var focused by remember { mutableIntStateOf(0) }
@@ -332,10 +332,8 @@ private fun PauseMenu(
         when (key) {
             NavKey.Left -> focused = (focused - 1).mod(entries.size)
             NavKey.Right -> focused = (focused + 1).mod(entries.size)
-            NavKey.Confirm ->
-                if (confirmingExit) onExit()
-                else entries[focused].third()
-            NavKey.Back, NavKey.Menu -> onResume()
+            NavKey.Confirm -> entries[focused].third()
+            NavKey.Back, NavKey.Menu -> if (confirmingExit) confirmingExit = false else onResume()
             else -> Unit
         }
     }
