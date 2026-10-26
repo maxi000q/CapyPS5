@@ -93,7 +93,12 @@ public:
 		m_fd = static_cast<int>(syscall(SYS_memfd_create, "KytyDirectMemory", 0));
 #endif
 #if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
-		__android_log_print(ANDROID_LOG_INFO, "CapyPS5-Core", "GuestBackingStore: m_size=%llu MB, m_fd=%d, errno=%d", (unsigned long long)(m_size / 1024 / 1024), m_fd, errno);
+		// Console Five Pro fix (v0.0.6proplus): errno is only meaningful after a failure;
+		// a stale value from an earlier syscall made healthy creations (m_fd=102, errno=2)
+		// look errored. The failure path below reports the real errno.
+		if (m_fd >= 0) {
+			__android_log_print(ANDROID_LOG_INFO, "CapyPS5-Core", "GuestBackingStore: m_size=%llu MB, m_fd=%d", (unsigned long long)(m_size / 1024 / 1024), m_fd);
+		}
 #endif
 		if (m_fd < 0) {
 #if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
