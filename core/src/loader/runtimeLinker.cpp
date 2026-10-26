@@ -208,31 +208,26 @@ static uint64_t RegisterStubbedImport(uint32_t index, const Program* program,
 }
 
 static KYTY_SYSV_ABI uint64_t UnresolvedImportStub(uint64_t record_id) {
+	// Console Five Pro fix (v0.0.6proplus): some games poll an unresolved import in a tight
+	// loop (Mewgenics: 230+ calls into Mouse_v1 in four seconds). Report each symbol once
+	// and a running total instead of the first 1024 calls verbatim.
 	const auto log_index = g_unresolved_stub_call_log_count.fetch_add(1);
-	if (log_index < 1024) {
-		if (record_id < g_stubbed_imports.size()) {
-			const auto& record = g_stubbed_imports[record_id];
+	if (record_id < g_stubbed_imports.size()) {
+		const auto& record = g_stubbed_imports[record_id];
+		Common::DebugFlags::NoteOnce("CapyPS5-Core", 0x554e5253ull ^ record_id,
+		                             "unresolved import stub: %s (%s) returns 0",
+		                             record.name.c_str(), record.program.c_str());
+		if ((log_index & 0xffffu) == 0xffffu) {
 #if defined(__ANDROID__)
 			__android_log_print(ANDROID_LOG_WARN, "CapyPS5-Core",
-			                    "Unresolved import stub called [%u]: symbol=%s (record_id=%llu)",
-			                    log_index, record.name.c_str(), static_cast<unsigned long long>(record_id));
+			                    "unresolved import stubs: %llu calls so far",
+			                    static_cast<unsigned long long>(log_index + 1));
 #endif
-			printf("Unresolved import stub called: %s\n", record.name.c_str());
-			LOGF("Unresolved import stub called [%u]: patch_vaddr=0x%016" PRIx64
-			     " jmprela_index=%" PRIu32 " symbol=%s type=%s bind=%s program=%s\n",
-			     log_index, record.patch_vaddr, record.index, record.name.c_str(),
-			     magic_enum::enum_name(record.type), magic_enum::enum_name(record.bind),
-			     record.program.c_str());
-		} else {
-#if defined(__ANDROID__)
-			__android_log_print(ANDROID_LOG_WARN, "CapyPS5-Core",
-			                    "Unresolved import stub called [%u]: record_id=%llu <bad-record>",
-			                    log_index, static_cast<unsigned long long>(record_id));
-#endif
-			printf("Unresolved import stub called: <bad-record>\n");
-			LOGF("Unresolved import stub called [%u]: record_id=%" PRIu64 " symbol=<bad-record>\n",
-			     log_index, record_id);
 		}
+	} else {
+		Common::DebugFlags::NoteOnce("CapyPS5-Core", 0x554e5242ull,
+		                             "unresolved import stub: <bad-record %llu>",
+		                             static_cast<unsigned long long>(record_id));
 	}
 	return 0;
 }
