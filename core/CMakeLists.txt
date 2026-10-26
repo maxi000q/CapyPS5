@@ -56,6 +56,10 @@ endif()
 if(ANDROID)
 	# Enable C++20 jthread and stop_token in LLVM libc++
 	add_compile_definitions(_LIBCPP_ENABLE_EXPERIMENTAL)
+	# Console Five Pro fix (v0.0.6proplus): Android 16 denies execstack (avc denied in
+	# logcat); nothing executes from the stack - the JIT writes anonymous code pages - so
+	# pin PT_GNU_STACK to NX for every library linked from this tree.
+	add_link_options(-Wl,-z,noexecstack)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
