@@ -12,6 +12,6 @@ for t in /proc/19167/task/*; do
 done
 """
 
-p = subprocess.run(['adb', '-s', '282f344c', 'shell', f"run-as org.capyps5.emulator.debug sh -c '{sh_code}'"], capture_output=True, text=True)
+p = subprocess.run(['adb', '-s', '282f344c', 'shell', f"run-as com.consolefivepro.debug sh -c '{sh_code}'"], capture_output=True, text=True)
 print(p.stdout)
 print(p.stderr)

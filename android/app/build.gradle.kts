@@ -8,11 +8,11 @@ plugins {
 }
 
 android {
-    namespace = "org.capyps5.emulator"
+    namespace = "com.consolefivepro"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "org.consolefivepro.emulator"
+        applicationId = "com.consolefivepro"
         minSdk = 31
         targetSdk = 34
         versionCode = 8
