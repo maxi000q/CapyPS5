@@ -63,6 +63,10 @@ class MainActivity : CapyActivity() {
     private var storageCheck by mutableIntStateOf(0)
     // Fatal report the last game session left behind, shown once when the launcher returns.
     private var lastError by mutableStateOf<String?>(null)
+    // Text of the card shown while a picked executable is being copied into the app (v0.0.8proplus).
+    private var importStatus by mutableStateOf<String?>(null)
+    // Rejection reason of the last import attempt (a string resource), toasted to the user.
+    private var importReject: Int? = null
     // Newer release found at start, and whether this launch shows the support card.
     private var update by mutableStateOf<Release?>(null)
     private var showSupport by mutableStateOf(false)
@@ -145,16 +149,37 @@ class MainActivity : CapyActivity() {
                         onGameSelected = { GameActivity.launch(this@MainActivity, it) },
                         onAddGameFile = { uriString ->
                             lifecycleScope.launch {
-                                // Content-resolver reads of a picked eboot can be large;
-                                // keep them off the main thread, then launch the game.
+                                // A picked eboot can be hundreds of megabytes; the copy stays on
+                                // IO, is validated before any byte is written and reports progress
+                                // (v0.0.8proplus: package files are rejected up front instead of
+                                // being copied for minutes and then failing to boot).
                                 val localFile = withContext(Dispatchers.IO) {
+                                    importReject = null
                                     if (uriString.startsWith("content://")) {
-                                        copyUriToLocal(android.net.Uri.parse(uriString))
+                                        copyUriToLocal(android.net.Uri.parse(uriString)) { name, percent ->
+                                            importStatus = when {
+                                                name == null -> null
+                                                percent < 0 -> getString(R.string.importing_game, name)
+                                                else -> getString(R.string.importing_progress, name, percent)
+                                            }
+                                        }
                                     } else {
-                                        File(uriString)
+                                        val picked = File(uriString)
+                                        if (picked.isFile && hasGameExecutableMagic(picked)) picked
+                                        else {
+                                            importReject = R.string.import_not_game
+                                            null
+                                        }
                                     }
                                 }
-                                if (localFile != null && localFile.exists()) {
+                                importStatus = null
+                                if (localFile == null) {
+                                    android.widget.Toast.makeText(
+                                        this@MainActivity,
+                                        importReject ?: R.string.import_failed,
+                                        android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                } else {
                                     val newGame = GameItem(
                                         titleId = "LOCAL",
                                         titleName = localFile.name,
@@ -174,8 +199,27 @@ class MainActivity : CapyActivity() {
                         onClearShaderCache = ::clearShaderCache,
                         onSaveLog = ::saveLog,
                         onCheckUpdate = ::checkUpdateNow,
-                        overlayActive = lastError != null || showWhatsNew || update != null || showSupport,
+                        overlayActive = lastError != null || showWhatsNew || update != null || showSupport ||
+                            importStatus != null,
                     )
+                    // Copy-in-progress card: the picked executable is being imported.
+                    importStatus?.let { status ->
+                        Box(
+                            Modifier.fillMaxSize().background(Capy.Scrim),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .background(Capy.Surface, RoundedCornerShape(16.dp))
+                                    .padding(horizontal = 32.dp, vertical = 26.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                androidx.compose.material3.CircularProgressIndicator(color = Capy.Accent)
+                                Text(status, style = MaterialTheme.typography.titleMedium, color = Capy.TextPrimary)
+                            }
+                        }
+                    }
                     // One notice at a time: the crash report, what's new, an update, the support card.
                     val report = lastError
                     val pending = update
@@ -262,21 +306,95 @@ class MainActivity : CapyActivity() {
         }
     }
 
-    private fun copyUriToLocal(uri: android.net.Uri): File? = try {
+    /** True when the first bytes of [head] are a PlayStation executable image (ELF64 or SELF). */
+    private fun isGameExecutableMagic(head: ByteArray, length: Int): Boolean {
+        if (length < 4) return false
+        val elf = head[0] == 0x7f.toByte() && head[1] == 'E'.code.toByte() &&
+            head[2] == 'L'.code.toByte() && head[3] == 'F'.code.toByte()
+        if (elf) return length < 5 || head[4] == 2.toByte()
+        val selfA = head[0] == 0x4f.toByte() && head[1] == 0x15.toByte() &&
+            head[2] == 0x3d.toByte() && head[3] == 0x1d.toByte()
+        val selfB = head[0] == 0x54.toByte() && head[1] == 0x14.toByte() &&
+            head[2] == 0xf5.toByte() && head[3] == 0xee.toByte()
+        return selfA || selfB
+    }
+
+    /** True when [file] starts with a game-executable magic (the core's ELF/SELF idents). */
+    private fun hasGameExecutableMagic(file: File): Boolean = runCatching {
+        java.io.FileInputStream(file).use { input ->
+            val head = ByteArray(16)
+            var len = 0
+            while (len < head.size) {
+                val n = input.read(head, len, head.size - len)
+                if (n < 0) break
+                len += n
+            }
+            isGameExecutableMagic(head, len)
+        }
+    }.getOrDefault(false)
+
+    /**
+     * Copies a picked document into filesDir/imported. The file must really be a game
+     * executable (ELF/SELF magic): a picked .pkg used to be copied for minutes and then
+     * failed to boot, so anything else is rejected before a byte is written. Space is
+     * checked when the provider reports a size, and [onProgress] receives the display
+     * name plus the percent (or -1 when unknown) for the import card.
+     */
+    private fun copyUriToLocal(uri: android.net.Uri, onProgress: (String?, Int) -> Unit): File? = try {
         var name = "eboot.bin"
+        var size = -1L
         contentResolver.query(uri, null, null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) {
-                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (idx != -1) cursor.getString(idx)?.let { name = it }
+                cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME).let { idx ->
+                    if (idx != -1) cursor.getString(idx)?.let { name = it }
+                }
+                cursor.getColumnIndex(android.provider.OpenableColumns.SIZE).let { idx ->
+                    if (idx != -1 && !cursor.isNull(idx)) size = cursor.getLong(idx)
+                }
             }
         }
         val targetDir = File(filesDir, "imported").apply { mkdirs() }
         val targetFile = File(targetDir, name)
         contentResolver.openInputStream(uri)?.use { input ->
-            targetFile.outputStream().use { output -> input.copyTo(output) }
+            val head = ByteArray(16)
+            var headLen = 0
+            while (headLen < head.size) {
+                val n = input.read(head, headLen, head.size - headLen)
+                if (n < 0) break
+                headLen += n
+            }
+            if (!isGameExecutableMagic(head, headLen)) {
+                importReject = R.string.import_not_game
+                return null
+            }
+            if (size > 0) {
+                val free = android.os.StatFs(filesDir.absolutePath).availableBytes
+                if (size > free - 64L * 1024 * 1024) {
+                    importReject = R.string.import_no_space
+                    return null
+                }
+            }
+            onProgress(name, if (size > 0) 0 else -1)
+            targetFile.outputStream().use { output ->
+                if (headLen > 0) output.write(head, 0, headLen)
+                if (size > 0) {
+                    var done = headLen.toLong()
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        output.write(buffer, 0, n)
+                        done += n
+                        onProgress(name, ((done * 100) / size).toInt().coerceIn(0, 100))
+                    }
+                } else {
+                    input.copyTo(output, 64 * 1024)
+                }
+            }
         }
         targetFile
     } catch (_: Exception) {
+        importReject = R.string.import_failed
         null
     }
 }
