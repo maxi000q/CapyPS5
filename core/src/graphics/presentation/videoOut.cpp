@@ -1500,9 +1500,17 @@ KYTY_SYSV_ABI int VideoOutRegisterBuffers2(int handle, int set_index, int buffer
 	     attribute->aspect_ratio, attribute->width, attribute->height, attribute->pitch_in_pixel,
 	     attribute->option, category);
 #if defined(__ANDROID__)
-	__android_log_print(ANDROID_LOG_WARN, "CapyPS5-VideoOut", "RegisterBuffers2 set=%d n=%d %ux%u fmt=0x%llx",
-	                    set_index, buffer_num, attribute->width, attribute->height,
-	                    static_cast<unsigned long long>(attribute->pixel_format));
+	// Console Five Pro (v0.0.6proplus): each video configuration registers a handful of
+	// times; report each distinct one once instead of on every call.
+	Common::DebugFlags::NoteOnce(
+	    "CapyPS5-VideoOut",
+	    (static_cast<uint64_t>(set_index) << 48u) ^
+	        (static_cast<uint64_t>(attribute->width) << 32u) ^
+	        (static_cast<uint64_t>(attribute->height) << 16u) ^
+	        static_cast<uint64_t>(buffer_num) ^ attribute->pixel_format,
+	    "RegisterBuffers2 set=%d n=%d %ux%u fmt=0x%llx",
+	    set_index, buffer_num, attribute->width, attribute->height,
+	    static_cast<unsigned long long>(attribute->pixel_format));
 #endif
 
 	if (option != nullptr) {
