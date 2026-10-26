@@ -206,11 +206,10 @@
     <string name="trophies_card_next">Por conseguir</string>
     <string name="whats_new_title">Lo nuevo en la v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Ajuste del hilo de presentación: el hilo de vblank ahora tiene nombre, pide prioridad por encima del hilo de GPU y divide la espera en trozos de 4 ms en lugar de una sola pausa larga — entrega de frames más fluida.</item>
-        <item>La caché de pipelines también se guarda tras 250 pipelines nuevos: si el juego se cierra durante el calentamiento de shaders, se pierde mucho menos trabajo compilado.</item>
-        <item>Nuevo ajuste — Búfer de streaming (64–256 MB): ayuda a los juegos que llenan el anillo cada fotograma (clase Asterix XXL2); por juego y global, en Ajustes → Rendimiento.</item>
-        <item>Corrección del actualizador: los sufijos de versión ahora se comparan bien (v0.0.5pro &lt; v0.0.5proplus &lt; v0.0.5 a secas) — sin esto, esta actualización nunca se habría ofrecido a los dispositivos con 0.0.5pro.</item>
-        <item>Superposición de rendimiento: lectura de FPS suavizada (sin saltos de frames enteros) y menos basura por muestra.</item>
-        <item>Limpieza: 374 líneas de código muerto comentado eliminadas en 26 archivos, incluido un bloque #if 0 de 199 líneas — consulta el historial para los más de 60 cambios.</item>
+        <item>Corrección de cierre: los juegos que colocan memoria en direcciones altas fijas (My First Gran Turismo en varios dispositivos) ya no terminan con estado 321 — la ventana del host que falta se adopta bajo demanda y una escritura huérfana se recupera en lugar de cerrar el emulador.</item>
+        <item>Funciona en los dispositivos más recientes: todas las librerías nativas se enlazan sin pila ejecutable y alineadas a páginas de 16 KB (requisito de Android 16 y del hardware de páginas de 16 KB), verificado automáticamente en cada compilación.</item>
+        <item>Nuevo ajuste — Resolución adaptativa: la escala de render baja cuando el juego no mantiene los FPS y se recupera cuando hay margen, en vivo y sin reiniciar (Ajustes → Rendimiento).</item>
+        <item>Rendimiento: los hilos de emulación y gráficos se fijan a los núcleos grandes en SoCs big.LITTLE, junto a sus prioridades (interruptor: debug.capy.perf_cores).</item>
+        <item>Higiene del logcat: los avisos de imports sin resolver y de archivos que faltan aparecen una vez por símbolo/ruta en vez de cientos de veces, y la línea de arranque del almacén de respaldo ya no imprime un errno caducado.</item>
     </string-array>
 </resources>

@@ -209,11 +209,10 @@
     <string name="trophies_card_next">Still to earn</string>
     <string name="whats_new_title">What\'s new in v%1$s</string>
     <string-array name="whats_new_items">
-        <item>Present thread tuning: the vblank thread is now named, requests priority above the GPU thread, and paces frames in 4 ms slices instead of one long sleep — smoother frame delivery.</item>
-        <item>The pipeline cache now also flushes after 250 new pipelines, so a crash during shader warm-up loses far less compiled work.</item>
-        <item>New setting — Streaming buffer (64–256 MB): helps titles that fill the ring every frame (Asterix XXL2 class); per-game and global, in Settings → Performance.</item>
-        <item>Updater fix: version suffixes now compare correctly (v0.0.5pro &lt; v0.0.5proplus &lt; a plain v0.0.5) — without it, this update would never have been offered to 0.0.5pro devices.</item>
-        <item>Perf overlay: smoothed FPS readout (no more whole-frame jumps) and less garbage per sample.</item>
-        <item>Cleanup: 374 lines of commented-out dead code removed across 26 files, including a 199-line #if 0 block — see the commit history for all 60+ changes.</item>
+        <item>Crash fix: games that place memory at high fixed addresses (My First Gran Turismo on several devices) no longer terminate with status 321 — the missing host window is adopted on demand, and a stray guest write into it is recovered instead of closing the emulator.</item>
+        <item>Works on the newest devices: every native library is linked non-execstack and 16 KB-page aligned (required by Android 16 and 16 KB-page hardware), verified automatically on every build.</item>
+        <item>New setting — Adaptive resolution: the render scale steps down while the game cannot hold its frame rate and recovers when there is headroom, live, without restarting (Settings → Performance).</item>
+        <item>Performance: the emulation and graphics threads are pinned to the big cores on big.LITTLE SoCs, next to their priority boosts (toggle: debug.capy.perf_cores).</item>
+        <item>Logcat hygiene: unresolved-import and missing-file reports now appear once per symbol/path instead of hundreds of times, and the backing-store startup line no longer prints a stale errno.</item>
     </string-array>
 </resources>
