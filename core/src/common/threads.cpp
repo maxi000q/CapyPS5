@@ -36,23 +36,36 @@ constexpr DWORD KYTY_CS_SPIN_COUNT = 4000;
 #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
 #endif
 
+// Console Five Pro fix (v0.0.8pro): the thread_local timer HANDLE was never closed, so
+// every host thread leaked one kernel waitable-timer object. The wrapper closes it when
+// the thread exits; the fallback timer (for systems without the high-resolution flag)
+// goes through the same path instead of leaking a second handle.
+struct HighResolutionTimer {
+	HANDLE handle = CreateWaitableTimerExW(
+	    nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+
+	~HighResolutionTimer() {
+		if (handle != nullptr) {
+			CloseHandle(handle);
+		}
+	}
+};
+
 static void SleepHighResolution100ns(uint64_t units_100ns) {
 	if (units_100ns == 0) {
 		return;
 	}
 
-	thread_local HANDLE timer = CreateWaitableTimerExW(
-	    nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-	if (timer == nullptr) {
-		thread_local HANDLE fallback_timer = CreateWaitableTimerW(nullptr, TRUE, nullptr);
-		timer                              = fallback_timer;
+	thread_local HighResolutionTimer timer;
+	if (timer.handle == nullptr) {
+		timer.handle = CreateWaitableTimerW(nullptr, TRUE, nullptr);
 	}
 
-	if (timer != nullptr) {
+	if (timer.handle != nullptr) {
 		LARGE_INTEGER due_time {};
 		due_time.QuadPart = -static_cast<LONGLONG>(units_100ns);
-		if (SetWaitableTimerEx(timer, &due_time, 0, nullptr, nullptr, nullptr, 0) != 0) {
-			WaitForSingleObject(timer, INFINITE);
+		if (SetWaitableTimerEx(timer.handle, &due_time, 0, nullptr, nullptr, nullptr, 0) != 0) {
+			WaitForSingleObject(timer.handle, INFINITE);
 			return;
 		}
 	}
@@ -172,6 +185,12 @@ struct ThreadPrivate {
 		t->unique_id = Thread::GetThreadIdUnique();
 		t->started   = true;
 		t->func(t->arg);
+		// Console Five Pro fix (v0.0.8pro): publish completion, then free the state when
+		// the destructor (or Detach) handed ownership over - see ~Thread().
+		t->finished = true;
+		if (t->auto_delete) {
+			delete t;
+		}
 	}
 
 	thread_func_t    func;
@@ -200,13 +219,31 @@ Thread::Thread(thread_func_t func, void* arg)
 }
 
 Thread::~Thread() {
-	EXIT_IF(!m_thread->finished && !m_thread->auto_delete);
-
-	m_thread.reset();
+	// Console Five Pro fix (v0.0.8pro): destroying a still-running Thread used to EXIT()
+	// and kill the whole emulator, and the Detach path freed ThreadPrivate while the
+	// runner could still be inside Run(). Ownership of a live ThreadPrivate now passes to
+	// the runner (it self-deletes in Run() once auto_delete is set); the destructor only
+	// frees state for an already-joined thread. The worst outcome of a torn handoff is a
+	// small leak of an exiting thread's state - never a crash, never a termination.
+	if (m_thread->auto_delete) {
+		m_thread.release(); // the runner self-deletes in Run()
+		return;
+	}
+	if (m_thread->finished || !m_thread->m_thread.joinable()) {
+		m_thread.reset(); // joined via Join(): the runner has already exited
+		return;
+	}
+	m_thread->auto_delete = true;
+	m_thread->m_thread.detach();
+	m_thread.release(); // handed over to the runner
 }
 
 void Thread::Join() {
-	EXIT_IF(m_thread->finished || m_thread->auto_delete);
+	// Console Five Pro fix (v0.0.8pro): joining twice (or after a detach) used to EXIT();
+	// treat it as a no-op instead of killing the emulator.
+	if (m_thread->finished || m_thread->auto_delete) {
+		return;
+	}
 
 	m_thread->m_thread.join();
 
@@ -214,7 +251,9 @@ void Thread::Join() {
 }
 
 void Thread::Detach() {
-	EXIT_IF(m_thread->finished || m_thread->auto_delete);
+	if (m_thread->finished || m_thread->auto_delete) {
+		return;
+	}
 
 	m_thread->auto_delete = true;
 	m_thread->m_thread.detach();
