@@ -1276,12 +1276,18 @@ void RuntimeLinker::RelocateAll() {
 void RuntimeLinker::RelocateProgram(Program* program) {
 	Common::LockGuard lock(m_mutex);
 
-	EXIT_IF(program == nullptr);
-	EXIT_IF(std::find(m_programs.begin(), m_programs.end(), program) == m_programs.end());
+	// Console Five Pro fix (v0.0.8pro): an unknown or double-used handle used to
+	// abort the whole emulator through EXIT_IF; reject it and keep running.
+	if (program == nullptr ||
+	    std::find(m_programs.begin(), m_programs.end(), program) == m_programs.end()) {
+		LOGF("RelocateProgram: refusing unknown program %p\n", static_cast<void*>(program));
+		return;
+	}
 
 	RelocateAll();
 	if (!GamePatch::ApplyPending(program)) {
-		EXIT("Failed to apply pending game cheat\n");
+		// A failed cheat write is a cheat problem, not a reason to kill the game.
+		LOGF("RelocateProgram: failed to apply pending game cheat\n");
 	}
 }
 
@@ -1290,15 +1296,26 @@ void RuntimeLinker::UnloadProgram(Program* program) {
 	Common::LockGuard lock(m_mutex);
 
 	auto it = std::find(m_programs.begin(), m_programs.end(), program);
-	EXIT_IF(it == m_programs.end());
+	if (it == m_programs.end()) {
+		// Console Five Pro fix (v0.0.8pro): double unloads and unknown handles
+		// terminated the process through EXIT_IF; ignore them instead.
+		LOGF("UnloadProgram: program %p is not loaded\n", static_cast<void*>(program));
+		return;
+	}
 	m_programs.erase(it);
 
 	for (auto* importer: m_programs) {
+		if (importer->dynamic_info == nullptr || importer->rela_bits.empty()) {
+			continue;
+		}
 		const auto& info = *importer->dynamic_info;
 		const auto rela_count =
 		    static_cast<uint32_t>(info.rela_table_total_size / sizeof(Elf64_Rela));
 		ForEachRelocation(importer, [&](Elf64_Rela* r, uint32_t index, bool jmprela) {
 			const auto bit_index = (jmprela ? rela_count : 0) + index;
+			if ((bit_index >> 3u) >= importer->rela_bits.size()) {
+				return;
+			}
 			auto&      bits      = importer->rela_bits[bit_index >> 3u];
 			const auto mask      = 1u << (bit_index & 7u);
 			const auto type      = r->GetType();
@@ -1329,7 +1346,8 @@ void RuntimeLinker::UnloadProgram(Program* program) {
 				default: return;
 			}
 			const std::string name = BoundedStr(info.str_table, info.str_table_size, symbol.st_name);
-			if (program->export_symbols->FindByNid(name.substr(0, name.find('#')), symbol_type,
+			if (program->export_symbols != nullptr &&
+			    program->export_symbols->FindByNid(name.substr(0, name.find('#')), symbol_type,
 			                                       address) != nullptr) {
 				bits &= ~mask;
 				if (RelocateRecord(index, r, importer, jmprela)) {
@@ -1471,7 +1489,8 @@ void RuntimeLinker::Execute(const std::filesystem::path& game_patch) {
 	// DT_PREINIT_ARRAY, which the PS4 dynamic linker runs before anything else. PS5 modules are
 	// left as they were.
 	const auto run_preinit = [](Program* program) {
-		if (program == nullptr || program->elf == nullptr || program->elf->IsNextGen()) {
+		if (program == nullptr || program->elf == nullptr || program->elf->IsNextGen() ||
+		    program->dynamic_info == nullptr) {
 			return;
 		}
 		const auto& info = *program->dynamic_info;
@@ -1490,12 +1509,14 @@ void RuntimeLinker::Execute(const std::filesystem::path& game_patch) {
 		}
 	};
 	run_preinit(libc);
-	if (libc != nullptr && libc->dynamic_info->init_vaddr != 0) {
+	if (libc != nullptr && libc->dynamic_info != nullptr &&
+	    libc->dynamic_info->init_vaddr != 0) {
 		StartModule(libc, 0, nullptr, nullptr);
 	}
 	for (auto* module: shipped_modules) {
 		run_preinit(module);
-		if (module != nullptr && module->dynamic_info->init_vaddr != 0) {
+		if (module != nullptr && module->dynamic_info != nullptr &&
+		    module->dynamic_info->init_vaddr != 0) {
 			StartModule(module, 0, nullptr, nullptr);
 		}
 	}
