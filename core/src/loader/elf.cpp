@@ -252,6 +252,15 @@ void Elf64::LoadSegment(uint64_t vaddr, uint64_t file_offset, uint64_t size) {
 			if ((seg.type & 0x800u) != 0) {
 				auto phdr_id = ((seg.type >> 20u) & 0xFFFu);
 
+				// Console Five Pro fix (v0.0.8pro): the segment header names a program-header
+				// index; reject anything outside the table instead of reading it.
+				if (phdr_id >= m_ehdr->e_phnum) {
+					LOGF("SELF segment %u references phdr %u, but the ELF has %" PRIu16
+					     " program headers\n",
+					     i, phdr_id, m_ehdr->e_phnum);
+					continue;
+				}
+
 				const auto& phdr = m_phdr[phdr_id];
 
 				if (file_offset >= phdr.p_offset && file_offset < phdr.p_offset + phdr.p_filesz) {
@@ -285,9 +294,16 @@ void Elf64::LoadSegment(uint64_t vaddr, uint64_t file_offset, uint64_t size) {
 }
 
 const Elf64_Dyn* Elf64::GetDynValue(Elf64_Sxword tag) const {
-	for (const auto* dyn = GetDynamic(); dyn->d_tag != DT_NULL; dyn++) {
-		if (dyn->d_tag == tag) {
-			return dyn;
+	const auto* dyn  = GetDynamic();
+	const auto  count = m_dynamic_size / sizeof(Elf64_Dyn);
+	if (dyn == nullptr) {
+		return nullptr;
+	}
+	// Console Five Pro fix (v0.0.8pro): walk by element count, not until DT_NULL -
+	// a module without a terminator used to read past the buffer.
+	for (uint64_t i = 0; i < count && dyn[i].d_tag != DT_NULL; i++) {
+		if (dyn[i].d_tag == tag) {
+			return &dyn[i];
 		}
 	}
 	return nullptr;
@@ -295,9 +311,14 @@ const Elf64_Dyn* Elf64::GetDynValue(Elf64_Sxword tag) const {
 
 std::vector<const Elf64_Dyn*> Elf64::GetDynList(Elf64_Sxword tag) const {
 	std::vector<const Elf64_Dyn*> ret;
-	for (const auto* dyn = GetDynamic(); dyn->d_tag != DT_NULL; dyn++) {
-		if (dyn->d_tag == tag) {
-			ret.push_back(dyn);
+	const auto* dyn  = GetDynamic();
+	const auto  count = m_dynamic_size / sizeof(Elf64_Dyn);
+	if (dyn == nullptr) {
+		return ret;
+	}
+	for (uint64_t i = 0; i < count && dyn[i].d_tag != DT_NULL; i++) {
+		if (dyn[i].d_tag == tag) {
+			ret.push_back(&dyn[i]);
 		}
 	}
 	return ret;
@@ -348,7 +369,9 @@ void Elf64::Clear() {
 	m_str_table.reset();
 	m_str_table_size = 0;
 	m_dynamic.reset();
+	m_dynamic_size = 0;
 	m_dynamic_data.reset();
+	m_dynamic_data_size = 0;
 }
 
 void Elf64::DbgDump(const std::string& folder) {
@@ -420,8 +443,11 @@ void Elf64::DbgDump(const std::string& folder) {
 	fout.Close();
 
 	fout.Create(folder_str + "dynamic.txt");
-	for (const auto* dyn = GetDynamic(); dyn->d_tag != DT_NULL; dyn++) {
-		DbgPrintDynamic64(dyn, fout);
+	if (const auto* dyn = GetDynamic(); dyn != nullptr) {
+		const auto count = m_dynamic_size / sizeof(Elf64_Dyn);
+		for (uint64_t i = 0; i < count && dyn[i].d_tag != DT_NULL; i++) {
+			DbgPrintDynamic64(&dyn[i], fout);
+		}
 	}
 	fout.Close();
 }
@@ -580,9 +606,11 @@ void Elf64::Open(const std::filesystem::path& file_name) {
 			switch (m_phdr[i].p_type) {
 				case PT_DYNAMIC:
 					m_dynamic = LoadDynamic64(this, m_phdr[i].p_offset, m_phdr[i].p_filesz);
+					m_dynamic_size = m_phdr[i].p_filesz;
 					break;
 				case PT_OS_DYNLIBDATA:
 					m_dynamic_data = LoadDynamic64(this, m_phdr[i].p_offset, m_phdr[i].p_filesz);
+					m_dynamic_data_size = m_phdr[i].p_filesz;
 					break;
 				default: break;
 			}

@@ -11,6 +11,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace Common {
@@ -293,6 +294,17 @@ public:
 
 	template <class T>
 	[[nodiscard]] T GetDynamicData(uint64_t offset) const {
+		// Console Five Pro fix (v0.0.8pro): the offset comes from the module file; validate
+		// it against the dynlib-data size before handing out a pointer.
+		if (m_dynamic_data == nullptr || offset > m_dynamic_data_size) {
+			return nullptr;
+		}
+		if constexpr (std::is_pointer_v<T>) {
+			using Element = std::remove_pointer_t<T>;
+			if (offset + sizeof(Element) > m_dynamic_data_size) {
+				return nullptr;
+			}
+		}
 		return (m_dynamic_data == nullptr ? nullptr
 		                                  : reinterpret_cast<T>(m_dynamic_data.get() + offset));
 	}
@@ -307,7 +319,9 @@ private:
 	std::unique_ptr<Elf64_Phdr[]>  m_phdr;
 	std::unique_ptr<Elf64_Shdr[]>  m_shdr;
 	std::unique_ptr<uint8_t[]>     m_dynamic;
+	uint64_t                       m_dynamic_size      = 0;
 	std::unique_ptr<uint8_t[]>     m_dynamic_data;
+	uint64_t                       m_dynamic_data_size = 0;
 	std::unique_ptr<char[]>        m_str_table;
 	uint32_t                       m_str_table_size = 0;
 
