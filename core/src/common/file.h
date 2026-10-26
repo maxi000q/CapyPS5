@@ -49,6 +49,7 @@ public:
 
 	bool Create(const std::filesystem::path& name);
 	bool Open(const std::filesystem::path& name, Mode mode);
+	bool Open(const std::filesystem::path& name, Mode mode, bool sequential);
 	bool OpenInMem(void* buf, uint32_t buf_size);
 	bool CreateInMem();
 

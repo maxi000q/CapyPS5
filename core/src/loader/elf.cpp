@@ -536,7 +536,7 @@ void Elf64::Open(const std::filesystem::path& file_name) {
 	Clear();
 
 	m_f = std::make_unique<Common::File>();
-	m_f->Open(file_name, Common::File::Mode::Read);
+	m_f->Open(file_name, Common::File::Mode::Read, /*sequential=*/true);
 
 	if (m_f->IsInvalid()) {
 		EXIT("Can't open %s\n", Common::PathToString(file_name).c_str());

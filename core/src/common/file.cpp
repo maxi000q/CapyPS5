@@ -114,6 +114,10 @@ bool File::Create(const std::filesystem::path& name) {
 }
 
 bool File::Open(const std::filesystem::path& name, Mode mode) {
+	return Open(name, mode, false);
+}
+
+bool File::Open(const std::filesystem::path& name, Mode mode, bool sequential) {
 	EXIT_IF(!IsInvalid());
 
 	m_file_name = name;
@@ -126,7 +130,10 @@ bool File::Open(const std::filesystem::path& name, Mode mode) {
 	}
 
 	switch (mode) {
-		case Mode::Read: m_p->f = SysFileOpenR(name); break;
+		case Mode::Read:
+			m_p->f = SysFileOpenR(name, sequential ? SYS_FILE_CACHE_SEQUENTIAL_SCAN
+			                                       : SYS_FILE_CACHE_AUTO);
+			break;
 		case Mode::Write: m_p->f = SysFileOpenW(name); break;
 		case Mode::ReadWrite:
 		case Mode::WriteRead: m_p->f = SysFileOpenRw(name); break;

@@ -554,7 +554,13 @@ int KYTY_SYSV_ABI KernelOpen(const char* path, int flags, uint16_t mode) {
 			LOGF_COLOR(result ? Log::Color::Green : Log::Color::Red, "\tCreate: %s, %s\n",
 			           Common::PathToString(file->real_name).c_str(), result ? "[ok]" : "[fail]");
 		} else {
-			result = file->f.Open(file->real_name, rw_mode);
+			// Console Five Pro tweak (v0.0.7pro): PS5 titles stream their assets mostly
+			// front-to-back. A sequential-access hint makes the kernel double its read-ahead
+			// window for the file, which removes per-read stalls on slow storage and SD
+			// cards. `setprop debug.capy.seq_reads 0` restores the plain access pattern.
+			static Common::DebugFlags::CachedValue seq_reads("debug.capy.seq_reads", 1);
+			const bool sequential = rw_mode == Common::File::Mode::Read && seq_reads.Get() != 0;
+			result = file->f.Open(file->real_name, rw_mode, sequential);
 
 			LOGF_COLOR(result ? Log::Color::Green : Log::Color::Red, "\tOpen: %s, %s\n",
 			           Common::PathToString(file->real_name).c_str(), result ? "[ok]" : "[fail]");
