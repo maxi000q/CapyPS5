@@ -205,28 +205,39 @@ jobs:
           VERSION="$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)"
           TAG="${GITHUB_REF_NAME}"
           cat > /tmp/release_notes.md <<'NOTES'
-          **Console Five Pro v0.0.7pro** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
+          **Console Five Pro v0.0.8pro** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
 
-          ## New in v0.0.7pro — own app identity, present mode, faster shader warm-up, smoother streaming
+          ## New in v0.0.8pro — the stability release: crashes fixed, auto-save, saves import/export
 
-          - **Own package name — `com.consolefivepro`**: the app is now fully Console Five Pro and installs as its own application (previously it shared the original's package id). Install it fresh; saves from older builds do not carry over.
-          - **Vulkan device-selection errors from user logs verified fixed**: the "Could not find suitable device — shaderOutputLayer / shaderOutputViewportIndex / shaderBufferInt64Atomics is not supported" (Adreno 740, driver 676) and "storageBuffer8BitAccess is not supported" (Adreno 660 + Turnip) rejections that closed the emulator with status 321 are long gone — all four features are optional with shader-recompiler fallbacks, so those devices boot into the game instead of exiting.
-          - **New setting — Present mode** (Settings → Performance): keep the low-latency default (Mailbox, triple buffering, no tearing), switch to classic **VSync** for the smoothest pacing, or **Uncapped** to present every finished frame for the maximum frame rate (may tear).
-          - **Faster shader warm-up**: the background pipeline workers now also run on the big cores (at low priority, so they only use spare cycles); material streaming finishes warming up sooner and causes fewer hitches.
-          - **Smoother asset streaming**: game files are opened with a sequential-access hint that doubles the kernel read-ahead window — measurably fewer read stalls on slow storage and SD cards (`debug.capy.seq_reads` to revert).
-          - Also in this release: the eboot/self loader reads with the same sequential hint.
+          ### Crash fixes (status-321 exits, freezes and native crashes)
 
-          ## Carried over from v0.0.6proplus
+          - **Malformed GPU packets no longer kill the emulator**: the const-RAM out-of-bounds write (up to 48 KB past the buffer) is bounded, and both PM4 parsers reject bad packets gracefully instead of hitting EXIT_NOT_IMPLEMENTED — a corrupt or edge-case command buffer now logs one diagnostic and continues.
+          - **Corrupted / truncated ELF and SELF images fail cleanly**: every Seek/Read result in the loader is verified (a truncated file used to parse as zeros), table reads are bounds-checked, `Elf64::Save` no longer dereferences a null section table on SELF images, and dynamic-linker tables and relocation targets are validated before use.
+          - **Cheat and param files abort the process load, not the emulator**: malformed cheat data is rejected without exceptions (the core builds with `-fno-exceptions`), and a bad param.sfo no longer takes the app down.
+          - **Guest page faults resolve on a dedicated fault thread**: the old path took locks and logged from inside the SIGSEGV handler, which self-deadlocked when the faulting thread held one of those locks; now the handler only queues the fault and a worker performs the cache invalidation.
+          - **Thread lifecycle races closed**: reference-counted file descriptors (use-after-free, racing close), thread-safe lazy singleton initialization, a synchronized stubbed-import registry, serialized game-patch state, and second game launch no longer `std::terminate`s.
+          - **Destroying a still-running host thread no longer terminates the emulator**, and the Windows high-resolution-timer HANDLE leak is closed.
+          - **A slow detached thread can no longer stall new thread creation**: the reaper joins outside the pool mutex.
+          - **Config reads outside the config lifetime fall back to defaults** instead of dereferencing null.
+          - **`PthreadJoin` writes the exit value through a verified-writable pointer**, reporting EFAULT like the real kernel instead of SIGSEGV on a wild guest pointer.
+          - **is_mapped no longer calls `feof` on a null FILE\*** when /proc is unavailable.
+          - **The desktop launcher's update download no longer divides by zero** (SIGFPE) when a release size is unknown.
 
-          - **Fixed-address memory crash fixed** (status 321): host-window adoption on demand, fixed range reservations, fault recovery with a zeroed page.
-          - **Newest-device compatibility**: non-executable stack + 16 KB-page-aligned libraries, verified automatically on every build.
-          - **Adaptive resolution** setting and **performance-core pinning** for the emulation and graphics threads.
+          ### Data safety
 
-          ## Also inherited from v0.0.5proplus / v0.0.5pro / v0.0.4pro
+          - **Writes larger than 4 GiB are chunked and completed** — previously rejected with EINVAL or silently narrowed to 32 bits on the iovec path.
+          - **Auto-save**: a zip snapshot of `_SaveData` per game every 5 minutes and on exit (3 newest kept), with a Settings toggle and an "Auto-saved HH:mm" line in the pause menu.
+          - **Import / export all game saves as one zip** (Settings → Game saves), with traversal and size guards — move your progress between devices.
 
-          - Present-thread priority + 4 ms pacing, pipeline-cache count-flush, streaming-buffer setting, updater suffix-ordering fix.
-          - FF7 Rebirth shader-crash fix (null-descriptor fallback), pad handle 0 input fix.
-          - Console Five Pro rebrand, white icon, Discord community link in Settings.
+          ### Android
+
+          - **Exit button fixed**: confirming Exit in the pause menu now really exits on the second tap — touch users no longer need the gamepad Confirm key.
+          - **Synchronized, reference-counted native-window hand-off**: detaching the view while the emulator builds its Vulkan surface can no longer use-after-free the window.
+          - **Build hardening**: ffmpeg prebuilt zips are pinned to SHA-256 and mirrored in-repo (no more build breakage when the upstream release moves), actions pinned to commit SHAs.
+
+          ## Carried over from v0.0.7pro
+
+          Own package name `com.consolefivepro`, Present mode setting (Mailbox / VSync / Uncapped), big-core pipeline workers, sequential-read game files, and the Vulkan device-selection fixes (Adreno 740 driver-676 and Turnip a660 logs).
 
           ## Requirements
 
@@ -241,7 +252,7 @@ jobs:
           - Upstream **CapyPS5 v0.0.3** by Ghael-V; this project is an independent rebranded build of it.
           - KytyPS5 and the original Kyty by InoriRus, and the FEX project.
 
-          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.6proplus)
+          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.8pro)
           NOTES
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets."
