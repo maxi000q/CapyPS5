@@ -40,7 +40,13 @@ static std::unique_ptr<Elf64_Ehdr> LoadEhdr64(Common::File& f) {
 
 	auto ehdr = std::make_unique<Elf64_Ehdr>();
 
-	f.Read(ehdr.get(), sizeof(Elf64_Ehdr));
+	// Console Five Pro fix (v0.0.8pro): the read result was ignored; a failed
+	// read left a zeroed header behind instead of an invalid image.
+	uint32_t bytes_read = 0;
+	f.Read(ehdr.get(), sizeof(Elf64_Ehdr), &bytes_read);
+	if (bytes_read != sizeof(Elf64_Ehdr)) {
+		return nullptr;
+	}
 
 	return ehdr;
 }
@@ -58,8 +64,16 @@ static void SaveEhdr64(Common::File& f, const Elf64_Ehdr* ehdr) {
 static std::unique_ptr<Elf64_Phdr[]> LoadPhdr64(Common::File& f, uint64_t offset, Elf64_Half num) {
 	auto phdr = std::make_unique<Elf64_Phdr[]>(num);
 
-	f.Seek(offset);
-	f.Read(phdr.get(), sizeof(Elf64_Phdr) * num);
+	// Console Five Pro fix (v0.0.8pro): ignored Seek/Read results turned a
+	// truncated file into zero-filled program headers.
+	if (!f.Seek(offset)) {
+		return nullptr;
+	}
+	uint32_t bytes_read = 0;
+	f.Read(phdr.get(), sizeof(Elf64_Phdr) * num, &bytes_read);
+	if (bytes_read != sizeof(Elf64_Phdr) * num) {
+		return nullptr;
+	}
 
 	return phdr;
 }
@@ -82,8 +96,14 @@ static std::unique_ptr<Elf64_Shdr[]> LoadShdr64(Common::File& f, uint64_t offset
 
 	auto shdr = std::make_unique<Elf64_Shdr[]>(num);
 
-	f.Seek(offset);
-	f.Read(shdr.get(), sizeof(Elf64_Shdr) * num);
+	if (!f.Seek(offset)) {
+		return nullptr;
+	}
+	uint32_t bytes_read = 0;
+	f.Read(shdr.get(), sizeof(Elf64_Shdr) * num, &bytes_read);
+	if (bytes_read != sizeof(Elf64_Shdr) * num) {
+		return nullptr;
+	}
 
 	return shdr;
 }
@@ -117,8 +137,14 @@ static std::unique_ptr<char[]> LoadStrTable(Common::File& f, uint64_t offset, ui
 	}
 
 	auto str_table = std::make_unique<char[]>(size);
-	f.Seek(offset);
-	f.Read(str_table.get(), size);
+	if (!f.Seek(offset)) {
+		return nullptr;
+	}
+	uint32_t bytes_read = 0;
+	f.Read(str_table.get(), size, &bytes_read);
+	if (bytes_read != size) {
+		return nullptr;
+	}
 	return str_table;
 }
 
@@ -587,6 +613,14 @@ void Elf64::Open(const std::filesystem::path& file_name) {
 
 	if (m_ehdr != nullptr /*&& m_self == nullptr*/) {
 		m_phdr = LoadPhdr64(*m_f, ehdr_pos + m_ehdr->e_phoff, m_ehdr->e_phnum);
+		if (m_phdr == nullptr && m_ehdr->e_phnum != 0) {
+			// Console Five Pro fix (v0.0.8pro): the program-header table could
+			// not be read; fail the image instead of parsing zeros.
+			m_ehdr.reset();
+		}
+	}
+
+	if (m_ehdr != nullptr /*&& m_self == nullptr*/) {
 		if (m_self == nullptr) {
 			m_shdr = LoadShdr64(*m_f, ehdr_pos + m_ehdr->e_shoff, m_ehdr->e_shnum);
 
