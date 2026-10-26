@@ -205,49 +205,24 @@ jobs:
           VERSION="$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)"
           TAG="${GITHUB_REF_NAME}"
           cat > /tmp/release_notes.md <<'NOTES'
-          **Console Five Pro v0.0.8proplus** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
+          **Console Five Pro v0.0.9pro** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
 
-          ## New in v0.0.8proplus — driver compatibility, per-game saves, screen format
+          ## New in v0.0.9pro — Mali GPU optimization, scrollable game options
 
-          - **Custom Vulkan drivers no longer fail at startup (status 321)**: Turnip and PanVk lack some optional Vulkan features, and requesting them used to make vkCreateDevice fail before the first frame. Optional features are now requested only when the driver reports them, samplers fall back to plain filtering without anisotropy, and a warning lists whatever the driver is missing.
-          - **Game imports are validated**: picking a .pkg or any non-executable used to freeze the app for minutes while it copied, and then fail to boot. Files are now checked for the ELF/SELF executable magic before a byte is written, free space is verified, and a card shows the import progress.
-          - **Per-game save export and import**: each game's options panel has its own export/import rows, so a save can be moved without knowing which title id it belongs to (also reads that game's folder out of a full-export zip).
-          - **Screen format setting**: Default (full screen), 16:9 or 5:4 letterboxing, applied live while playing (Settings → Graphics).
-          - **The Settings sidebar scrolls on small screens**, so the About entry is always reachable.
-          - **Clearer crash reports**: a null-pointer crash inside the game's own code is now reported as a game-side crash — like it would behave on console — instead of a raw host exception.
+          - **Mali GPU optimization (Settings → Performance, Auto by default)**: on Mali GPUs (Mali-G76 class and newer) the emulator now detects the GPU at Vulkan device creation and applies bandwidth-tuned defaults — **with exactly the same graphics**:
+            - **Hardware render-target clears**: pass clears now use Vulkan `loadOp CLEAR` instead of loading the previous contents and clearing inside the pass. On Mali, loading a render target forces an AFBC (Arm Frame Buffer Compression) decompress of data that is immediately overwritten; hardware clears are free and keep AFBC compression alive — far less memory traffic on a GPU family that is bandwidth-bound.
+            - **128 MB streaming buffer** (up from 64 MB): the upload ring wraps half as often, so games that stream geometry and textures heavily wait on the GPU less.
+            - **One more pipeline-compile worker**: Mali shader compiles are slower, so material warm-up finishes sooner and streaming games hitch less.
+          - The profile is per-game overridable like every core option, and non-Mali GPUs (Adreno, PowerVR, ...) keep the existing defaults untouched. The setting value names the detected GPU (e.g. "Auto · Mali-G76 MC4").
+          - **The per-game options panel ("Choose options for this game") now scrolls**: on small screens the lower rows — save export / import, reset, Play — were cut off. The header and hint bar stay pinned, touch scrolling works, and gamepad focus brings the selected row into view.
 
-          ## From v0.0.8pro — the stability release: crashes fixed, auto-save, saves import/export
+          ## From v0.0.8proplus
 
-          ### Crash fixes (status-321 exits, freezes and native crashes)
+          Custom Vulkan drivers (Turnip, PanVk) that lack optional features no longer fail at startup with status 321; game imports are validated up front with a progress card; per-game save export/import; screen-format setting (Default / 16:9 / 5:4); scrollable Settings sidebar; clearer game-side crash reports.
 
-          - **Malformed GPU packets no longer kill the emulator**: the const-RAM out-of-bounds write (up to 48 KB past the buffer) is bounded, and both PM4 parsers reject bad packets gracefully instead of hitting EXIT_NOT_IMPLEMENTED — a corrupt or edge-case command buffer now logs one diagnostic and continues.
-          - **Corrupted / truncated ELF and SELF images fail cleanly**: every Seek/Read result in the loader is verified (a truncated file used to parse as zeros), table reads are bounds-checked, `Elf64::Save` no longer dereferences a null section table on SELF images, and dynamic-linker tables and relocation targets are validated before use.
-          - **Cheat and param files abort the process load, not the emulator**: malformed cheat data is rejected without exceptions (the core builds with `-fno-exceptions`), and a bad param.sfo no longer takes the app down.
-          - **Guest page faults resolve on a dedicated fault thread**: the old path took locks and logged from inside the SIGSEGV handler, which self-deadlocked when the faulting thread held one of those locks; now the handler only queues the fault and a worker performs the cache invalidation.
-          - **Thread lifecycle races closed**: reference-counted file descriptors (use-after-free, racing close), thread-safe lazy singleton initialization, a synchronized stubbed-import registry, serialized game-patch state, and second game launch no longer `std::terminate`s.
-          - **Destroying a still-running host thread no longer terminates the emulator**, and the Windows high-resolution-timer HANDLE leak is closed.
-          - **Unreal Engine games no longer die at boot with LowLevelFatalError (sceKernelBatchMap 0x8002000c)**: memory reserved through the kernel memory pool (sceKernelMemoryPoolExpand — e.g. Enotria) is now a legal direct-memory source. Borrowed pool pages cannot be double-owned by a pool commit, are returned when the last direct view goes away, and pool expansion release keeps working unchanged.
-          - **A slow detached thread can no longer stall new thread creation**: the reaper joins outside the pool mutex.
-          - **Config reads outside the config lifetime fall back to defaults** instead of dereferencing null.
-          - **`PthreadJoin` writes the exit value through a verified-writable pointer**, reporting EFAULT like the real kernel instead of SIGSEGV on a wild guest pointer.
-          - **is_mapped no longer calls `feof` on a null FILE\*** when /proc is unavailable.
-          - **The desktop launcher's update download no longer divides by zero** (SIGFPE) when a release size is unknown.
+          ## From v0.0.8pro — the stability release
 
-          ### Data safety
-
-          - **Writes larger than 4 GiB are chunked and completed** — previously rejected with EINVAL or silently narrowed to 32 bits on the iovec path.
-          - **Auto-save**: a zip snapshot of `_SaveData` per game every 5 minutes and on exit (3 newest kept), with a Settings toggle and an "Auto-saved HH:mm" line in the pause menu.
-          - **Import / export all game saves as one zip** (Settings → Game saves), with traversal and size guards — move your progress between devices.
-
-          ### Android
-
-          - **Exit button fixed**: confirming Exit in the pause menu now really exits on the second tap — touch users no longer need the gamepad Confirm key.
-          - **Synchronized, reference-counted native-window hand-off**: detaching the view while the emulator builds its Vulkan surface can no longer use-after-free the window.
-          - **Build hardening**: ffmpeg prebuilt zips are pinned to SHA-256 and mirrored in-repo (no more build breakage when the upstream release moves), actions pinned to commit SHAs.
-
-          ## Carried over from v0.0.7pro
-
-          Own package name `com.consolefivepro`, Present mode setting (Mailbox / VSync / Uncapped), big-core pipeline workers, sequential-read game files, and the Vulkan device-selection fixes (Adreno 740 driver-676 and Turnip a660 logs).
+          Malformed GPU packets no longer kill the emulator; corrupted ELF/SELF images fail cleanly; guest page faults resolve on a dedicated fault thread; Unreal Engine games no longer die at boot with LowLevelFatalError (sceKernelBatchMap 0x8002000c, e.g. Enotria); auto-save snapshots; import/export all saves; exit button fix; build hardening.
 
           ## Requirements
 
@@ -262,7 +237,7 @@ jobs:
           - Upstream **CapyPS5 v0.0.3** by Ghael-V; this project is an independent rebranded build of it.
           - KytyPS5 and the original Kyty by InoriRus, and the FEX project.
 
-          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.8proplus)
+          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.9pro)
           NOTES
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets."
