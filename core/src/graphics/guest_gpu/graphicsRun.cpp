@@ -13,6 +13,7 @@
 
 #include "common/assert.h"
 #include "common/debugFlags.h"
+#include "common/perfCores.h"
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
@@ -714,6 +715,11 @@ void GuestGpu::ThreadRun(void* data) {
 	if (setpriority(PRIO_PROCESS, 0, -4) != 0) {
 		LOGF("GPU thread: priority boost unavailable (nice -4 denied)\n");
 	}
+	// Console Five Pro tweak (v0.0.6proplus): frame-critical thread - keep it on the
+	// big cores as well when the topology is known (best effort, debug.capy.perf_cores).
+#if defined(__ANDROID__)
+	Common::PinToPerformanceCores("GPU thread");
+#endif
 #endif
 	g_gpu_thread = true;
 	g_gpu_state  = gpu;
