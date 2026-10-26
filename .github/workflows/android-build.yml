@@ -107,13 +107,24 @@ jobs:
       - name: Verify 16 KB alignment and non-execstack (Android 15+/16 devices)
         run: |
           set -euo pipefail
-          NDK="$ANDROID_HOME/ndk/28.2.13676358"
-          READELF="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          # The NDK's llvm-readelf exits 74 on the stripped 28 MB core library (it parses
+          # the 9 MB prebuilt libc++_shared.so fine); GNU readelf handles both reliably
+          # and is preinstalled on the runner.
+          READELF="$(command -v readelf)"
           JNI="android/app/src/main/jniLibs/arm64-v8a"
           fail=0
           for SO in "$JNI"/*.so; do
             name=$(basename "$SO")
-            align_hex=$("$READELF" -lW "$SO" | awk '$1=="LOAD" {print $NF; exit}')
+            headers="$(mktemp)"
+            if ! "$READELF" -lW "$SO" > "$headers" 2>&1; then
+              rc=$?
+              echo "::error::$name: readelf failed (rc=$rc)"
+              head -5 "$headers" || true
+              rm -f "$headers"
+              fail=1
+              continue
+            fi
+            align_hex="$(awk '$1=="LOAD" {print $NF; exit}' "$headers")"
             align_dec=$((align_hex))
             if [ "${align_dec:-0}" -lt 16384 ]; then
               echo "::error::$name LOAD alignment is $align_hex (expected >= 0x4000)"
@@ -121,14 +132,23 @@ jobs:
             else
               echo "$name: LOAD aligned to $align_dec bytes"
             fi
-            if "$READELF" -lW "$SO" | grep -q 'GNU_STACK.*RWE'; then
+            if grep -q 'GNU_STACK.*RWE' "$headers"; then
               echo "::error::$name requests an executable stack (GNU_STACK RWE)"
               fail=1
             else
               echo "$name: GNU_STACK is non-executable"
             fi
+            rm -f "$headers"
           done
           exit $fail
+
+      - name: Upload staged native libraries (when the gate fails)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staged-jnilibs-failed-gate
+          path: android/app/src/main/jniLibs/arm64-v8a/*.so
+          if-no-files-found: ignore
 
       - name: Cache Gradle dependencies
         uses: actions/cache@v4
