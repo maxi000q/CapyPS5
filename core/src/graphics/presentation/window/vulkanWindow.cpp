@@ -687,24 +687,31 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	EXIT_NOT_IMPLEMENTED(supported_features2.features.vertexPipelineStoresAndAtomics != VK_TRUE);
 	EXIT_NOT_IMPLEMENTED(supported_features2.features.dualSrcBlend != VK_TRUE);
 	vk::PhysicalDeviceFeatures device_features {};
-	device_features.fragmentStoresAndAtomics = VK_TRUE;
-	device_features.samplerAnisotropy        = VK_TRUE;
-	device_features.robustBufferAccess       = VK_TRUE;
+	// Console Five Pro fix (v0.0.8proplus): request every optional feature only when the
+	// driver reports it. Custom Vulkan drivers (Turnip, PanVk) reject unsupported requests
+	// inside vkCreateDevice, which ended the session with "Could not create device"
+	// (status 321) before the first frame. A missing feature now degrades through the
+	// existing fallback flags instead of closing the game.
+	const auto supported_features = supported_features2.features;
+	device_features.fragmentStoresAndAtomics = supported_features.fragmentStoresAndAtomics;
+	device_features.samplerAnisotropy        = supported_features.samplerAnisotropy;
+	device_features.robustBufferAccess       = supported_features.robustBufferAccess;
+	graphics.sampler_anisotropy_enabled      = supported_features.samplerAnisotropy == VK_TRUE;
 	// Unsupported by MoltenVK and Mali.
 	device_features.depthBounds = supported_features2.features.depthBounds;
 #if !defined(__APPLE__)
 	device_features.depthClamp  = VK_TRUE;
 #endif
-	device_features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
-	device_features.shaderImageGatherExtended            = VK_TRUE;
-	device_features.independentBlend                     = VK_TRUE;
-	device_features.dualSrcBlend                         = VK_TRUE;
-	device_features.tessellationShader                   = VK_TRUE;
-	device_features.sampleRateShading                    = VK_TRUE;
-	device_features.depthBiasClamp                       = VK_TRUE;
+	device_features.shaderStorageImageWriteWithoutFormat = supported_features.shaderStorageImageWriteWithoutFormat;
+	device_features.shaderImageGatherExtended            = supported_features.shaderImageGatherExtended;
+	device_features.independentBlend                     = supported_features.independentBlend;
+	device_features.dualSrcBlend                         = supported_features.dualSrcBlend;
+	device_features.tessellationShader                   = supported_features.tessellationShader;
+	device_features.sampleRateShading                    = supported_features.sampleRateShading;
+	device_features.depthBiasClamp                       = supported_features.depthBiasClamp;
 	device_features.shaderClipDistance = supported_features2.features.shaderClipDistance;
 	device_features.shaderCullDistance = supported_features2.features.shaderCullDistance;
-	device_features.largePoints                          = VK_TRUE;
+	device_features.largePoints                          = supported_features.largePoints;
 	device_features.multiViewport    = supported_features2.features.multiViewport;
 	device_features.fillModeNonSolid = supported_features2.features.fillModeNonSolid;
 	graphics.depth_bounds_enabled        = device_features.depthBounds == VK_TRUE;
@@ -718,6 +725,20 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	    device_features.drawIndirectFirstInstance == VK_TRUE;
 	ShaderRecompiler::g_host_features.clip_distance = device_features.shaderClipDistance == VK_TRUE;
 	ShaderRecompiler::g_host_features.cull_distance = device_features.shaderCullDistance == VK_TRUE;
+	if (device_features.dualSrcBlend != VK_TRUE ||
+	    device_features.vertexPipelineStoresAndAtomics != VK_TRUE ||
+	    device_features.tessellationShader != VK_TRUE ||
+	    device_features.fragmentStoresAndAtomics != VK_TRUE ||
+	    !graphics.sampler_anisotropy_enabled) {
+		LOGF("WARNING: the driver lacks optional Vulkan features (dualSrcBlend=%d "
+		     "vertexPipelineStoresAndAtomics=%d tessellationShader=%d fragmentStoresAndAtomics=%d "
+		     "samplerAnisotropy=%d); continuing with reduced features\n",
+		     device_features.dualSrcBlend == VK_TRUE,
+		     device_features.vertexPipelineStoresAndAtomics == VK_TRUE,
+		     device_features.tessellationShader == VK_TRUE,
+		     device_features.fragmentStoresAndAtomics == VK_TRUE,
+		     graphics.sampler_anisotropy_enabled);
+	}
 	LOGF("Vulkan optional features: colorWrite=%d minLod=%d depthClipControl=%d depthBounds=%d "
 	     "multiViewport=%d fillModeNonSolid=%d clipDistance=%d cullDistance=%d outputLayer=%d "
 	     "outputViewportIndex=%d bufferInt64Atomics=%d storageBuffer8Bit=%d\n",
@@ -730,9 +751,9 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	     ShaderRecompiler::g_host_features.output_viewport_index,
 	     ShaderRecompiler::g_host_features.buffer_int64_atomics,
 	     graphics.storage_buffer_8bit_enabled);
-	device_features.vertexPipelineStoresAndAtomics       = VK_TRUE;
-	graphics.sample_rate_shading_enabled                 = true;
-	device_features.shaderInt64 = VK_TRUE;
+	device_features.vertexPipelineStoresAndAtomics = supported_features.vertexPipelineStoresAndAtomics;
+	graphics.sample_rate_shading_enabled           = supported_features.sampleRateShading == VK_TRUE;
+	device_features.shaderInt64                    = supported_features.shaderInt64;
 	device_features.shaderFloat64 =
 	    supported_features2.features.shaderFloat64 &&
 	    float_controls.shaderSignedZeroInfNanPreserveFloat64;

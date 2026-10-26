@@ -855,6 +855,26 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 		}
 	}
 #endif
+	// A data fault below 64 KiB from translated guest code is a null-pointer dereference
+	// inside the game itself: on console the game would crash the same way. Report that
+	// plainly instead of only the raw host-exception line (v0.0.8proplus).
+	if (info->type == Common::HostException::ExceptionType::AccessViolation &&
+	    info->access_violation_vaddr < 0x10000 &&
+	    Cpu::GuestRipFromHostPc(info->exception_address) != 0) {
+		const char* access_name =
+		    info->access_violation_type == Common::HostException::AccessViolationType::Read
+		        ? "read"
+		        : info->access_violation_type == Common::HostException::AccessViolationType::Write
+		              ? "write"
+		              : "access";
+		EXIT("The game itself crashed: the game code made a null-pointer %s "
+		     "(exception type=%u code=%u pc=0x%016" PRIx64 " address=0x%016" PRIx64 "). "
+		     "This is a game-side crash - on a real console the game would crash the same "
+		     "way; no emulator setting can prevent it.",
+		     access_name, static_cast<unsigned>(info->type), info->native_code,
+		     info->exception_address, info->access_violation_vaddr);
+		return false;
+	}
 	EXIT("Unhandled host exception: type=%u code=%u pc=0x%016" PRIx64
 	     " access=%u address=0x%016" PRIx64 "\n",
 	     static_cast<unsigned>(info->type), info->native_code, info->exception_address,
