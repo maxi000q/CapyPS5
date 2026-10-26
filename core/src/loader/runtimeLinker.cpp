@@ -911,8 +911,18 @@ static void KYTY_SYSV_ABI ProgramExitHandler() {
 	LOGF("exit!!!\n");
 }
 
+// Console Five Pro (v0.0.8pro): every name offset below comes from the module file;
+// this returns an empty string instead of a pointer past the table.
+static const char* BoundedStr(const char* table, uint64_t table_size, uint64_t offset) {
+	if (table == nullptr || offset >= table_size) {
+		return "";
+	}
+	return table + offset;
+}
+
 template <class T>
-static void GetDynModules(Elf64* elf, T* out, const char* names, Elf64_Sxword tag) {
+static void GetDynModules(Elf64* elf, T* out, const char* names, uint64_t names_size,
+                          Elf64_Sxword tag) {
 	std::vector<uint64_t> needed_modules;
 	GetDynValues(elf, &needed_modules, tag);
 	for (auto need: needed_modules) {
@@ -921,13 +931,14 @@ static void GetDynModules(Elf64* elf, T* out, const char* names, Elf64_Sxword ta
 		EncodeId64(static_cast<uint16_t>((need >> 48u) & 0xffffu), &id.id);
 		id.version_major = static_cast<int>((need >> 40u) & 0xffu);
 		id.version_minor = static_cast<int>((need >> 32u) & 0xffu);
-		id.name          = names + (need & 0xffffffff);
+		id.name          = BoundedStr(names, names_size, need & 0xffffffff);
 		out->push_back(id);
 	}
 }
 
 template <class T>
-static void GetDynLibs(Elf64* elf, T* out, const char* names, Elf64_Sxword tag) {
+static void GetDynLibs(Elf64* elf, T* out, const char* names, uint64_t names_size,
+                       Elf64_Sxword tag) {
 	std::vector<uint64_t> needed_modules;
 	GetDynValues(elf, &needed_modules, tag);
 	for (auto need: needed_modules) {
@@ -935,7 +946,7 @@ static void GetDynLibs(Elf64* elf, T* out, const char* names, Elf64_Sxword tag) 
 
 		EncodeId64(static_cast<uint16_t>((need >> 48u) & 0xffffu), &id.id);
 		id.version = static_cast<int>((need >> 32u) & 0xffffu);
-		id.name    = names + (need & 0xffffffff);
+		id.name    = BoundedStr(names, names_size, need & 0xffffffff);
 		out->push_back(id);
 	}
 }
@@ -962,6 +973,15 @@ static RelocationInfo GetRelocationInfo(Elf64_Rela* r, Program* program) {
 		case 1026 /* R_AARCH64_JUMP_SLOT */: addend = 0; [[fallthrough]];
 		case R_X86_64_64:
 		case 257 /* R_AARCH64_ABS64 */: {
+			if (static_cast<uint64_t>(symbol) * sizeof(Elf64_Sym) >=
+			    program->dynamic_info->symbol_table_total_size) {
+				// Console Five Pro (v0.0.8pro): out-of-range symbol index in a corrupt module;
+				// stub the relocation instead of reading past the symbol table.
+				ret.resolved = false;
+				ret.type     = SymbolType::Unknown;
+				ret.bind     = BindType::Weak;
+				return ret;
+			}
 			auto         sym          = symbols[symbol];
 			auto         bind         = sym.GetBind();
 			auto         sym_type     = sym.GetType();
@@ -981,7 +1001,7 @@ static RelocationInfo GetRelocationInfo(Elf64_Rela* r, Program* program) {
 				case STB_GLOBAL: ret.bind = BindType::Global; [[fallthrough]];
 				case STB_WEAK: {
 					ret.bind = (ret.bind == BindType::Unknown ? BindType::Weak : ret.bind);
-					ret.name = names + sym.st_name;
+					ret.name = BoundedStr(names, program->dynamic_info->str_table_size, sym.st_name);
 					program->rt->Resolve(ret.name, ret.type, program, &sr, &ret.bind_self);
 					symbol_vaddr = sr.vaddr;
 				} break;
@@ -1030,6 +1050,18 @@ static bool RelocateRecord(uint32_t index, Elf64_Rela* r, Program* program, bool
 			value   = RegisterStubbedImport(index, program, ri);
 			stubbed = true;
 		}
+	}
+
+	// Console Five Pro (v0.0.8pro): the relocation target must land inside the module's own
+	// mapping; a corrupt r_offset used to write anywhere in the address space.
+	const bool target_valid =
+	    ri.vaddr >= program->map_vaddr &&
+	    ri.vaddr - program->map_vaddr + sizeof(uint64_t) <= program->mapped_size;
+	if (!target_valid) {
+		LOGF("Relocate: skipped out-of-range target [%016" PRIx64 "] (module %016" PRIx64 " + %x) in %s\n",
+		     ri.vaddr, program->map_vaddr, static_cast<uint32_t>(program->mapped_size),
+		     Common::PathToString(program->file_name).c_str());
+		return false;
 	}
 
 	const bool patched = PatchGuestMemory64(ri.vaddr, value);
@@ -1267,6 +1299,10 @@ void RuntimeLinker::UnloadProgram(Program* program) {
 			                           type != R_X86_64_JUMP_SLOT)) {
 				return;
 			}
+			if (static_cast<uint64_t>(r->GetSymbol()) * sizeof(Elf64_Sym) >=
+			    info.symbol_table_total_size) {
+				return;
+			}
 			const auto& symbol = info.symbol_table[r->GetSymbol()];
 			if (symbol.GetBind() != STB_GLOBAL && symbol.GetBind() != STB_WEAK) {
 				return;
@@ -1285,7 +1321,7 @@ void RuntimeLinker::UnloadProgram(Program* program) {
 				case STT_OBJECT: symbol_type = SymbolType::Object; break;
 				default: return;
 			}
-			const std::string name = info.str_table + symbol.st_name;
+			const std::string name = BoundedStr(info.str_table, info.str_table_size, symbol.st_name);
 			if (program->export_symbols->FindByNid(name.substr(0, name.find('#')), symbol_type,
 			                                       address) != nullptr) {
 				bits &= ~mask;
@@ -2212,7 +2248,8 @@ void RuntimeLinker::ParseProgramDynamicInfo(Program* program) {
 
 	uint64_t so_name = 0;
 	GetDynValue(elf, &so_name, DT_SONAME);
-	program->dynamic_info->so_name = program->dynamic_info->str_table + so_name;
+	program->dynamic_info->so_name =
+	    BoundedStr(program->dynamic_info->str_table, program->dynamic_info->str_table_size, so_name);
 
 	EXIT_NOT_IMPLEMENTED(elf->HasDynValue(DT_OS_NEEDED_MODULE) &&
 	                     elf->HasDynValue(DT_OS_NEEDED_MODULE_1));
@@ -2222,21 +2259,21 @@ void RuntimeLinker::ParseProgramDynamicInfo(Program* program) {
 	                     elf->HasDynValue(DT_OS_IMPORT_LIB_1));
 	EXIT_NOT_IMPLEMENTED(elf->HasDynValue(DT_OS_EXPORT_LIB) &&
 	                     elf->HasDynValue(DT_OS_EXPORT_LIB_1));
-	GetDynModules(elf, &program->dynamic_info->import_modules, program->dynamic_info->str_table,
+	GetDynModules(elf, &program->dynamic_info->import_modules, program->dynamic_info->str_table, program->dynamic_info->str_table_size,
 	              DT_OS_NEEDED_MODULE);
-	GetDynModules(elf, &program->dynamic_info->import_modules, program->dynamic_info->str_table,
+	GetDynModules(elf, &program->dynamic_info->import_modules, program->dynamic_info->str_table, program->dynamic_info->str_table_size,
 	              DT_OS_NEEDED_MODULE_1);
-	GetDynModules(elf, &program->dynamic_info->export_modules, program->dynamic_info->str_table,
+	GetDynModules(elf, &program->dynamic_info->export_modules, program->dynamic_info->str_table, program->dynamic_info->str_table_size,
 	              DT_OS_MODULE_INFO);
-	GetDynModules(elf, &program->dynamic_info->export_modules, program->dynamic_info->str_table,
+	GetDynModules(elf, &program->dynamic_info->export_modules, program->dynamic_info->str_table, program->dynamic_info->str_table_size,
 	              DT_OS_MODULE_INFO_1);
-	GetDynLibs(elf, &program->dynamic_info->import_libs, program->dynamic_info->str_table,
+	GetDynLibs(elf, &program->dynamic_info->import_libs, program->dynamic_info->str_table, program->dynamic_info->str_table_size,
 	           DT_OS_IMPORT_LIB);
-	GetDynLibs(elf, &program->dynamic_info->import_libs, program->dynamic_info->str_table,
+	GetDynLibs(elf, &program->dynamic_info->import_libs, program->dynamic_info->str_table, program->dynamic_info->str_table_size,
 	           DT_OS_IMPORT_LIB_1);
-	GetDynLibs(elf, &program->dynamic_info->export_libs, program->dynamic_info->str_table,
+	GetDynLibs(elf, &program->dynamic_info->export_libs, program->dynamic_info->str_table, program->dynamic_info->str_table_size,
 	           DT_OS_EXPORT_LIB);
-	GetDynLibs(elf, &program->dynamic_info->export_libs, program->dynamic_info->str_table,
+	GetDynLibs(elf, &program->dynamic_info->export_libs, program->dynamic_info->str_table, program->dynamic_info->str_table_size,
 	           DT_OS_EXPORT_LIB_1);
 }
 
@@ -2339,7 +2376,8 @@ void RuntimeLinker::CreateSymbolDatabase(Program* program) {
 		     reinterpret_cast<uint8_t*>(program->dynamic_info->symbol_table) +
 		         program->dynamic_info->symbol_table_total_size;
 		     sym++) {
-			std::string id   = std::string(program->dynamic_info->str_table + sym->st_name);
+			std::string id   = BoundedStr(program->dynamic_info->str_table,
+			                         program->dynamic_info->str_table_size, sym->st_name);
 			auto        bind = sym->GetBind();
 			auto        type = sym->GetType();
 			auto        ids  = Common::Split(id, '#');
