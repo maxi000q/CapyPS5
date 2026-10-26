@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.SaveAlt
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.SportsEsports
@@ -37,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,12 +52,21 @@ import androidx.compose.ui.res.stringResource
 import com.consolefivepro.GpuDrivers
 import com.consolefivepro.R
 import com.consolefivepro.CoreOption
+import com.consolefivepro.GameSaves
 import com.consolefivepro.OverlayMode
 import com.consolefivepro.Settings
 import com.consolefivepro.TouchControlsMode
 import com.consolefivepro.ui.NavKey
 import com.consolefivepro.ui.OnNavKey
 import com.consolefivepro.ui.theme.Capy
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** Title of a full-screen page with a back arrow in front of it. */
 @Composable
@@ -114,6 +125,41 @@ fun SettingsScreen(
     val context = LocalContext.current
     var message by remember { mutableStateOf<String?>(null) }
     var showDrivers by remember { mutableStateOf(false) }
+    var savesMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val exportSaves = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) { GameSaves.exportAll(context, uri) }
+                val any = withContext(Dispatchers.IO) { GameSaves.hasSaves(context) }
+                savesMessage = context.getString(
+                    when {
+                        ok -> R.string.saves_exported
+                        any -> R.string.saves_export_failed
+                        else -> R.string.saves_export_empty
+                    }
+                )
+            }
+        }
+    }
+    val importSaves = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val restored = withContext(Dispatchers.IO) { GameSaves.importAll(context, uri) }
+                savesMessage = context.getString(
+                    when {
+                        restored > 0 -> R.string.saves_imported
+                        restored == 0 -> R.string.saves_import_empty
+                        else -> R.string.saves_import_failed
+                    }
+                )
+            }
+        }
+    }
     // Read so the option rows recompose when a value changes.
     val optionsVersion = settings.coreOptionsVersion
 
@@ -128,7 +174,7 @@ fun SettingsScreen(
 
     val categories = remember(
         optionsVersion, settings.libraryPaths, message, driverMessage, settings.updateChecks,
-        settings.adaptiveResolution,
+        settings.adaptiveResolution, settings.autoSave, savesMessage,
     ) {
         listOf(
             SettingsCategory(context.getString(R.string.category_graphics), Icons.Outlined.Image) {
@@ -226,6 +272,31 @@ fun SettingsScreen(
                         onStep = { settings.updateControlsOpacity((settings.controlsOpacity + it * 0.1f).coerceIn(0.1f, 1f)) },
                     ),
                 )
+            },
+            SettingsCategory(context.getString(R.string.category_saves), Icons.Outlined.SaveAlt) {
+                listOf(
+                    SettingItem(
+                        context.getString(R.string.auto_save),
+                        context.getString(R.string.auto_save_desc),
+                        context.getString(if (settings.autoSave) R.string.enabled else R.string.disabled),
+                        onStep = { settings.updateAutoSave(!settings.autoSave) },
+                    ),
+                    SettingItem(
+                        context.getString(R.string.saves_export),
+                        context.getString(R.string.saves_export_desc),
+                        onConfirm = {
+                            exportSaves.launch(
+                                "ConsoleFivePro-saves-" +
+                                    SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".zip"
+                            )
+                        },
+                    ),
+                    SettingItem(
+                        context.getString(R.string.saves_import),
+                        context.getString(R.string.saves_import_desc),
+                        onConfirm = { importSaves.launch(arrayOf("application/zip", "application/octet-stream")) },
+                    ),
+                ) + listOfNotNull(savesMessage?.let { SettingItem(it) })
             },
             SettingsCategory(context.getString(R.string.category_folders), Icons.Outlined.Folder) {
                 settings.libraryPaths.map { path ->

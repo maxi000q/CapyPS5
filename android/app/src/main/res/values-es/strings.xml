@@ -199,6 +199,16 @@
     <string name="auto_save">Autoguardado</string>
     <string name="auto_save_desc">Mantiene copias de seguridad de las partidas mientras juegas</string>
     <string name="autosave_last">Autoguardado %1$s</string>
+    <string name="saves_export">Exportar partidas</string>
+    <string name="saves_export_desc">Escribe todas las partidas en un archivo zip que eliges</string>
+    <string name="saves_import">Importar partidas</string>
+    <string name="saves_import_desc">Restaura partidas de un zip de Exportar, reemplazando esos juegos</string>
+    <string name="saves_exported">Partidas exportadas</string>
+    <string name="saves_export_empty">Aún no hay datos que exportar</string>
+    <string name="saves_export_failed">Error al exportar las partidas</string>
+    <string name="saves_imported">%1$d juego(s) restaurados</string>
+    <string name="saves_import_empty">El zip no contiene partidas</string>
+    <string name="saves_import_failed">Error al importar las partidas</string>
 
     <!-- Apoyo -->
     <string name="support_title">¿Te gusta Console Five Pro?</string>

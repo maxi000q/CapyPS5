@@ -201,6 +201,16 @@
     <string name="auto_save">Auto-save</string>
     <string name="auto_save_desc">Keeps safety copies of the current game saves while playing</string>
     <string name="autosave_last">Auto-saved %1$s</string>
+    <string name="saves_export">Export saves</string>
+    <string name="saves_export_desc">Writes every game save into one zip file you pick</string>
+    <string name="saves_import">Import saves</string>
+    <string name="saves_import_desc">Restores game saves from an Export zip, replacing those games</string>
+    <string name="saves_exported">Saves exported</string>
+    <string name="saves_export_empty">No saved data to export yet</string>
+    <string name="saves_export_failed">Exporting the saves failed</string>
+    <string name="saves_imported">%1$d game(s) restored</string>
+    <string name="saves_import_empty">The zip contains no game saves</string>
+    <string name="saves_import_failed">Importing the saves failed</string>
 
     <!-- Support -->
     <string name="support_title">Enjoying Console Five Pro?</string>
