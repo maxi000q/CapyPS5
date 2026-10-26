@@ -235,9 +235,12 @@
     <string name="trophies_card_next">Still to earn</string>
     <string name="whats_new_title">What\'s new in v%1$s</string>
     <string-array name="whats_new_items">
-        <item>New identity: the app is now Console Five Pro with its own package name com.consolefivepro — install it fresh alongside any older build (its saves live in a new data folder).</item>
-        <item>New setting — Present mode: keep the low-latency default (Mailbox), or switch to classic VSync or fully uncapped presenting for maximum frame rate (Settings → Performance).</item>
-        <item>Performance: background pipeline (shader) workers now run on the big cores too, so material streaming finishes warming-up sooner and causes fewer hitches.</item>
-        <item>Performance: game files are opened with a sequential-access hint, doubling the kernel read-ahead window — smoother asset streaming on slow storage and SD cards.</item>
+        <item>Stability: a wave of hard crashes is fixed — malformed GPU packets, corrupted ELF/SELF images, bad cheat files and null config reads no longer close the emulator (status 321).</item>
+        <item>Stability: page faults are resolved on a dedicated fault thread, thread creation/join races are gone, and a stuck detached thread can no longer freeze new thread creation.</item>
+        <item>Data safety: writes larger than 4 GB are no longer dropped, and PthreadJoin reports EFAULT instead of crashing on a bad pointer.</item>
+        <item>New: auto-save — a snapshot of your in-game saves is taken every 5 minutes and when you exit (Settings → Game saves to turn it off).</item>
+        <item>New: import and export all game saves as a single zip (Settings → Game saves) — move your progress between devices.</item>
+        <item>Fixed: the Exit button in the pause menu now really exits on the second tap — touch users are no longer forced to use the gamepad Confirm key.</item>
+        <item>Android: detaching the view mid-frame can no longer crash the renderer (the native window hand-off is synchronized and reference-counted).</item>
     </string-array>
 </resources>
