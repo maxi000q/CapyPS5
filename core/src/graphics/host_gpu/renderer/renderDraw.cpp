@@ -1767,8 +1767,15 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		EXIT_IF(mesh_index_offset > UINT32_MAX || groups * mesh.max_primitives * 3u > UINT32_MAX);
 		mesh_output               = &MeshOutputBuffer(mesh_index_offset + index_bytes);
 		mesh_index_count          = static_cast<uint32_t>(groups * mesh.max_primitives * 3u);
-		auto& compute_pipeline    = m_context.GetPipelineCache().GetMeshComputePipeline(
+		auto* compute_pipeline = m_context.GetPipelineCache().GetMeshComputePipeline(
 		    state.vertex_info[0], state.programs.vertex[0], ScaledImageMask(bindings.vertex[0]));
+		// v0.0.9proQ4 round 2: nullptr = the emulation pipeline is still compiling on
+		// the async workers. Skip this draw like a graphics-pipeline miss; the next
+		// occurrence draws for real (the old inline ~100 ms compile here was half of
+		// the 3D warm-up storm that froze heavy titles for whole seconds).
+		if (compute_pipeline == nullptr) {
+			return;
+		}
 		m_context.GetCommandScheduler().EndRendering();
 		// Console Five Pro (v0.0.9proQ3): the mesh output is read by earlier draws as a
 		// vertex/index buffer (VERTEX_INPUT) and written by the previous emulation dispatch
@@ -1794,7 +1801,7 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		                          vk::PipelineStageFlagBits::eComputeShader, {}, 1, &filled, 0,
 		                          nullptr, 0, nullptr);
 		PreparedBindings* mesh_stage = &bindings.vertex[0];
-		CommitBindings(buffer, vk::PipelineBindPoint::eCompute, compute_pipeline,
+		CommitBindings(buffer, vk::PipelineBindPoint::eCompute, *compute_pipeline,
 		               std::span {&mesh_stage, 1u});
 		const auto records = mesh_output->BufferDeviceAddress();
 		const uint32_t draw_data[] {
@@ -1806,9 +1813,9 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		    static_cast<uint32_t>(mesh_index_offset), static_cast<uint32_t>(records),
 		    static_cast<uint32_t>(records >> 32u)};
 		static_assert(std::size(draw_data) == ShaderRecompiler::IR::PushData::MeshDrawDwordCount);
-		vk_buffer.pushConstants(compute_pipeline.pipeline_layout, vk::ShaderStageFlagBits::eCompute,
+		vk_buffer.pushConstants(compute_pipeline->pipeline_layout, vk::ShaderStageFlagBits::eCompute,
 		                        0, sizeof(draw_data), draw_data);
-		vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, compute_pipeline.pipeline);
+		vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, compute_pipeline->pipeline);
 		vk_buffer.dispatch(mesh_groups, draw.instance_count, 1);
 		vk::MemoryBarrier written {};
 		written.srcAccessMask = vk::AccessFlagBits::eShaderWrite;

@@ -161,11 +161,22 @@ public:
 	                              vk::PrimitiveTopology topology, bool primitive_restart_enable,
 	                              const GraphicsPrograms& programs, uint32_t vs_scaled_images = 0,
 	                              uint32_t ps_scaled_images = 0, bool allow_async = false);
-	Pipeline& GetComputePipeline(const ShaderComputeInputInfo& input_info,
+	/** Guest compute pipeline. Never returns nullptr: a first miss is compiled by
+	 * the async workers and awaited for `debug.capy.compute_wait_ms` (default
+	 * 150 ms) - a dispatch's writes are guest-visible, so unlike a draw it must
+	 * not be silently skipped; on timeout the compile finishes INLINE (the
+	 * pre-round-2 behaviour, correct but slow). The entry itself may hold a null
+	 * `pipeline` when the driver rejected the program; the dispatch is then
+	 * skipped, exactly as before. */
+	Pipeline* GetComputePipeline(const ShaderComputeInputInfo& input_info,
 	                             const ShaderProgram&          compute_program,
 	                             uint32_t                      scaled_images = 0);
-	// Compute pipeline of a mesh program emulated as a compute shader.
-	Pipeline& GetMeshComputePipeline(const ShaderVertexInputInfo& input_info,
+	/** Compute pipeline of a mesh program emulated as a compute shader. Returns
+	 * nullptr while the pipeline is still compiling in the background: the mesh
+	 * emulation feeds a draw, which is skipped exactly like a graphics-pipeline
+	 * miss and re-drawn for real once the compile lands (the old inline ~100 ms
+	 * compile per first-visit mesh program was half of the 3D warm-up storm). */
+	Pipeline* GetMeshComputePipeline(const ShaderVertexInputInfo& input_info,
 	                                 const ShaderProgram&         mesh_program,
 	                                 uint32_t                     scaled_images = 0);
 
@@ -213,6 +224,9 @@ private:
 	struct AsyncCompile;
 	std::unordered_map<GraphicsPipelineKey, std::shared_ptr<AsyncCompile>, GraphicsPipelineKeyHash>
 	                                        m_pending_pipelines;
+	// v0.0.9proQ4 round 2: compute/mesh pipeline first misses keyed like
+	// m_compute_pipelines (program id << 32 | scaled_images).
+	std::unordered_map<uint64_t, std::shared_ptr<AsyncCompile>> m_pending_compute;
 	std::mutex                              m_async_mutex;
 	std::condition_variable                 m_async_available;
 	std::deque<std::shared_ptr<AsyncCompile>> m_async_queue;
@@ -220,6 +234,11 @@ private:
 	bool                                    m_async_stop = false;
 	void                                    AsyncWorker();
 	void                                    StopAsyncWorkers();
+	/** Waits up to `wait_ms` (0 = no wait) for a pending async compile. Returns
+	 * true when the job finished; the caller promotes it into its owning cache
+	 * map. Shared by the compute and mesh first-miss paths. */
+	bool                                    AwaitPending(std::shared_ptr<AsyncCompile>& job,
+	                                                         int64_t                            wait_ms);
 
 	void InitializeDriverCache();
 };

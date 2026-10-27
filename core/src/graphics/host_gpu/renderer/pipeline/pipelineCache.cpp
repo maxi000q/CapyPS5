@@ -1002,6 +1002,12 @@ struct PipelineCache::AsyncCompile {
 	bool                               has_pixel = false;
 	GraphicsPrograms                   programs;
 	PipelineStaticParameters           static_params;
+	// v0.0.9proQ4 round 2: compute/mesh jobs (is_compute = true) reuse the same
+	// queue, priority accounting and done/notify protocol as graphics jobs.
+	bool                               is_compute            = false;
+	ShaderStageRuntime                 compute_stage {};
+	vk::ShaderModule                   compute_module        = nullptr;
+	uint32_t                           compute_scaled_images = 0;
 	std::unique_ptr<Pipeline>          pipeline;
 	std::atomic<bool>                  done {false};
 	// v0.0.10pro phase 3 (hot pipelines): every re-request of a still-pending pipeline bumps
@@ -1375,9 +1381,14 @@ void PipelineCache::AsyncWorker() {
 			}
 		}
 		auto pipeline = std::make_unique<Pipeline>();
-		CreatePipelineInternal(m_graphics, *pipeline, job->rendering, job->vertex_input, job->vertex_info,
-		                       job->has_pixel ? &job->pixel_info : nullptr, job->programs, job->static_params,
-		                       m_driver_cache);
+		if (job->is_compute) {
+			CreatePipelineInternal(m_graphics, *pipeline, job->compute_stage, job->compute_module,
+		                       m_driver_cache, job->compute_scaled_images);
+		} else {
+			CreatePipelineInternal(m_graphics, *pipeline, job->rendering, job->vertex_input,
+			                       job->vertex_info, job->has_pixel ? &job->pixel_info : nullptr,
+			                       job->programs, job->static_params, m_driver_cache);
+		}
 		job->pipeline = std::move(pipeline);
 		size_t queue_left = 0;
 		{
@@ -1398,7 +1409,7 @@ void PipelineCache::AsyncWorker() {
 	}
 }
 
-PipelineCache::Pipeline&
+PipelineCache::Pipeline*
 PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
                                   const ShaderProgram&          compute_program,
                                   uint32_t                      scaled_images) {
@@ -1409,11 +1420,52 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 
 	if (auto iter = m_compute_pipelines.find(key);
 	    iter != m_compute_pipelines.end()) {
-		return *iter->second;
+		return iter->second.get();
 	}
 
 	if (graphics_debug_dump_enabled()) {
 		ShaderDbgDumpInputInfo(input_info);
+	}
+
+	// Console Five Pro (v0.0.9proQ4 round 2): compute pipelines used to compile INLINE
+	// on the GPU thread - one half of the mesh/compute warm-up storms that held heavy
+	// 3D titles at whole seconds per frame. First misses now go to the async workers.
+	// Unlike a draw, a dispatch's writes are guest-visible and must not be silently
+	// skipped, so the GPU thread awaits a compute-sized bound and falls back to the old
+	// inline compile on timeout: the dispatch always runs, the compile just happens
+	// off-thread in the common case (and the driver disk cache makes later boots free).
+	static Common::DebugFlags::CachedValue async_pipelines("debug.capy.async_pipelines", 1);
+	static Common::DebugFlags::CachedValue compute_wait_ms("debug.capy.compute_wait_ms", 150);
+	if (async_pipelines.Get() != 0 && !m_async_workers.empty()) {
+		std::shared_ptr<AsyncCompile> job;
+		if (auto pending = m_pending_compute.find(key); pending != m_pending_compute.end()) {
+			job = pending->second;
+			// The dispatch path re-requests this program: compile it first.
+			(void)job->requests.fetch_add(1, std::memory_order_relaxed);
+		} else {
+			job                        = std::make_shared<AsyncCompile>();
+			job->is_compute            = true;
+			job->compute_stage         = input_info.stage;
+			job->compute_module        = compute_program.module;
+			job->compute_scaled_images = scaled_images;
+			m_pipelines_since_save++;
+			m_pending_compute.emplace(key, job);
+			{
+				std::lock_guard lock(m_async_mutex);
+				m_async_queue.push_back(job);
+			}
+			m_async_available.notify_all();
+		}
+		if (AwaitPending(job, std::max<int64_t>(compute_wait_ms.Get(), 0))) {
+			auto [iter, inserted] = m_compute_pipelines.emplace(key, std::move(job->pipeline));
+			EXIT_IF(!inserted);
+			m_pending_compute.erase(key);
+			return iter->second.get();
+		}
+		// Storm backlog timeout (the wait expired with the queue still draining):
+		// finish inline - correctness over latency. The abandoned worker job is
+		// harmless: it completes, nobody promotes it, the shared_ptr frees it.
+		m_pending_compute.erase(key);
 	}
 
 	auto cached = std::make_unique<Pipeline>();
@@ -1437,10 +1489,10 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 	auto [iter, inserted] = m_compute_pipelines.emplace(key, std::move(cached));
 	EXIT_IF(!inserted);
 
-	return *iter->second;
+	return iter->second.get();
 }
 
-PipelineCache::Pipeline&
+PipelineCache::Pipeline*
 PipelineCache::GetMeshComputePipeline(const ShaderVertexInputInfo& input_info,
                                       const ShaderProgram&         mesh_program,
                                       uint32_t                     scaled_images) {
@@ -1449,7 +1501,45 @@ PipelineCache::GetMeshComputePipeline(const ShaderVertexInputInfo& input_info,
 	// Program ids are unique across stages, so mesh programs share the compute pipeline map.
 	const auto key = mesh_program.id << 32u | scaled_images;
 	if (auto iter = m_compute_pipelines.find(key); iter != m_compute_pipelines.end()) {
-		return *iter->second;
+		return iter->second.get();
+	}
+	// Console Five Pro (v0.0.9proQ4 round 2): the mesh emulation feeds a DRAW, so a
+	// not-yet-compiled pipeline skips this draw exactly like a graphics-pipeline miss
+	// (heavy 3D titles run dozens of emulated mesh draws per frame; the old inline
+	// ~100 ms compile per first-visit program was the 1-3 FPS warm-up disaster). The
+	// compile lands on the async workers; the next occurrence draws for real.
+	static Common::DebugFlags::CachedValue async_pipelines("debug.capy.async_pipelines", 1);
+	static Common::DebugFlags::CachedValue wait_ms("debug.capy.pipeline_wait_ms", 0);
+	if (auto pending = m_pending_compute.find(key); pending != m_pending_compute.end()) {
+		auto job = pending->second;
+		(void)job->requests.fetch_add(1, std::memory_order_relaxed);
+		// Skip at once: a frame full of re-requested first-visit mesh draws must not
+		// pay even a few ms each (30 x 4 ms = an 8 FPS frame); the priority bump above
+		// already jumps this program to the front of the compile queue, so the next
+		// frame very likely has it.  makes the
+		// re-request wait N ms for near-done compiles instead of skipping at once.
+		if (!AwaitPending(job, std::max<int64_t>(wait_ms.Get(), 0))) {
+			return nullptr;
+		}
+		auto [iter, inserted] = m_compute_pipelines.emplace(key, std::move(job->pipeline));
+		EXIT_IF(!inserted);
+		m_pending_compute.erase(pending);
+		return iter->second.get();
+	}
+	if (async_pipelines.Get() != 0 && !m_async_workers.empty()) {
+		auto job                    = std::make_shared<AsyncCompile>();
+		job->is_compute             = true;
+		job->compute_stage          = input_info.stage;
+		job->compute_module         = mesh_program.module;
+		job->compute_scaled_images  = scaled_images;
+		m_pipelines_since_save++;
+		m_pending_compute.emplace(key, job);
+		{
+			std::lock_guard lock(m_async_mutex);
+			m_async_queue.push_back(job);
+		}
+		m_async_available.notify_all();
+		return nullptr;
 	}
 	auto cached = std::make_unique<Pipeline>();
 	m_pipelines_since_save++;
@@ -1457,6 +1547,18 @@ PipelineCache::GetMeshComputePipeline(const ShaderVertexInputInfo& input_info,
 	                       m_driver_cache, scaled_images);
 	auto [iter, inserted] = m_compute_pipelines.emplace(key, std::move(cached));
 	EXIT_IF(!inserted);
-	return *iter->second;
+	return iter->second.get();
+}
+
+bool PipelineCache::AwaitPending(std::shared_ptr<AsyncCompile>& job, int64_t wait_ms) {
+	if (job->done.load(std::memory_order_acquire)) {
+		return true;
+	}
+	if (wait_ms <= 0) {
+		return false;
+	}
+	std::unique_lock lock(m_async_mutex);
+	return m_async_available.wait_for(lock, std::chrono::milliseconds(wait_ms),
+	                                  [&] { return job->done.load(std::memory_order_acquire); });
 }
 } // namespace Libs::Graphics

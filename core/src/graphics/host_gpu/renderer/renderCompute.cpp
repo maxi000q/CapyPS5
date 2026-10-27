@@ -529,16 +529,17 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		scaled_mask |= ShaderRecompiler::IR::ScaledDispatchBit;
 		Common::DebugFlags::FrameTrace("    -> downscaled grid %ux%u", thread_group_x, thread_group_y);
 	}
-	auto& pipeline = m_context.GetPipelineCache().GetComputePipeline(
+	auto* pipeline = m_context.GetPipelineCache().GetComputePipeline(
 	    input_info, compute_program, scaled_mask);
-	if (pipeline.pipeline == nullptr) {
-		// The driver rejected this shader (logged once by the pipeline cache): skip the dispatch.
+	// v0.0.9proQ4 round 2: null entry = the driver rejected this shader (logged by the
+	// pipeline cache): skip the dispatch, exactly as before.
+	if (pipeline == nullptr || pipeline->pipeline == nullptr) {
 		ResetBindings();
 		return;
 	}
 
 	auto              vk_buffer        = buffer.Handle();
-	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, pipeline,
+	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, *pipeline,
 	               std::span {&descriptor_stage, 1u});
 	bool has_storage_writes = bindings.shared_memory.buffer != nullptr ||
 	    HasShaderBufferWrites(input_info.stage);
@@ -615,7 +616,7 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		}
 	}
 
-	vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.pipeline);
+	vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->pipeline);
 	const bool profile = GpuProfiler::Enabled();
 	if (profile) {
 		GpuProfiler::BeginDispatch(m_context.GetGraphics(), vk_buffer, sh_ctx.GetCs().cs_regs.data_addr,
@@ -627,7 +628,7 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	if (skip_cs.Get() == 0 ||
 	    static_cast<uint64_t>(skip_cs.Get()) != sh_ctx.GetCs().cs_regs.data_addr) {
 		RecordGuestDispatch(vk_buffer, m_context.GetGraphics(), {thread_group_x, thread_group_y, thread_group_z},
-		                    program, pipeline);
+		                    program, *pipeline);
 	}
 	if (profile) {
 		GpuProfiler::EndScope(vk_buffer);
@@ -666,10 +667,11 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	}
 	BindSharedMemory(m_context, input_info, bindings, args_addr);
 	RebindImages(bindings);
-	auto& pipeline = m_context.GetPipelineCache().GetComputePipeline(
+	auto* pipeline = m_context.GetPipelineCache().GetComputePipeline(
 	    input_info, compute_program, ScaledImageMask(bindings));
-	if (pipeline.pipeline == nullptr) {
-		// The driver rejected this shader (logged once by the pipeline cache): skip the dispatch.
+	// v0.0.9proQ4 round 2: null entry = the driver rejected this shader (logged by the
+	// pipeline cache): skip the dispatch, exactly as before.
+	if (pipeline == nullptr || pipeline->pipeline == nullptr) {
 		ResetBindings();
 		return;
 	}
@@ -678,7 +680,7 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	    args_addr, sizeof(vk::DispatchIndirectCommand), false);
 	EXIT_IF(args_buffer == nullptr || (args_offset & 3u) != 0);
 	RebindBuffers(bindings);
-	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, pipeline,
+	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, *pipeline,
 	               std::span {&descriptor_stage, 1u});
 	const auto vk_buffer = buffer.Handle();
 	const bool has_storage_writes = bindings.shared_memory.buffer != nullptr ||
@@ -698,7 +700,7 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	                              vk::PipelineStageFlagBits::eTransfer,
 	                          vk::PipelineStageFlagBits::eDrawIndirect, {},
 	                          1, &barrier, 0, nullptr, 0, nullptr);
-	vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.pipeline);
+	vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->pipeline);
 	vk_buffer.dispatchIndirect(args_buffer->Handle(), args_offset);
 	ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
 	ResetBindings();
