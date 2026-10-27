@@ -5,6 +5,7 @@
 #include "kernel/memory.h"
 #include "common/debugFlags.h"
 #include "common/contentProfile.h"
+#include "common/enginePolicy.h"
 #include "common/gpuProfile.h"
 
 #include "common/assert.h"
@@ -308,12 +309,19 @@ static uint64_t GuestReadCacheSlots() {
 	// - its logic loop walks a wide descriptor/header working set every
 	// frame. 8192 slots (32 MiB per thread) halve the conflict misses the
 	// mobile profile's 4096-entry table shows on that working-set size.
-	if (Common::ContentProfile::Profile501Enabled()) {
-		return 8192;
-	}
-	return (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
-	           ? 4096
-	           : 512;
+	// v0.0.9proQ4 round 5: the ladder lives in common/enginePolicy.h. The
+	// class tiers stay vendor-shared (working-set sizes are determined by
+	// the content, not the GPU); the REGULAR tier diverges: the median Mali
+	// device is a mid-range SoC whose slower shared DRAM makes every
+	// conflict miss costlier, so Mali takes 8192 slots (32 MiB coverage,
+	// 64 KiB of tags per thread - no benefit under a 16 MiB set, conflict
+	// removal for the 16-32 MiB sets) while Adreno keeps the flagship 4096.
+	return std::min<uint64_t>(
+	    Common::EnginePolicy::TuningFor(Common::GpuProfile::MaliProfileEnabled(),
+	                                    Common::GpuProfile::AdrenoProfileEnabled(),
+	                                    Common::EnginePolicy::CurrentTier())
+	        .read_cache_slots,
+	    GuestReadCache::MaxSlots);
 }
 
 // v0.0.9proQ4 round 3: set-associative lookup helpers. live_slots is always

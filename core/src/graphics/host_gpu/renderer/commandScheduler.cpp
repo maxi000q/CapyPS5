@@ -12,6 +12,7 @@
 #include "common/assert.h"
 #include "common/contentProfile.h"
 #include "common/debugFlags.h"
+#include "common/enginePolicy.h"
 #include "common/gpuProfile.h"
 #include "common/logging/log.h"
 #include "graphics/host_gpu/graphicContext.h"
@@ -590,17 +591,19 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 	// frames are thousands of tiny draws, the deepest merge amortises the
 	// fixed submit cost furthest, and its frame time is not submit-latency
 	// bound (the guest CPU is), so the deeper flush granularity is free.
+	// v0.0.9proQ4 round 5: the whole ladder moved into one table
+	// (common/enginePolicy.h) and gained its Mali column: Arm's driver
+	// serializes every submit into kernel-visible command streams and
+	// builds a tiler job chain per pass, so its fixed per-submit cost is
+	// the largest of the mobile vendors - Mali batches 24/32/40 against
+	// Adreno's 16/24/32. The queue-empty batch drain bounds the deeper
+	// flush to the frame tail, and semaphore-carrying (present)
+	// submissions still flush the batch first.
+	const auto& engine_tuning = Common::EnginePolicy::TuningFor(
+	    Common::GpuProfile::MaliProfileEnabled(), Common::GpuProfile::AdrenoProfileEnabled(),
+	    Common::EnginePolicy::CurrentTier());
 	const auto max_batch = static_cast<uint32_t>(
-	    batch_limit.Get() >= 0
-	        ? batch_limit.Get()
-	        : (Common::ContentProfile::Profile501Enabled()
-	               ? 32
-	               : (Common::ContentProfile::Profile500Enabled()
-	                      ? 24
-	                      : ((Common::GpuProfile::MaliProfileEnabled() ||
-	                          Common::GpuProfile::AdrenoProfileEnabled())
-	                             ? 16
-	                             : 8))));
+	    batch_limit.Get() >= 0 ? batch_limit.Get() : engine_tuning.submit_batch);
 	const bool  forced    = m_force_submit.exchange(false, std::memory_order_acq_rel);
 	const bool  batchable = m_batch_submits && max_batch > 1 && !forced &&
 	                      submit.num_wait_semaphores == 0 &&

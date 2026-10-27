@@ -12,6 +12,8 @@
 
 #include "common/contentProfile.h"
 #include "common/debugFlags.h"
+#include "common/enginePolicy.h"
+#include "common/gpuProfile.h"
 
 #include <algorithm>
 #include <atomic>
@@ -58,10 +60,17 @@ uint32_t ActiveSweepIntervalMs() {
         // v0.0.9proQ4 round 4: the compositing family shares the fast
         // cadence - its guest heap is as hot as any, and the TLB win
         // compounds the same way for a CPU-bound frame loop.
-        return (Common::ContentProfile::Profile500Enabled() ||
-                Common::ContentProfile::Profile501Enabled())
-                   ? 1000
-                   : ActiveSweepMs;
+        // v0.0.9proQ4 round 5: the cadence ladder lives in the vendor-aware
+        // table (common/enginePolicy.h). Under the classes Mali sweeps every
+        // 750 ms instead of 1 s: on a UMA Mali SoC the MMU walks contend with
+        // the GPU for the same DRAM bus, so reaching full 2 MiB-page coverage
+        // sooner compounds the TLB win for the whole streaming period; the
+        // sweeper stays nice-8 background work either way.
+        return Common::EnginePolicy::TuningFor(
+                   Common::GpuProfile::MaliProfileEnabled(),
+                   Common::GpuProfile::AdrenoProfileEnabled(),
+                   Common::EnginePolicy::CurrentTier())
+            .thp_active_sweep_ms;
 }
 
 enum class ThpMode : int32_t {

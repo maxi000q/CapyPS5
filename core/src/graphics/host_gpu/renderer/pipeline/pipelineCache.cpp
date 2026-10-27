@@ -15,6 +15,7 @@
 #include "common/assert.h"
 #include "common/contentProfile.h"
 #include "common/debugFlags.h"
+#include "common/enginePolicy.h"
 #include "graphics/shader/recompiler/HostFeatures.h"
 #include "common/emulatorConfig.h"
 #include "common/gpuProfile.h"
@@ -601,16 +602,23 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	// streams new materials.
 	// v0.0.10pro phase 2: the Adreno profile adds one too (Turnip compiles slower
 	// than Qualcomm's proprietary driver; UE material streaming hitches less).
-	const uint32_t profile_extra =
-	    (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
-	        ? 1
-	        : 0;
 	// v0.0.9proQ4 round 3: profile 500 adds one more worker and raises the cap
 	// by one (7): the matched content class pays its whole pipeline warm-up in
 	// the first minutes, and an extra compile thread shortens exactly that
 	// phase; the workers stay nice'd and pinned off the prime core.
-	const uint32_t turbo_extra = Common::ContentProfile::Profile500Enabled() ? 1u : 0u;
-	const uint32_t worker_cap  = 6u + turbo_extra;
+	// v0.0.9proQ4 round 5: the extras and the cap come from the vendor-aware
+	// table (common/enginePolicy.h). Under the throughput tier Mali adds TWO
+	// extra workers (cap 8) against everyone else's one (cap 7): Arm's backend
+	// compiler is the slowest shader stage on mobile, and that tier pays its
+	// whole pipeline warm-up in the first minutes. The compositing tier keeps
+	// its efficiency-cluster step-down on every vendor - that placement
+	// follows the workload, not the GPU.
+	const auto& engine_tuning = Common::EnginePolicy::TuningFor(
+	    Common::GpuProfile::MaliProfileEnabled(), Common::GpuProfile::AdrenoProfileEnabled(),
+	    Common::EnginePolicy::CurrentTier());
+	const uint32_t profile_extra = engine_tuning.compile_profile_extra;
+	const uint32_t turbo_extra   = engine_tuning.compile_class_extra;
+	const uint32_t worker_cap    = engine_tuning.compile_pool_cap;
 	const uint32_t worker_count =
 		std::min(worker_cap,
 		          (host_cores >= 12 ? 5u : host_cores >= 8 ? 4u : 2u) + profile_extra + turbo_extra);
@@ -1390,11 +1398,22 @@ void PipelineCache::AsyncWorker() {
 			if (m_async_stop) {
 				return;
 			}
+			// v0.0.9proQ4 round 5: the growth size and the cap come from the
+			// vendor-aware table too - Mali under the throughput tier grows by
+			// two (cap 8), everyone else by one. Still one shot per run.
 			if (!m_turbo_worker_applied && m_async_queue.size() >= m_async_workers.size() &&
-			    m_async_workers.size() < 7u &&
 			    Common::ContentProfile::Profile500Enabled()) {
+				const auto& growth_tuning = Common::EnginePolicy::TuningFor(
+				    Common::GpuProfile::MaliProfileEnabled(),
+				    Common::GpuProfile::AdrenoProfileEnabled(),
+				    Common::EnginePolicy::CurrentTier());
+				for (uint32_t grown = 0;
+				     grown < growth_tuning.compile_class_extra &&
+				     m_async_workers.size() < growth_tuning.compile_pool_cap;
+				     ++grown) {
+					m_async_workers.emplace_back([this] { AsyncWorker(); });
+				}
 				m_turbo_worker_applied = true;
-				m_async_workers.emplace_back([this] { AsyncWorker(); });
 			}
 			if (hot_pipelines.Get() != 0 && m_async_queue.size() > 1) {
 				auto best = m_async_queue.begin();

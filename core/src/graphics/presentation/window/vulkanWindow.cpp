@@ -1308,7 +1308,9 @@ void WindowContext::CreateVulkan() {
 			"GPU: {} - Mali performance profile enabled: hardware render-target clears "
 			"(AFBC-friendly), 128 MiB streaming buffer, +1 pipeline worker, "
 			"pass-split-free event barriers, batched compute submissions, "
-			"batched queue submits, 2 MiB huge-page guest memory, no depth-pass kick\n",
+			"deeper batched queue submits (24/32/40 by workload class), "
+			"2 MiB huge-page guest memory (750 ms class sweeps), widened guest read "
+			"cache, narrow-bandwidth read-ahead bases, no depth-pass kick\n",
 			device_properties.deviceName.data()));
 	}
 	// v0.0.10pro phase 2: Snapdragon-tuned defaults for Adreno GPUs (also under Turnip).
