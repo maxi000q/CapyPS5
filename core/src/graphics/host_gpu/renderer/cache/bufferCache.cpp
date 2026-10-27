@@ -6,6 +6,7 @@
 
 #include "common/alignment.h"
 #include "common/assert.h"
+#include "common/contentProfile.h"
 #include "common/logging/log.h"
 #include "common/debugFlags.h"
 #include "common/gpuProfile.h"
@@ -54,12 +55,22 @@ uint64_t StreamBufferSize() {
 	// v0.0.9pro: the Mali profile defaults to 128 MiB and other GPUs to 96 MiB (was 64) -
 	// so streaming-heavy games wait on the GPU less. Explicit values still win.
 	// v0.0.10pro phase 2: the Adreno profile takes the same 128 MiB.
-	const int64_t fallback =
-	    (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
-	        ? 128
-	        : 96;
-	Common::DebugFlags::CachedValue mb("debug.capy.stream_mb", fallback);
-	return static_cast<uint64_t>(std::clamp<int64_t>(mb.Get(), 16, 1024)) * MiB;
+	// v0.0.9proQ4 round 3: the default now resolves per call (fallback -1 = no
+	// explicit user value), so a profile-500 session lifts the buffer to 160 MiB
+	// while every other game keeps its own default - also correct when two games
+	// run in one process.
+	Common::DebugFlags::CachedValue mb("debug.capy.stream_mb", -1);
+	int64_t                         value = mb.Get();
+	if (value < 0) {
+		value =
+		    (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
+		        ? 128
+		        : 96;
+		if (Common::ContentProfile::Profile500Enabled()) {
+			value = 160;
+		}
+	}
+	return static_cast<uint64_t>(std::clamp<int64_t>(value, 16, 1024)) * MiB;
 }
 
 } // namespace
@@ -415,13 +426,18 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 		// `setprop debug.capy.read_ahead_kb N` sets the window (0 downloads the faulting pages only).
 		// v0.0.10pro phase 3: 512 KB under the Mali/Adreno profiles - heavy titles fault GPU-owned
 		// pages in long sequential sweeps, and a wider window halves the fault+download count.
-		static Common::DebugFlags::CachedValue read_ahead_kb(
-		    "debug.capy.read_ahead_kb",
-		    // v0.0.9proQ3: Mali keeps the 256 KB window - it is bandwidth-bound and a
-		    // wider download copies more bytes per fault; Adreno has the headroom for
-		    // the 512 KB window the Q2 round gave it.
-		    Common::GpuProfile::AdrenoProfileEnabled() ? 512 : 256);
-		const uint64_t base_window  = static_cast<uint64_t>(std::max<int64_t>(read_ahead_kb.Get(), 0)) * 1024u;
+		// v0.0.9proQ4 round 3: per-call default (fallback -1 = no explicit user
+		// value). Profile 500 widens the base window to 768 KB - the matched
+		// content class streams its assets in long sequential sweeps and pays one
+		// GPU wait per window when the window is narrow.
+		static Common::DebugFlags::CachedValue read_ahead_kb("debug.capy.read_ahead_kb", -1);
+		int64_t                                 window_kb = read_ahead_kb.Get();
+		if (window_kb < 0) {
+			window_kb = Common::ContentProfile::Profile500Enabled()
+			                ? 768
+			                : (Common::GpuProfile::AdrenoProfileEnabled() ? 512 : 256);
+		}
+		const uint64_t base_window  = static_cast<uint64_t>(std::max<int64_t>(window_kb, 0)) * 1024u;
 		// v0.0.9proQ4 round 2: adaptive window. A static window is wrong twice: a
 		// long sequential sweep pays one GPU wait per window (under-prefetch), a
 		// scattered pattern copies whole windows it never reads (bandwidth waste
@@ -434,7 +450,12 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 		static Common::DebugFlags::CachedValue adaptive("debug.capy.read_ahead_adaptive", 1);
 		uint64_t read_ahead = base_window;
 		if (adaptive.Get() != 0) {
-			constexpr uint64_t kWindowMax = 1ull << 20;
+			// v0.0.9proQ4 round 3: profile 500 doubles the ceiling to 2 MiB - a
+			// sweep-outrunning stream keeps doubling the window instead of
+			// stalling at 1 MiB and paying a GPU wait per window.
+			const uint64_t kWindowMax = Common::ContentProfile::Profile500Enabled()
+			                            ? (2ull << 20)
+			                            : (1ull << 20);
 			constexpr uint64_t kWindowMin = 64ull * 1024;
 			if (m_read_ahead_window == 0) {
 				m_read_ahead_window = base_window;

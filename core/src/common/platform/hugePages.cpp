@@ -10,6 +10,7 @@
 
 #include "common/hugePages.h"
 
+#include "common/contentProfile.h"
 #include "common/debugFlags.h"
 
 #include <algorithm>
@@ -47,6 +48,15 @@ constexpr size_t   MaxTrackedRanges    = 16384;
 constexpr uint32_t ActiveSweepMs       = 2000;  // sweep every 2 s while things happen
 constexpr uint32_t IdleSweepMs         = 32000; // back off to 32 s when idle
 constexpr uint32_t SweeperNice         = 8;     // background, never steals game time
+
+// v0.0.9proQ4 round 3: profile 500 halves the active sweep cadence (1 s):
+// the matched content class commits hundreds of MiB in its first minutes,
+// and reaching full 2 MiB-page coverage twice as fast compounds the TLB
+// win for the rest of the session. The sweeper stays nice-8 background
+// work either way.
+uint32_t ActiveSweepIntervalMs() {
+        return Common::ContentProfile::Profile500Enabled() ? 1000 : ActiveSweepMs;
+}
 
 enum class ThpMode : int32_t {
         Off     = 0,
@@ -252,7 +262,7 @@ void* SweeperMain(void* /*arg*/) {
                 RescuePassToAdviceMode();
                 return nullptr;
         }
-        uint32_t sleep_ms = ActiveSweepMs;
+        uint32_t sleep_ms = ActiveSweepIntervalMs();
         uint64_t epoch_before = g_notify_epoch.load(std::memory_order_relaxed);
         while (!g_stop_requested.load(std::memory_order_relaxed)) {
                 SleepMs(sleep_ms);
@@ -263,7 +273,7 @@ void* SweeperMain(void* /*arg*/) {
                 const uint64_t epoch_now = g_notify_epoch.load(std::memory_order_relaxed);
                 if (collapsed != 0 || epoch_now != epoch_before) {
                         // Something changed: stay (or return to) the active cadence.
-                        sleep_ms      = ActiveSweepMs;
+                        sleep_ms      = ActiveSweepIntervalMs();
                         epoch_before  = epoch_now;
                 } else {
                         // Quiet game: back off exponentially, capped.

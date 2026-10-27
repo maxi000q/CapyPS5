@@ -13,6 +13,7 @@
 #include "graphics/host_gpu/renderer/pipeline/spirvOptimizer.h"
 
 #include "common/assert.h"
+#include "common/contentProfile.h"
 #include "common/debugFlags.h"
 #include "graphics/shader/recompiler/HostFeatures.h"
 #include "common/emulatorConfig.h"
@@ -604,8 +605,15 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	    (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
 	        ? 1
 	        : 0;
+	// v0.0.9proQ4 round 3: profile 500 adds one more worker and raises the cap
+	// by one (7): the matched content class pays its whole pipeline warm-up in
+	// the first minutes, and an extra compile thread shortens exactly that
+	// phase; the workers stay nice'd and pinned off the prime core.
+	const uint32_t turbo_extra = Common::ContentProfile::Profile500Enabled() ? 1u : 0u;
+	const uint32_t worker_cap  = 6u + turbo_extra;
 	const uint32_t worker_count =
-		std::min(6u, (host_cores >= 12 ? 5u : host_cores >= 8 ? 4u : 2u) + profile_extra);
+		std::min(worker_cap,
+		          (host_cores >= 12 ? 5u : host_cores >= 8 ? 4u : 2u) + profile_extra + turbo_extra);
 	for (uint32_t i = 0; i < worker_count; i++) {
 		m_async_workers.emplace_back([this] { AsyncWorker(); });
 	}

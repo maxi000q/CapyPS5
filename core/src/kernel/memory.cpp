@@ -4,6 +4,7 @@
 
 #include "kernel/memory.h"
 #include "common/debugFlags.h"
+#include "common/contentProfile.h"
 #include "common/gpuProfile.h"
 
 #include "common/assert.h"
@@ -265,7 +266,9 @@ struct GuestReadCache {
 	// Mali/Adreno profiles). 4096 slots cover 16 MiB per thread - UE's shader resource
 	// walker reads gigabytes of scattered descriptors, and every hit skips a
 	// process_vm_readv syscall (they were 27% of the GPU thread when uncached).
-	static constexpr uint32_t MaxSlots = 4096;
+	// v0.0.9proQ4 round 3: 16384 slots (128 KiB of tags per thread). Profile 500
+	// uses the whole table; every other profile keeps its live-slot count.
+	static constexpr uint32_t MaxSlots = 16384;
 	uint64_t                  generation = 0;
 	std::array<uint64_t, MaxSlots> pages {};
 };
@@ -282,6 +285,13 @@ static uint64_t GuestReadCacheSlots() {
 			power *= 2;
 		}
 		return power;
+	}
+	// v0.0.9proQ4 round 3: profile 500 (the content-signature preset) takes the
+	// full table - 16384 slots cover 64 MiB per thread, and the descriptor
+	// working set of the matched content class is far larger than the 16 MiB
+	// the mobile GPU profiles cover.
+	if (Common::ContentProfile::Profile500Enabled()) {
+		return GuestReadCache::MaxSlots;
 	}
 	return (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
 	           ? 4096
@@ -1266,6 +1276,10 @@ bool ReadGuestMemory(uint64_t vaddr, void* data, uint64_t size) {
 	const auto generation = g_guest_read_generation.load(std::memory_order_acquire);
 	const auto first_page = vaddr / CachePage;
 	const auto last_page  = (vaddr + size - 1) / CachePage;
+	// v0.0.9proQ4 round 3: the slot count is resolved once per read, not once
+	// per page - the flag lookups amortise inside CachedValue, but one read
+	// can walk dozens of pages and both loops below want the same value.
+	const uint64_t live_slots = GuestReadCacheSlots();
 	if (use_cache) {
 		if (cache.generation != generation) {
 			cache.pages.fill(0);
@@ -1273,7 +1287,7 @@ bool ReadGuestMemory(uint64_t vaddr, void* data, uint64_t size) {
 		}
 		bool hit = true;
 		for (auto page = first_page; page <= last_page && hit; page++) {
-			hit = cache.pages[page % GuestReadCacheSlots()] == page + 1;
+			hit = cache.pages[page % live_slots] == page + 1;
 		}
 		if (hit) {
 			if (!GuardedGuestCopy(data, reinterpret_cast<const void*>(vaddr), size)) {
@@ -1300,7 +1314,7 @@ bool ReadGuestMemory(uint64_t vaddr, void* data, uint64_t size) {
 		if (use_cache && g_guest_address_space != nullptr &&
 		    g_guest_address_space->BackingContains(first_page * CachePage, (last_page - first_page + 1) * CachePage)) {
 			for (auto page = first_page; page <= last_page; page++) {
-				cache.pages[page % GuestReadCacheSlots()] = page + 1;
+				cache.pages[page % live_slots] = page + 1;
 			}
 		}
 		return true;

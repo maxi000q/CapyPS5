@@ -10,6 +10,7 @@
 
 #include "graphics/host_gpu/renderer/gpuProfiler.h"
 #include "common/assert.h"
+#include "common/contentProfile.h"
 #include "common/debugFlags.h"
 #include "common/gpuProfile.h"
 #include "common/logging/log.h"
@@ -582,13 +583,18 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 	// frame pushes ~80 flushes at single-digit FPS. `setprop debug.capy.submit_batch N`
 	// still overrides (the previous default was 8).
 	static Common::DebugFlags::CachedValue batch_limit("debug.capy.submit_batch", -1);
+	// v0.0.9proQ4 round 3: profile 500 batches 24 - the matched content class
+	// pushes well past 80 semaphore-free flushes per frame, and every merged
+	// vkQueueSubmit is fixed driver+kernel overhead off the frame path.
 	const auto max_batch = static_cast<uint32_t>(
 	    batch_limit.Get() >= 0
 	        ? batch_limit.Get()
-	        : ((Common::GpuProfile::MaliProfileEnabled() ||
-	            Common::GpuProfile::AdrenoProfileEnabled())
-	               ? 16
-	               : 8));
+	        : (Common::ContentProfile::Profile500Enabled()
+	               ? 24
+	               : ((Common::GpuProfile::MaliProfileEnabled() ||
+	                   Common::GpuProfile::AdrenoProfileEnabled())
+	                      ? 16
+	                      : 8)));
 	const bool  forced    = m_force_submit.exchange(false, std::memory_order_acq_rel);
 	const bool  batchable = m_batch_submits && max_batch > 1 && !forced &&
 	                      submit.num_wait_semaphores == 0 &&
