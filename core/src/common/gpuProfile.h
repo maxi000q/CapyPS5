@@ -64,6 +64,52 @@ inline void SetVendor(uint32_t vendor_id, const char* device_name) {
         return GetVendor() == Vendor::Arm;
 }
 
+/** True on a Qualcomm Adreno GPU (proprietary driver or Turnip). */
+[[nodiscard]] inline bool IsAdreno() {
+        return GetVendor() == Vendor::Qualcomm;
+}
+
+// Console Five Pro (v0.0.10pro phase 2): whether the selected Vulkan device runs an open
+// driver (Turnip reports driverName "freedreno"), recorded next to the vendor in
+// WindowContext::CreateVulkan. Open drivers compile shaders slower than Qualcomm's
+// proprietary one, which the Adreno profile offsets with an extra pipeline worker.
+inline std::atomic<uint32_t> g_open_driver {0};
+
+inline void SetOpenDriver(const char* driver_name) {
+        uint32_t open = 0;
+        if (driver_name != nullptr) {
+                if (std::strncmp(driver_name, "freedreno", 9) == 0 ||
+                    std::strncmp(driver_name, "Turnip", 6) == 0 ||
+                    std::strncmp(driver_name, "panvk", 5) == 0 ||
+                    std::strncmp(driver_name, "Mesa", 4) == 0) {
+                        open = 1;
+                }
+        }
+        g_open_driver.store(open, std::memory_order_release);
+}
+
+[[nodiscard]] inline bool IsOpenDriver() {
+        return g_open_driver.load(std::memory_order_acquire) != 0;
+}
+
+/**
+ * The Adreno performance profile (v0.0.10pro phase 2): Snapdragon-tuned defaults with the
+ * same graphics - one extra pipeline-compile worker (Turnip compiles slower than the
+ * proprietary driver, so shader warm-up during material streaming finishes sooner), a 128 MiB
+ * streaming buffer (streaming-heavy games wait on the GPU less) and one more swapchain image
+ * (MAILBOX stops throttling vkAcquireNextImageKHR when the emulator runs ahead of a 90/120 Hz
+ * display). `debug.capy.adreno_profile` (frontend setting "Adreno GPU optimization"):
+ * 2 = auto (the default; on only when an Adreno GPU is present), 1 = force on, 0 = force off.
+ */
+[[nodiscard]] inline bool AdrenoProfileEnabled() {
+        static DebugFlags::CachedValue profile("debug.capy.adreno_profile", 2);
+        switch (profile.Get()) {
+                case 1: return true;
+                case 0: return false;
+                default: return IsAdreno();
+        }
+}
+
 /**
  * The Mali performance profile (v0.0.9pro): bandwidth-tuned defaults for Mali GPUs with the
  * same graphics — hardware render-target clears that keep AFBC compression alive, a larger

@@ -593,9 +593,14 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	// v0.0.9pro: one more worker under the Mali profile - Mali shader compiles are
 	// slower, so finishing the warm-up sooner means fewer hitches while a game
 	// streams new materials.
-	const uint32_t mali_extra = Common::GpuProfile::MaliProfileEnabled() ? 1 : 0;
+	// v0.0.10pro phase 2: the Adreno profile adds one too (Turnip compiles slower
+	// than Qualcomm's proprietary driver; UE material streaming hitches less).
+	const uint32_t profile_extra =
+	    (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
+	        ? 1
+	        : 0;
 	const uint32_t worker_count =
-		std::min(6u, (host_cores >= 12 ? 5u : host_cores >= 8 ? 4u : 2u) + mali_extra);
+		std::min(6u, (host_cores >= 12 ? 5u : host_cores >= 8 ? 4u : 2u) + profile_extra);
 	for (uint32_t i = 0; i < worker_count; i++) {
 		m_async_workers.emplace_back([this] { AsyncWorker(); });
 	}

@@ -7,6 +7,7 @@
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
 #include "common/debugFlags.h"
+#include "common/gpuProfile.h"
 #include "common/profiler.h"
 #include "common/telemetry.h"
 #include "common/threads.h"
@@ -413,6 +414,17 @@ void Swapchain::Create() {
 		               surface.capabilities.maxImageExtent.height);
 	}
 	uint32_t image_count = surface.capabilities.minImageCount + 1;
+	// v0.0.10pro phase 2: under the Adreno profile one more swapchain image keeps MAILBOX from
+	// throttling vkAcquireNextImageKHR when the emulator runs ahead of a 90/120 Hz display
+	// (the high-refresh unlock presents up to twice as often as the old 60 Hz lock).
+	// `setprop debug.capy.swapchain_extra N` overrides (0 = the plain +1 of other GPUs).
+	{
+		static Common::DebugFlags::CachedValue extra_images("debug.capy.swapchain_extra", -1);
+		const int64_t extra =
+		    extra_images.Get() >= 0 ? extra_images.Get()
+		                            : (Common::GpuProfile::AdrenoProfileEnabled() ? 1 : 0);
+		image_count += static_cast<uint32_t>(std::max<int64_t>(extra, 0));
+	}
 	if (surface.capabilities.maxImageCount != 0) {
 		image_count = std::min(image_count, surface.capabilities.maxImageCount);
 	}

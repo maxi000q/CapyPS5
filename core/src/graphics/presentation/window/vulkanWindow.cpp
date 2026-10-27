@@ -1284,8 +1284,10 @@ void WindowContext::CreateVulkan() {
 	}
 
 	vk::PhysicalDevicePushDescriptorProperties push_descriptor_properties {};
+	vk::PhysicalDeviceDriverProperties          driver_properties {};
 	vk::PhysicalDeviceProperties2              physical_device_properties {};
 	physical_device_properties.pNext = &push_descriptor_properties;
+	push_descriptor_properties.pNext = &driver_properties;
 	graphic_ctx.physical_device.getProperties2(&physical_device_properties);
 	graphic_ctx.physical_device_properties = physical_device_properties.properties;
 	graphic_ctx.max_push_descriptors       = push_descriptor_properties.maxPushDescriptors;
@@ -1296,12 +1298,25 @@ void WindowContext::CreateVulkan() {
 	// v0.0.9pro: record the GPU vendor so per-vendor performance defaults can key off it.
 	Common::GpuProfile::SetVendor(device_properties.vendorID,
 	                               device_properties.deviceName.data());
+	// v0.0.10pro phase 2: also record whether the driver is an open one (Turnip/freedreno) -
+	// it compiles shaders slower, which the Adreno profile offsets.
+	Common::GpuProfile::SetOpenDriver(driver_properties.driverName.data());
+	LOGF("Vulkan driver: %s (%s)\n", driver_properties.driverName.data(),
+	     driver_properties.driverInfo.data());
 	if (Common::GpuProfile::MaliProfileEnabled()) {
 		Log::WriteToConsoleAndLog(fmt::format(
 			"GPU: {} - Mali performance profile enabled: hardware render-target clears "
 			"(AFBC-friendly), 128 MiB streaming buffer, +1 pipeline worker, "
 			"pass-split-free event barriers, batched compute submissions, "
 			"batched queue submits, 2 MiB huge-page guest memory, no depth-pass kick\n",
+			device_properties.deviceName.data()));
+	}
+	// v0.0.10pro phase 2: Snapdragon-tuned defaults for Adreno GPUs (also under Turnip).
+	if (Common::GpuProfile::AdrenoProfileEnabled()) {
+		Log::WriteToConsoleAndLog(fmt::format(
+			"GPU: {} - Adreno performance profile enabled: 128 MiB streaming buffer, "
+			"+1 pipeline worker, one extra swapchain image for the high-refresh present, "
+			"UBWC-friendly render targets, depth-pass kick (Adreno depth-write workaround)\n",
 			device_properties.deviceName.data()));
 	}
 	// v0.0.9proQ1: render targets keep the driver framebuffer compression (AFBC on Mali,

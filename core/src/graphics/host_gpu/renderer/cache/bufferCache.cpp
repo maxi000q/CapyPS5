@@ -53,7 +53,11 @@ constexpr uint64_t GdsBufferSize = 64 * 1024;
 uint64_t StreamBufferSize() {
 	// v0.0.9pro: the Mali profile defaults to 128 MiB and other GPUs to 96 MiB (was 64) -
 	// so streaming-heavy games wait on the GPU less. Explicit values still win.
-	const int64_t fallback = Common::GpuProfile::MaliProfileEnabled() ? 128 : 96;
+	// v0.0.10pro phase 2: the Adreno profile takes the same 128 MiB.
+	const int64_t fallback =
+	    (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
+	        ? 128
+	        : 96;
 	Common::DebugFlags::CachedValue mb("debug.capy.stream_mb", fallback);
 	return static_cast<uint64_t>(std::clamp<int64_t>(mb.Get(), 16, 1024)) * MiB;
 }

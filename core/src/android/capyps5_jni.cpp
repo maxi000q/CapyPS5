@@ -148,6 +148,17 @@ JNIEXPORT jboolean JNICALL Java_com_consolefivepro_NativeBridge_nativeStartGame(
 	options.config.screen_width       = 1280;
 	options.config.screen_height      = 720;
 	options.config.fullscreen_enabled = true;
+	// Console Five Pro (v0.0.10pro phase 2): the emulated vblank used to stay at the built-in
+	// 60 Hz, and PresentThread flips at most once per vblank - every game pacing on vblank was
+	// capped at 60 FPS even on 90/120 Hz displays. The frontend passes the chosen refresh
+	// (display default, see GameActivity) as debug.capy.vblank_hz before nativeStartGame.
+	{
+		static Common::DebugFlags::CachedValue vblank_hz("debug.capy.vblank_hz", 0);
+		const int64_t                          hz = vblank_hz.Get();
+		if (hz >= 30 && hz <= 120) {
+			options.config.vblank_frequency = static_cast<uint32_t>(hz);
+		}
+	}
 
 	// Console Five Pro fix (v0.0.8pro): after a previous game finished on its own
 	// (Emulator::Run returned), the thread object is finished but still joinable, and
