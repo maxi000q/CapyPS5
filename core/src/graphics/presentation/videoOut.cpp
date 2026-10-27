@@ -16,6 +16,7 @@
 #include "common/telemetry.h"
 #include "common/threads.h"
 #include "common/timer.h"
+#include "common/perfCores.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/guest_gpu/tile.h"
@@ -192,6 +193,15 @@ struct BufferAttributeGroup {
 struct VideoOutConfig {
 	Common::Mutex                       mutex;
 	Common::CondVar                     vblank_cond;
+	// v0.0.9proQ3 fast path: per-kind event interest and vblank waiter counts.
+	// Maintained under `mutex` (registration, WaitVblank) or reset at Open; read
+	// lock-free by the present thread's vblank triggers to skip ports nobody
+	// listens on. Over-counts are safe (slow path); under-counts cannot happen
+	// because every decrement pairs with an increment under the same lock.
+	std::atomic<uint32_t>               flip_events        {0};
+	std::atomic<uint32_t>               pre_vblank_events  {0};
+	std::atomic<uint32_t>               vblank_events      {0};
+	std::atomic<uint32_t>               vblank_waiters     {0};
 	std::shared_ptr<VideoOutEventState> events      = std::make_shared<VideoOutEventState>();
 	uint32_t                            width       = 0;
 	uint32_t                            height      = 0;
@@ -287,6 +297,15 @@ public:
 
 	void                     Init(uint32_t width, uint32_t height);
 	FlipQueue&               GetFlipQueue() { return m_flip_queue; }
+
+	// v0.0.9proQ3: adaptive vblank governor. See GovernedVblankFrequency.
+	uint32_t GovernedVblankFrequency(uint32_t configured, int64_t now, int64_t qpc_frequency);
+	uint32_t m_governor_configured   = 0;
+	uint32_t m_governor_effective    = 60;
+	uint32_t m_governor_good         = 0;
+	uint32_t m_governor_bad          = 0;
+	uint32_t m_governor_flips        = 0;
+	int64_t  m_governor_window_start = 0;
 	Graphics::RenderContext& Renderer() const noexcept { return m_renderer; }
 
 	void VblankBegin();
@@ -402,6 +421,13 @@ static void TriggerVideoOutEvents(VideoOutConfig& video_out, VideoOutEventKind k
 	}
 }
 
+// v0.0.9proQ3: fast-path toggle. `debug.capy.vblank_fastpath` (1 = on, the default)
+// restores the unconditional trigger/signal behaviour of every previous build.
+static bool VblankFastPathDisabled() {
+	static Common::DebugFlags::CachedValue disabled("debug.capy.vblank_fastpath", 0);
+	return disabled.Get() != 0;
+}
+
 static void DeleteVideoOutEvents(const VideoOutEventQueues& queues, VideoOutEventKind kind) {
 	for (const auto& registration: queues) {
 		if (!registration) {
@@ -425,6 +451,22 @@ static int RegisterVideoOutEvent(int handle, EventQueue::KernelEqueue eq, VideoO
 	Common::LockGuard lock(video_out->mutex);
 	if (!video_out->opened || video_out->closing || video_out->generation != generation) {
 		return VIDEO_OUT_ERROR_INVALID_HANDLE;
+	}
+	// v0.0.9proQ3 fast path: count this port's interest in the kind so the
+	// vblank/flip triggers can skip the queue copy when nobody listens. Removal
+	// without an explicit delete (expired queue, port close) only ever leaves the
+	// count high - the safe direction (slow path) - and Open resets it.
+	switch (kind) {
+		case VideoOutEventKind::Flip:
+			video_out->flip_events.fetch_add(1, std::memory_order_relaxed);
+			break;
+		case VideoOutEventKind::PreVblankStart:
+			video_out->pre_vblank_events.fetch_add(1, std::memory_order_relaxed);
+			break;
+		case VideoOutEventKind::Vblank:
+			video_out->vblank_events.fetch_add(1, std::memory_order_relaxed);
+			break;
+		default: break;
 	}
 	if (kind == VideoOutEventKind::OutputMode) {
 		LOGF("\t eq     = 0x%016" PRIx64 "\n"
@@ -691,6 +733,12 @@ int VideoOutDriver::Impl::Open(int bus_type, int index) {
 	config.closing = false;
 	config.opened  = true;
 	config.bus     = bus_type;
+	// v0.0.9proQ3 fast path: a reopened port starts with a clean interest set
+	// (Close deletes the registrations wholesale without decrementing).
+	config.flip_events.store(0, std::memory_order_relaxed);
+	config.pre_vblank_events.store(0, std::memory_order_relaxed);
+	config.vblank_events.store(0, std::memory_order_relaxed);
+	config.vblank_waiters.store(0, std::memory_order_relaxed);
 	if (++config.generation == 0) {
 		EXIT("video-out port generation wrapped\n");
 	}
@@ -739,6 +787,15 @@ bool VideoOutDriver::Impl::Close(int handle) {
 		config.flip_rate   = 0;
 		master             = config.master;
 		config.master      = nullptr;
+		// v0.0.9proQ3: the port is closed - wake any guest thread still waiting on
+		// its vblank (VideoOutWaitVblank re-checks `opened` and returns; without this
+		// signal a waiter could sleep forever, because VblankEnd skips closed ports).
+		config.vblank_cond.SignalAll();
+		// v0.0.9proQ3 fast path: the registrations were just moved out wholesale;
+		// zero the interest counters to match (Open resets them again anyway).
+		config.flip_events.store(0, std::memory_order_relaxed);
+		config.pre_vblank_events.store(0, std::memory_order_relaxed);
+		config.vblank_events.store(0, std::memory_order_relaxed);
 
 		for (const auto& buffer: config.buffers) {
 			if (buffer.Occupied() &&
@@ -835,8 +892,14 @@ void VideoOutDriver::Impl::VblankBegin() {
 			ctx.pre_vblank_status.reserved           = LibKernel::KernelReadTsc();
 			ctx.pre_vblank_status.processTimeCounter = LibKernel::KernelGetProcessTimeCounter();
 
-			TriggerVideoOutEvents(ctx, VideoOutEventKind::PreVblankStart,
-			                      reinterpret_cast<void*>(ctx.pre_vblank_status.count));
+			// v0.0.9proQ3 fast path: skip the queue copy + weak_ptr locks for ports
+			// with no registered PreVblankStart events (the trigger on an empty queue
+			// was a no-op).
+			if (ctx.pre_vblank_events.load(std::memory_order_relaxed) != 0 ||
+			    VblankFastPathDisabled()) {
+				TriggerVideoOutEvents(ctx, VideoOutEventKind::PreVblankStart,
+				                      reinterpret_cast<void*>(ctx.pre_vblank_status.count));
+			}
 			ctx.mutex.Unlock();
 		}
 	}
@@ -854,12 +917,86 @@ void VideoOutDriver::Impl::VblankEnd() {
 			ctx.vblank_status.reserved           = LibKernel::KernelReadTsc();
 			ctx.vblank_status.processTimeCounter = LibKernel::KernelGetProcessTimeCounter();
 
-			TriggerVideoOutEvents(ctx, VideoOutEventKind::Vblank,
-			                      reinterpret_cast<void*>(ctx.vblank_status.count));
-			ctx.vblank_cond.SignalAll();
+			// v0.0.9proQ3 fast path: same skip for Vblank events, and SignalAll -
+			// a futex syscall per port per tick even with zero waiters - runs only
+			// while someone is actually waiting on this port's vblank.
+			if (ctx.vblank_events.load(std::memory_order_relaxed) != 0 ||
+			    VblankFastPathDisabled()) {
+				TriggerVideoOutEvents(ctx, VideoOutEventKind::Vblank,
+				                      reinterpret_cast<void*>(ctx.vblank_status.count));
+			}
+			if (ctx.vblank_waiters.load(std::memory_order_relaxed) != 0 ||
+			    VblankFastPathDisabled()) {
+				ctx.vblank_cond.SignalAll();
+			}
 			ctx.mutex.Unlock();
 		}
 	}
+}
+
+// v0.0.9proQ3: adaptive vblank governor. The refresh unlock (Auto = display max)
+// doubled the emulated vblank's fixed costs on 90/120 Hz phones - present-thread
+// wakeups, per-port vblank bookkeeping, guest vblank waiters waking twice as
+// often - exactly for games that crawl at single-digit FPS and can never fill
+// even 60. Pace at 60 Hz until the game SUSTAINS 55+ flips/s for two
+// consecutive one-second windows, then unlock to the configured rate; fall back
+// to 60 after two windows below 50. Games that earn high refresh keep every
+// frame of it; games that do not stop paying for it. Mode queries
+// (Config::GetVblankFrequency) keep reporting the configured rate, so a game
+// that asked for a 120 Hz mode at boot still sees one - only the pacing adapts.
+// `setprop debug.capy.vblank_governor 0` pins the pacing to the configured rate.
+uint32_t VideoOutDriver::Impl::GovernedVblankFrequency(uint32_t configured, int64_t now,
+                                                       int64_t qpc_frequency) {
+	static Common::DebugFlags::CachedValue governor("debug.capy.vblank_governor", 1);
+	if (governor.Get() == 0 || configured <= 60) {
+		m_governor_configured = configured;
+		m_governor_effective  = configured;
+		return configured;
+	}
+	if (m_governor_configured != configured) {
+		// First sight (or a mid-session rate change): start paced at 60.
+		m_governor_configured   = configured;
+		m_governor_effective    = 60;
+		m_governor_good         = 0;
+		m_governor_bad          = 0;
+		m_governor_flips        = 0;
+		m_governor_window_start = now;
+		return m_governor_effective;
+	}
+	if (now - m_governor_window_start >= qpc_frequency) {
+		const uint32_t flips = m_governor_flips;
+		m_governor_flips        = 0;
+		m_governor_window_start = now;
+		if (m_governor_effective < configured) {
+			// Paced at 60: unlock only on sustained near-full-rate flipping.
+			if (flips >= 55) {
+				if (++m_governor_good >= 2) {
+					m_governor_effective = configured;
+					m_governor_good      = 0;
+					m_governor_bad       = 0;
+				}
+			} else {
+				m_governor_good = 0;
+			}
+		} else {
+			// Unlocked: fall back when the game can no longer fill even ~60.
+			if (flips < 50) {
+				if (++m_governor_bad >= 2) {
+					m_governor_effective = 60;
+					m_governor_bad       = 0;
+					m_governor_good      = 0;
+				}
+			} else {
+				m_governor_bad = 0;
+			}
+		}
+#if defined(__ANDROID__)
+		__android_log_print(ANDROID_LOG_INFO, "CapyPS5-Refresh",
+		                    "vblank governor: %u flips in window, effective vblank %u Hz",
+		                    flips, m_governor_effective);
+#endif
+	}
+	return m_governor_effective;
 }
 
 void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
@@ -868,6 +1005,13 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 	if (setpriority(PRIO_PROCESS, 0, -6) != 0) {
 		LOGF("Present thread: priority boost unavailable (nice -6 denied)\n");
 	}
+#if defined(__ANDROID__)
+	// v0.0.9proQ3: the present thread runs the vblank cascade on the critical
+	// path of every game frame; on big.LITTLE SoCs a little-core present thread
+	// holding the very locks the big-core game threads want amplifies the
+	// 60-120 Hz vblank cost (best effort, toggle debug.capy.perf_cores).
+	Common::PinToPerformanceCores("Present thread");
+#endif
 #endif
 	const auto frequency = Common::Timer::QueryPerformanceFrequency();
 	EXIT_IF(frequency == 0);
@@ -887,8 +1031,9 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 		const auto frame_begin = Common::Timer::QueryPerformanceCounter();
 		total_wait -= static_cast<int64_t>(frame_begin - sleep_begin);
 
-		const auto refresh = std::max(Config::GetVblankFrequency(), 1u);
-		const auto period  = std::max(frequency / refresh, uint64_t {1});
+		const auto configured = std::max(Config::GetVblankFrequency(), 1u);
+		const auto refresh    = GovernedVblankFrequency(configured, frame_begin, frequency);
+		const auto period     = std::max(frequency / refresh, uint64_t {1});
 
 		if (m_presenter.IsGuestPaused()) {
 			(void)m_presenter.PresentLastFrame();
@@ -899,7 +1044,13 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 		}
 
 		VblankBegin();
-		bool presented = m_flip_queue.Flip(0);
+		const bool flipped = m_flip_queue.Flip(0);
+		bool presented = flipped;
+		// v0.0.9proQ3: only real game flips count toward the governor's unlock
+		// threshold - overlay repaints of the last frame are not game progress.
+		if (flipped) {
+			m_governor_flips++;
+		}
 		if (!presented && m_presenter.NeedsSystemOverlayRefresh()) {
 			if (m_presenter.PresentLastFrame()) {
 				presented = true;
@@ -1307,7 +1458,13 @@ bool FlipQueue::Flip(uint32_t micros) {
 		r.cfg->flip_status.currentBuffer            = r.index;
 		r.cfg->flip_status.flipPendingNum--;
 		r.cfg->flip_status.gcQueueNum -= r.source == FlipRequestSource::GpuEop;
-		TriggerVideoOutEvents(*r.cfg, VideoOutEventKind::Flip, reinterpret_cast<void*>(r.flip_arg));
+		// v0.0.9proQ3 fast path: same skip as the vblank triggers - no queue copy
+		// per completed flip for ports with no registered Flip events.
+		if (r.cfg->flip_events.load(std::memory_order_relaxed) != 0 ||
+		    VblankFastPathDisabled()) {
+			TriggerVideoOutEvents(*r.cfg, VideoOutEventKind::Flip,
+			                      reinterpret_cast<void*>(r.flip_arg));
+		}
 		it = m_requests.erase(it);
 	}
 	m_processing = false;
@@ -1842,9 +1999,13 @@ KYTY_SYSV_ABI int VideoOutWaitVblank(int handle) {
 
 	Common::LockGuard lock(ctx->mutex);
 	const auto        count = ctx->vblank_status.count;
+	// v0.0.9proQ3 fast path: count this waiter so VblankEnd can skip the futex
+	// while nobody waits. Both sides hold ctx->mutex, so the pair is race-free.
+	ctx->vblank_waiters.fetch_add(1, std::memory_order_relaxed);
 	while (ctx->opened && ctx->vblank_status.count == count) {
 		ctx->vblank_cond.Wait(&ctx->mutex);
 	}
+	ctx->vblank_waiters.fetch_sub(1, std::memory_order_relaxed);
 
 	return OK;
 }
