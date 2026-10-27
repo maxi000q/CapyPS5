@@ -1767,13 +1767,21 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		auto& compute_pipeline    = m_context.GetPipelineCache().GetMeshComputePipeline(
 		    state.vertex_info[0], state.programs.vertex[0], ScaledImageMask(bindings.vertex[0]));
 		m_context.GetCommandScheduler().EndRendering();
-		vk::MemoryBarrier full {};
-		full.srcAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite;
-		full.dstAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite;
+		// Console Five Pro (v0.0.9proQ3): the mesh output is read by earlier draws as a
+		// vertex/index buffer (VERTEX_INPUT) and written by the previous emulation dispatch
+		// (COMPUTE_SHADER); a barrier scoped to exactly those accesses replaces the
+		// full-pipeline stall, which serialized every mesh draw against all in-flight
+		// fragment work of other draws (heavy 3D titles run dozens of these per frame).
+		vk::MemoryBarrier before_fill {};
+		before_fill.srcAccessMask = vk::AccessFlagBits::eVertexAttributeRead |
+		                         vk::AccessFlagBits::eIndexRead | vk::AccessFlagBits::eShaderWrite;
+		before_fill.dstAccessMask = vk::AccessFlagBits::eTransferWrite | vk::AccessFlagBits::eShaderWrite;
 		// Earlier draws may still read the previous contents of the output buffer.
-		vk_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
-		                          vk::PipelineStageFlagBits::eAllCommands, {}, 1, &full, 0, nullptr,
-		                          0, nullptr);
+		vk_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eVertexInput |
+		                          vk::PipelineStageFlagBits::eComputeShader,
+		                          vk::PipelineStageFlagBits::eTransfer |
+		                              vk::PipelineStageFlagBits::eComputeShader,
+		                          {}, 1, &before_fill, 0, nullptr, 0, nullptr);
 		// Triangles a workgroup does not emit stay (0, 0, 0): degenerate, never rasterized.
 		vk_buffer.fillBuffer(mesh_output->Handle(), mesh_index_offset, index_bytes, 0);
 		vk::MemoryBarrier filled {};

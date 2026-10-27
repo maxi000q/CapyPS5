@@ -9,6 +9,8 @@
 #include <sys/resource.h>
 #endif
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
+// v0.0.9proQ3: per-vendor spirv-opt pass lists over translated shaders.
+#include "graphics/host_gpu/renderer/pipeline/spirvOptimizer.h"
 
 #include "common/assert.h"
 #include "common/debugFlags.h"
@@ -392,6 +394,9 @@ struct PipelineCache::ProgramCache {
 			EXIT("%s failed hash=0x%016" PRIx64 ": SPIR-V validation failed\n", options.dump_label,
 			     options.shader_hash);
 		}
+		// v0.0.9proQ3: per-vendor spirv-opt pass list (see spirvOptimizer.h) - smaller,
+		// simpler modules compile faster and drive better codegen on mobile compilers.
+		SpirvOptimizer::Optimize(options.stage, result.spirv);
 		DumpShaderSpirv(stage_name, options.shader_hash, result.spirv);
 
 		const auto module = CompileSPV(result.spirv, device);
