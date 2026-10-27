@@ -339,6 +339,10 @@ private fun TopIcon(icon: ImageVector, onClick: () -> Unit) {
 
 @Composable
 private fun GameRow(games: List<GameItem>, selected: Int, onSelect: (Int) -> Unit) {
+    // v0.0.9proQ4: the lazy list keys by elfPath; a duplicate would crash the whole UI
+    // process (the 10-26 library crash). Whatever produced the list, the keyed container
+    // itself never sees two items with the same key.
+    val games = games.distinctBy { it.elfPath }
     val state = rememberLazyListState()
     // The selection moves along the row up to the third slot; only then does the row scroll, so
     // the games before and after the selected one stay in view.
@@ -366,6 +370,9 @@ private fun GameRow(games: List<GameItem>, selected: Int, onSelect: (Int) -> Uni
 
 @Composable
 private fun GameGrid(games: List<GameItem>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier) {
+    // v0.0.9proQ4: same guard as GameRow - the grid keys by elfPath, so the list is
+    // deduped here no matter what produced it. A duplicate key is a hard UI crash.
+    val games = games.distinctBy { it.elfPath }
     val state = rememberLazyGridState()
     LaunchedEffect(selected) { if (games.isNotEmpty()) state.animateScrollToItem(selected.coerceIn(0, games.size - 1)) }
     LazyVerticalGrid(
