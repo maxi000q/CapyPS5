@@ -6,6 +6,7 @@
 
 #include "common/abi.h"
 #include "common/assert.h"
+#include <cmath>
 #include "common/debugFlags.h"
 #include "common/passInspector.h"
 #include "common/common.h"
@@ -299,6 +300,8 @@ public:
 	FlipQueue&               GetFlipQueue() { return m_flip_queue; }
 
 	// v0.0.9proQ3: adaptive vblank governor. See GovernedVblankFrequency.
+	// v0.0.9proQ4 round 2: transition cooldown (the game needs ~2 s to re-lock
+	// its present loop after a pacing change) and flip-pacing telemetry.
 	uint32_t GovernedVblankFrequency(uint32_t configured, int64_t now, int64_t qpc_frequency);
 	uint32_t m_governor_configured   = 0;
 	uint32_t m_governor_effective    = 60;
@@ -306,6 +309,14 @@ public:
 	uint32_t m_governor_bad          = 0;
 	uint32_t m_governor_flips        = 0;
 	int64_t  m_governor_window_start = 0;
+	int64_t  m_governor_last_change  = 0;
+	uint32_t m_pacing_last_refresh   = 0;
+	// Flip-interval pacing telemetry (present thread only).
+	double   m_flip_ema_ms      = 0.0;
+	double   m_flip_jitter_ms   = 0.0;
+	int64_t  m_last_flip_qpc    = 0;
+	int64_t  m_pacing_log_qpc   = 0;
+	uint32_t m_pacing_flips     = 0;
 	Graphics::RenderContext& Renderer() const noexcept { return m_renderer; }
 
 	void VblankBegin();
@@ -967,27 +978,39 @@ uint32_t VideoOutDriver::Impl::GovernedVblankFrequency(uint32_t configured, int6
 		const uint32_t flips = m_governor_flips;
 		m_governor_flips        = 0;
 		m_governor_window_start = now;
-		if (m_governor_effective < configured) {
-			// Paced at 60: unlock only on sustained near-full-rate flipping.
-			if (flips >= 55) {
-				if (++m_governor_good >= 2) {
-					m_governor_effective = configured;
-					m_governor_good      = 0;
-					m_governor_bad       = 0;
+		// v0.0.9proQ4 round 2: 2 s cooldown after any transition. The game's
+		// present loop re-locks to the new pacing; judging the NEW rate with
+		// windows that still straddle the old one caused the unlock/fall-back
+		// oscillation (the "the frame rate is not stable" reports).
+		const bool in_cooldown =
+		    m_governor_last_change != 0 && now - m_governor_last_change < 2 * qpc_frequency;
+		if (!in_cooldown) {
+			if (m_governor_effective < configured) {
+				// Paced at 60: unlock only on sustained near-full-rate flipping.
+				if (flips >= 55) {
+					if (++m_governor_good >= 2) {
+						m_governor_effective = configured;
+						m_governor_good      = 0;
+						m_governor_bad       = 0;
+						m_governor_last_change = now;
+					}
+				} else {
+					m_governor_good = 0;
 				}
 			} else {
-				m_governor_good = 0;
-			}
-		} else {
-			// Unlocked: fall back when the game can no longer fill even ~60.
-			if (flips < 50) {
-				if (++m_governor_bad >= 2) {
-					m_governor_effective = 60;
-					m_governor_bad       = 0;
-					m_governor_good      = 0;
+				// Unlocked: fall back when the game SUSTAINABLY cannot fill even
+				// ~60 - three windows (was two) plus the cooldown above kill the
+				// oscillation around the 50-55 boundary.
+				if (flips < 50) {
+					if (++m_governor_bad >= 3) {
+						m_governor_effective = 60;
+						m_governor_bad       = 0;
+						m_governor_good      = 0;
+						m_governor_last_change = now;
+					}
+				} else {
+					m_governor_bad = 0;
 				}
-			} else {
-				m_governor_bad = 0;
 			}
 		}
 #if defined(__ANDROID__)
@@ -1038,6 +1061,14 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 		const auto configured = std::max(Config::GetVblankFrequency(), 1u);
 		const auto refresh    = GovernedVblankFrequency(configured, frame_begin, frequency);
 		const auto period     = std::max(frequency / refresh, uint64_t {1});
+		// v0.0.9proQ4 round 2: phase-continuous rate transitions. The accumulator
+		// carries a fraction of the OLD period across a rate change, which landed
+		// the next tick too early (a double vblank) or too late (a visible hitch).
+		// On a change, resync so the next tick is exactly ONE new period out.
+		if (refresh != m_pacing_last_refresh) {
+			m_pacing_last_refresh = refresh;
+			total_wait            = static_cast<int64_t>(period);
+		}
 
 		if (m_presenter.IsGuestPaused()) {
 			(void)m_presenter.PresentLastFrame();
@@ -1054,6 +1085,36 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 		// threshold - overlay repaints of the last frame are not game progress.
 		if (flipped) {
 			m_governor_flips++;
+			// v0.0.9proQ4 round 2: pacing telemetry - an EMA of the flip interval
+			// and of its |delta| (judder). Measured, not modelled: logged once a
+			// second under CapyPS5-Refresh so frame-pacing quality is visible on
+			// real hardware.
+			if (m_last_flip_qpc != 0) {
+				const double interval_ms =
+				    static_cast<double>(frame_begin - m_last_flip_qpc) * 1000.0 /
+				    static_cast<double>(frequency);
+				if (m_flip_ema_ms == 0.0) {
+					m_flip_ema_ms    = interval_ms;
+					m_flip_jitter_ms = 0.0;
+				} else {
+					const double alpha = 0.1;
+					m_flip_jitter_ms += (std::fabs(interval_ms - m_flip_ema_ms) -
+					                         m_flip_jitter_ms) * alpha;
+					m_flip_ema_ms += (interval_ms - m_flip_ema_ms) * alpha;
+				}
+			}
+			m_last_flip_qpc = frame_begin;
+			m_pacing_flips++;
+			if (m_pacing_log_qpc == 0) {
+				m_pacing_log_qpc = frame_begin;
+			} else if (frame_begin - m_pacing_log_qpc >= frequency) {
+				m_pacing_log_qpc = frame_begin;
+				__android_log_print(
+				    ANDROID_LOG_INFO, "CapyPS5-Refresh",
+				    "pacing: %u flips/s, interval %.2f ms (target %.2f), judder %.2f ms",
+				    m_pacing_flips, m_flip_ema_ms, 1000.0 / refresh, m_flip_jitter_ms);
+				m_pacing_flips = 0;
+			}
 		}
 		if (!presented && m_presenter.NeedsSystemOverlayRefresh()) {
 			if (m_presenter.PresentLastFrame()) {
