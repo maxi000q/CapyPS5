@@ -318,6 +318,12 @@ public:
 	int64_t  m_last_flip_qpc    = 0;
 	int64_t  m_pacing_log_qpc   = 0;
 	uint32_t m_pacing_flips     = 0;
+	// v0.0.10pro phase 5: frame-generator state (present thread only). The previous
+	// flip's timestamp gives the idle tick's phase between the two real frames; the
+	// counters feed the once-a-second framegen telemetry line.
+	int64_t  m_prev_flip_qpc      = 0;
+	int64_t  m_framegen_log_qpc   = 0;
+	uint32_t m_framegen_presented = 0;
 	Graphics::RenderContext& Renderer() const noexcept { return m_renderer; }
 
 	void VblankBegin();
@@ -438,6 +444,22 @@ static void TriggerVideoOutEvents(VideoOutConfig& video_out, VideoOutEventKind k
 static bool VblankFastPathDisabled() {
 	static Common::DebugFlags::CachedValue disabled("debug.capy.vblank_fastpath", 0);
 	return disabled.Get() != 0;
+}
+
+// v0.0.10pro phase 5: the frame generator's switches. `debug.capy.frame_gen` is the
+// Settings -> Performance "Frame generation" option (the frontend sets it per
+// session) - on by default. `debug.capy.framegen_lambda` caps the motion weight in
+// percent (default 60: at the deepest phase a generated tick extends the newest
+// frame's motion by 60% of the frame-to-frame delta; the steady 30-in-60 idle tick
+// lands at half that, 30%).
+static bool FrameGenerationEnabled() {
+	static Common::DebugFlags::CachedValue enabled("debug.capy.frame_gen", 1);
+	return enabled.Get() != 0;
+}
+
+static double FrameGenerationWeight() {
+	static Common::DebugFlags::CachedValue lambda("debug.capy.framegen_lambda", 60);
+	return std::clamp(lambda.Get(), 0, 100) / 100.0;
 }
 
 static void DeleteVideoOutEvents(const VideoOutEventQueues& queues, VideoOutEventKind kind) {
@@ -986,9 +1008,18 @@ uint32_t VideoOutDriver::Impl::GovernedVblankFrequency(uint32_t configured, int6
 		const bool in_cooldown =
 		    m_governor_last_change != 0 && now - m_governor_last_change < 2 * qpc_frequency;
 		if (!in_cooldown) {
+			// v0.0.10pro phase 5: with the frame generator active, a game that
+			// sustains about a third of the configured rate can still FILL it -
+			// generated frames top the cadence up to the display rate (the 4K
+			// case: ~45 flips/s sustains a 90 Hz pace). The thresholds scale
+			// with the configured rate; without the generator the original
+			// fixed 55/50 stand.
+			const bool    framegen_on  = FrameGenerationEnabled();
+			const uint32_t unlock_at    = framegen_on ? configured * 35 / 100 : 55;
+			const uint32_t fall_back_at = framegen_on ? configured * 25 / 100 : 50;
 			if (m_governor_effective < configured) {
 				// Paced at 60: unlock only on sustained near-full-rate flipping.
-				if (flips >= 55) {
+				if (flips >= unlock_at) {
 					if (++m_governor_good >= 2) {
 						m_governor_effective = configured;
 						m_governor_good      = 0;
@@ -1002,7 +1033,7 @@ uint32_t VideoOutDriver::Impl::GovernedVblankFrequency(uint32_t configured, int6
 				// Unlocked: fall back when the game SUSTAINABLY cannot fill even
 				// ~60 - three windows (was two) plus the cooldown above kill the
 				// oscillation around the 50-55 boundary.
-				if (flips < 50) {
+				if (flips < fall_back_at) {
 					if (++m_governor_bad >= 3) {
 						m_governor_effective = 60;
 						m_governor_bad       = 0;
@@ -1104,6 +1135,9 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 					m_flip_ema_ms += (interval_ms - m_flip_ema_ms) * alpha;
 				}
 			}
+			// v0.0.10pro phase 5: keep the previous flip's timestamp - the frame
+			// generator's phase reference for the idle ticks that follow.
+			m_prev_flip_qpc = m_last_flip_qpc;
 			m_last_flip_qpc = frame_begin;
 			m_pacing_flips++;
 			if (m_pacing_log_qpc == 0) {
@@ -1115,6 +1149,49 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 				    "pacing: %u flips/s, interval %.2f ms (target %.2f), judder %.2f ms",
 				    m_pacing_flips, m_flip_ema_ms, 1000.0 / refresh, m_flip_jitter_ms);
 				m_pacing_flips = 0;
+			}
+		}
+		// v0.0.10pro phase 5: the frame generator. An idle tick - no flip due - shows a
+		// generated frame instead of letting the panel repeat the newest one: the newest
+		// frame's motion extended by this tick's phase through the frame-to-frame delta
+		// (gpu_video_out_framegen.frag). Phase-aware by construction: a steady 30-in-60
+		// lands at 0.5, 45-in-90 at 0.5, 40-in-120 at 0.33/0.67 - the weight always
+		// matches where the display tick falls between the two real frames. Real flips
+		// still present the moment they are due (that path is untouched), so input
+		// latency is exactly what it was; nothing ever waits for a future frame.
+		if (!presented && FrameGenerationEnabled()) {
+			if (m_last_flip_qpc != 0 && m_prev_flip_qpc != 0) {
+				const int64_t span  = m_last_flip_qpc - m_prev_flip_qpc;
+				const int64_t since = frame_begin - m_last_flip_qpc;
+				// A quarter second between flips is a slideshow - extending motion
+				// across that gap is ghost soup, not smoothing.
+				if (span > 0 && since > 0 && span <= frequency / 4) {
+					const double phase =
+					    static_cast<double>(since) / static_cast<double>(span);
+					// Near a flip tick the newest frame is still fresh (nothing to add);
+					// past ~0.85 the next flip is imminent and the extension would
+					// overshoot it. Generate only inside the meaningful band.
+					if (phase >= 0.15 && phase <= 0.85) {
+						const double weight = phase * FrameGenerationWeight();
+						if (m_presenter.PresentGeneratedFrame(static_cast<float>(weight))) {
+							presented = true;
+							m_framegen_presented++;
+						}
+					}
+				}
+			}
+			// Once a second: how much of the presented cadence was generated -
+			// measured, on device, next to the pacing line.
+			if (m_framegen_log_qpc == 0) {
+				m_framegen_log_qpc = frame_begin;
+			} else if (frame_begin - m_framegen_log_qpc >= frequency) {
+				m_framegen_log_qpc = frame_begin;
+#if defined(__ANDROID__)
+				__android_log_print(ANDROID_LOG_INFO, "CapyPS5-Refresh",
+				                    "framegen: %u generated/s at %u Hz pacing",
+				                    m_framegen_presented, refresh);
+#endif
+				m_framegen_presented = 0;
 			}
 		}
 		if (!presented && m_presenter.NeedsSystemOverlayRefresh()) {

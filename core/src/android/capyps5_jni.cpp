@@ -309,6 +309,9 @@ JNIEXPORT jlongArray JNICALL Java_com_consolefivepro_NativeBridge_nativeGetStats
 	    // perf overlay can show WHICH turbo family is driving the engine - the
 	    // on-device answer to "did the turbo even engage for this game".
 	    static_cast<jlong>(Common::ContentProfile::ActiveClass()),
+	    // v0.0.10pro phase 5: frames the presenter generated to fill idle display
+	    // ticks (the frame generator). game frames + generated = host presents.
+	    static_cast<jlong>(g_generated_frames.load(std::memory_order_relaxed)),
 	};
 	constexpr auto count = static_cast<jsize>(sizeof(values) / sizeof(values[0]));
 	jlongArray     array = env->NewLongArray(count);

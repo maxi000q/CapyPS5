@@ -19,23 +19,31 @@ inline std::atomic<uint64_t> g_last_game_frame_ns {0};
 inline std::atomic<uint64_t> g_max_frame_ns {0};
 // Host swapchain presents (can differ from game frames when the presenter repeats images).
 inline std::atomic<uint64_t> g_host_presents {0};
+// Frames the presenter generated to fill idle display ticks (the frame generator,
+// v0.0.10pro phase 5). Real game frames + generated frames = host presents, so the
+// overlay can show all three rates honestly.
+inline std::atomic<uint64_t> g_generated_frames {0};
 // Places where emulation papered over a problem; non-zero rates point at real bugs.
 inline std::atomic<uint64_t> g_wait_reg_mem_timeouts {0};
 inline std::atomic<uint64_t> g_wait_reg_mem_unmapped {0};
 inline std::atomic<uint64_t> g_null_buffer_fallbacks {0};
 
+inline void RecordGeneratedFrame() {
+        g_generated_frames.fetch_add(1, std::memory_order_relaxed);
+}
+
 inline void RecordGameFrame() {
-	const auto now  = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        const auto now  = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                                std::chrono::steady_clock::now().time_since_epoch())
                                                .count());
-	const auto prev = g_last_game_frame_ns.exchange(now, std::memory_order_relaxed);
-	if (prev != 0 && now > prev) {
-		const auto delta = now - prev;
-		auto       max   = g_max_frame_ns.load(std::memory_order_relaxed);
-		while (delta > max && !g_max_frame_ns.compare_exchange_weak(max, delta, std::memory_order_relaxed)) {
-		}
-	}
-	g_game_frames.fetch_add(1, std::memory_order_relaxed);
+        const auto prev = g_last_game_frame_ns.exchange(now, std::memory_order_relaxed);
+        if (prev != 0 && now > prev) {
+                const auto delta = now - prev;
+                auto       max   = g_max_frame_ns.load(std::memory_order_relaxed);
+                while (delta > max && !g_max_frame_ns.compare_exchange_weak(max, delta, std::memory_order_relaxed)) {
+                }
+        }
+        g_game_frames.fetch_add(1, std::memory_order_relaxed);
 }
 
 } // namespace Common::Telemetry

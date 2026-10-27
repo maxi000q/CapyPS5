@@ -284,6 +284,20 @@ enum class CoreOption(
         ),
         0L,
     ),
+    /**
+     * v0.0.10pro phase 5: the frame generator. Fills idle display ticks with a generated
+     * in-between frame (the newest frame's motion extended between the two real frames),
+     * so the presented cadence reaches the display rate without touching the emulation
+     * path - real frames still present the moment they finish, input latency is unchanged.
+     * On by default; turn it off for the raw cadence.
+     */
+    FrameGeneration(
+        R.string.option_frame_generation,
+        R.string.option_frame_generation_desc,
+        "debug.capy.frame_gen",
+        listOf(1L to R.string.enabled, 0L to R.string.disabled),
+        1L,
+    ),
     ;
 
     fun title(context: Context) = context.getString(titleRes)

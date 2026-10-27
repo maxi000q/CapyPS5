@@ -34,6 +34,15 @@ public:
 	[[nodiscard]] Frame&         PrepareBlankFrame(uint32_t width, uint32_t height, bool opaque,
 	                                               CommandBuffer* producer = nullptr);
 	[[nodiscard]] bool           PresentLastFrame();
+	/**
+	 * v0.0.10pro phase 5: present one generated frame into the acquired swapchain image -
+	 * the newest game frame with its motion extended by `weight` of the frame-to-frame
+	 * delta (see gpu_video_out_framegen.frag). Fills an idle display tick; a real flip
+	 * still presents the moment it is due, so input latency is unchanged. Returns false
+	 * when there is no usable history (first frames, format change) or the presentation
+	 * path cannot generate (the GL compatibility backend).
+	 */
+	[[nodiscard]] bool           PresentGeneratedFrame(float weight);
 	[[nodiscard]] bool           IsGuestPaused() const noexcept;
 	[[nodiscard]] bool           NeedsSystemOverlayRefresh() const noexcept;
 	[[nodiscard]] RenderContext& Renderer() const noexcept;

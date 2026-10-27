@@ -13,6 +13,7 @@
 #include "common/threads.h"
 #include "gpu_blit_shaders/gpu_blit_fs_triangle_spv.h"
 #include "gpu_blit_shaders/gpu_video_out_overlay_spv.h"
+#include "gpu_blit_shaders/gpu_video_out_framegen_spv.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
@@ -323,6 +324,11 @@ public:
 	[[nodiscard]] bool   PrepareSystemOverlay();
 	void     RecordPresentCommands(CommandBuffer& command, Presenter::Frame* source,
 	                               const Presenter::Layer& overlay, bool draw_system_overlay);
+	/** v0.0.10pro phase 5: compose one generated frame (see the frame generator). */
+	void     RecordFrameGenCommands(CommandBuffer& command, Presenter::Frame* newest,
+	                               Presenter::Frame* previous, float weight,
+	                               const Presenter::Layer& overlay, bool draw_system_overlay);
+	[[nodiscard]] bool PrepareFrameGen();
 	uint64_t Submit(CommandScheduler& scheduler);
 	[[nodiscard]] Status Present();
 
@@ -354,6 +360,12 @@ private:
 	vk::PipelineLayout             m_overlay_layout      = nullptr;
 	vk::Pipeline                   m_overlay_pipeline    = nullptr;
 	vk::Sampler                    m_overlay_sampler     = nullptr;
+	// v0.0.10pro phase 5: the frame generator's pipeline (two samplers: the newest
+	// game frame and the one before it; one float push constant: the motion weight).
+	vk::DescriptorSetLayout        m_framegen_descriptors = nullptr;
+	vk::PipelineLayout             m_framegen_layout      = nullptr;
+	vk::Pipeline                   m_framegen_pipeline    = nullptr;
+	vk::Sampler                    m_framegen_sampler     = nullptr;
 	uint32_t                       m_image_index         = static_cast<uint32_t>(-1);
 	uint32_t                       m_frame_index         = 0;
 	// v0.0.9proQ3: OpenGL compatibility backend ("Graphics API: OpenGL").
@@ -417,6 +429,8 @@ struct Presenter::Impl {
 		return image;
 	}
 	void Present();
+	/** v0.0.10pro phase 5: present a generated frame (see PresentGeneratedFrame). */
+	bool PresentGenerated(float weight);
 
 	RenderContext&        renderer;
 	WindowContext&        window;
@@ -426,6 +440,9 @@ struct Presenter::Impl {
 	Common::Mutex         present_mutex;
 	std::array<Layer, 2>  layers {};
 	std::atomic<uint64_t> presented_overlay_revision {0};
+	// v0.0.10pro phase 5: bus 0's previous frame, retained for the frame generator
+	// (the image the newest frame's motion is extended from).
+	Frame*                framegen_history = nullptr;
 };
 
 void Swapchain::Create() {
@@ -913,6 +930,14 @@ void Swapchain::Destroy() {
 	m_overlay_layout      = nullptr;
 	m_overlay_descriptors = nullptr;
 	m_overlay_sampler     = nullptr;
+	graphics.device.destroyPipeline(m_framegen_pipeline, nullptr);
+	graphics.device.destroyPipelineLayout(m_framegen_layout, nullptr);
+	graphics.device.destroyDescriptorSetLayout(m_framegen_descriptors, nullptr);
+	graphics.device.destroySampler(m_framegen_sampler, nullptr);
+	m_framegen_pipeline    = nullptr;
+	m_framegen_layout      = nullptr;
+	m_framegen_descriptors = nullptr;
+	m_framegen_sampler     = nullptr;
 
 	for (const auto semaphore: m_image_acquired) {
 		if (semaphore != nullptr) {
@@ -1297,6 +1322,235 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, Presenter::Frame* 
 	}
 }
 
+
+// v0.0.10pro phase 5: the frame generator's lazy pipeline. Two samplers - the newest
+// game frame and the one before it - and one float push constant, the motion weight the
+// shader extends the newest frame by. Built on first use, exactly like the overlay
+// pipeline, so devices that never generate (setting off, GL backend) pay nothing.
+bool Swapchain::PrepareFrameGen() {
+	if (m_framegen_pipeline != nullptr) {
+		return true;
+	}
+	auto device = m_window.graphic_ctx.device;
+	vk::SamplerCreateInfo sampler {};
+	sampler.magFilter    = vk::Filter::eLinear;
+	sampler.minFilter    = vk::Filter::eLinear;
+	sampler.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+	sampler.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+	sampler.addressModeW = vk::SamplerAddressMode::eClampToEdge;
+	RequireVulkanSuccess(device.createSampler(&sampler, nullptr, &m_framegen_sampler),
+				     "create frame-generator sampler");
+	const std::array<vk::DescriptorSetLayoutBinding, 2> bindings {
+		vk::DescriptorSetLayoutBinding {0, vk::DescriptorType::eCombinedImageSampler, 1,
+		                                vk::ShaderStageFlagBits::eFragment},
+		vk::DescriptorSetLayoutBinding {1, vk::DescriptorType::eCombinedImageSampler, 1,
+		                                vk::ShaderStageFlagBits::eFragment}};
+	vk::DescriptorSetLayoutCreateInfo descriptors {};
+	descriptors.flags        = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR;
+	descriptors.bindingCount = static_cast<uint32_t>(bindings.size());
+	descriptors.pBindings    = bindings.data();
+	RequireVulkanSuccess(
+		device.createDescriptorSetLayout(&descriptors, nullptr, &m_framegen_descriptors),
+		"create frame-generator descriptor layout");
+	const vk::PushConstantRange weight {vk::ShaderStageFlagBits::eFragment, 0, sizeof(float)};
+	vk::PipelineLayoutCreateInfo layout {};
+	layout.setLayoutCount         = 1;
+	layout.pSetLayouts            = &m_framegen_descriptors;
+	layout.pushConstantRangeCount = 1;
+	layout.pPushConstantRanges    = &weight;
+	RequireVulkanSuccess(device.createPipelineLayout(&layout, nullptr, &m_framegen_layout),
+				     "create frame-generator pipeline layout");
+	const auto vertex   = CompileSPV(GPU_BLIT_FS_TRIANGLE_SPV, device);
+	const auto fragment = CompileSPV(GPU_VIDEO_OUT_FRAMEGEN_SPV, device);
+	std::array<vk::PipelineShaderStageCreateInfo, 2> stages {};
+	stages[0].stage  = vk::ShaderStageFlagBits::eVertex;
+	stages[0].module = vertex;
+	stages[0].pName  = "main";
+	stages[1].stage  = vk::ShaderStageFlagBits::eFragment;
+	stages[1].module = fragment;
+	stages[1].pName  = "main";
+	vk::PipelineVertexInputStateCreateInfo   vertex_input {};
+	vk::PipelineInputAssemblyStateCreateInfo assembly {};
+	assembly.topology = vk::PrimitiveTopology::eTriangleList;
+	vk::PipelineViewportStateCreateInfo viewport {};
+	viewport.viewportCount = 1;
+	viewport.scissorCount  = 1;
+	vk::PipelineRasterizationStateCreateInfo rasterization {};
+	rasterization.lineWidth = 1.0f;
+	vk::PipelineMultisampleStateCreateInfo multisample {};
+	multisample.rasterizationSamples = vk::SampleCountFlagBits::e1;
+	// The generated frame is the base layer: opaque, no blending. The guest overlay
+	// (bus 1) and the system overlay draw on top of it with their own pipelines,
+	// exactly like they draw on top of the normal blit.
+	vk::PipelineColorBlendAttachmentState attachment {};
+	attachment.colorWriteMask = vk::ColorComponentFlagBits::eR |
+		                            vk::ColorComponentFlagBits::eG |
+		                            vk::ColorComponentFlagBits::eB |
+		                            vk::ColorComponentFlagBits::eA;
+	vk::PipelineColorBlendStateCreateInfo blend {};
+	blend.attachmentCount = 1;
+	blend.pAttachments    = &attachment;
+	const std::array dynamic_states {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+	vk::PipelineDynamicStateCreateInfo dynamic {};
+	dynamic.dynamicStateCount = static_cast<uint32_t>(dynamic_states.size());
+	dynamic.pDynamicStates    = dynamic_states.data();
+	vk::PipelineRenderingCreateInfo rendering {};
+	rendering.colorAttachmentCount    = 1;
+	rendering.pColorAttachmentFormats = &m_format;
+	vk::GraphicsPipelineCreateInfo create {};
+	create.pNext               = &rendering;
+	create.stageCount          = static_cast<uint32_t>(stages.size());
+	create.pStages             = stages.data();
+	create.pVertexInputState   = &vertex_input;
+	create.pInputAssemblyState = &assembly;
+	create.pViewportState      = &viewport;
+	create.pRasterizationState = &rasterization;
+	create.pMultisampleState   = &multisample;
+	create.pColorBlendState    = &blend;
+	create.pDynamicState       = &dynamic;
+	create.layout              = m_framegen_layout;
+	RequireVulkanSuccess(
+		device.createGraphicsPipelines(nullptr, 1, &create, nullptr, &m_framegen_pipeline),
+		"create frame-generator pipeline");
+	device.destroyShaderModule(fragment, nullptr);
+	device.destroyShaderModule(vertex, nullptr);
+	return true;
+}
+
+// v0.0.10pro phase 5: compose one generated frame into the acquired swapchain image: the
+// newest game frame with its motion extended by `weight` of the frame-to-frame delta
+// (gpu_video_out_framegen.frag), then the bus-1 overlay and the system overlay on top -
+// the same layering the normal blit path produces, so a generated tick is the same stack
+// of layers, pixel for pixel, with only the base image generated.
+void Swapchain::RecordFrameGenCommands(CommandBuffer& command, Presenter::Frame* newest,
+					       Presenter::Frame* previous, float weight,
+					       const Presenter::Layer& overlay, bool draw_system_overlay) {
+	EXIT_IF(m_image_index >= m_images.size());
+	EXIT_IF(newest == nullptr || previous == nullptr);
+	auto       vk_command   = command.Handle();
+	const bool draw_overlay = overlay.frame != nullptr;
+	newest->Transit(vk_command, vk::ImageLayout::eShaderReadOnlyOptimal,
+			vk::AccessFlagBits2::eShaderRead);
+	previous->Transit(vk_command, vk::ImageLayout::eShaderReadOnlyOptimal,
+			 vk::AccessFlagBits2::eShaderRead);
+	if (draw_overlay) {
+		overlay.frame->Transit(vk_command, vk::ImageLayout::eShaderReadOnlyOptimal,
+				       vk::AccessFlagBits2::eShaderRead);
+	}
+	// The swapchain image is written for the first time this present: Undefined straight
+	// into the color-attachment layout; the render pass clears what the previous image held.
+	vk::ImageMemoryBarrier to_attachment {};
+	to_attachment.sType               = vk::StructureType::eImageMemoryBarrier;
+	to_attachment.dstAccessMask       = vk::AccessFlagBits::eColorAttachmentRead |
+						  vk::AccessFlagBits::eColorAttachmentWrite;
+	to_attachment.oldLayout           = vk::ImageLayout::eUndefined;
+	to_attachment.newLayout           = vk::ImageLayout::eColorAttachmentOptimal;
+	to_attachment.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	to_attachment.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	to_attachment.image               = m_images[m_image_index];
+	to_attachment.subresourceRange.aspectMask     = vk::ImageAspectFlagBits::eColor;
+	to_attachment.subresourceRange.baseMipLevel   = 0;
+	to_attachment.subresourceRange.levelCount     = 1;
+	to_attachment.subresourceRange.baseArrayLayer = 0;
+	to_attachment.subresourceRange.layerCount     = 1;
+	vk_command.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+					 vk::PipelineStageFlagBits::eColorAttachmentOutput,
+					 vk::DependencyFlags {}, 0, nullptr, 0, nullptr, 1, &to_attachment);
+	auto device = m_window.graphic_ctx.device;
+	for (auto* frame: {newest, previous}) {
+		if (frame->view == nullptr) {
+			vk::ImageViewCreateInfo view {};
+			view.image            = frame->image.image;
+			view.viewType         = vk::ImageViewType::e2D;
+			view.format           = frame->image.format;
+			view.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+			RequireVulkanSuccess(device.createImageView(&view, nullptr, &frame->view),
+					     "create frame-generator image view");
+		}
+	}
+	const std::array<vk::DescriptorImageInfo, 2> images {
+		vk::DescriptorImageInfo {m_framegen_sampler, newest->view,
+						 vk::ImageLayout::eShaderReadOnlyOptimal},
+		vk::DescriptorImageInfo {m_framegen_sampler, previous->view,
+						 vk::ImageLayout::eShaderReadOnlyOptimal}};
+	std::array<vk::WriteDescriptorSet, 2> writes {};
+	for (uint32_t i = 0; i < writes.size(); i++) {
+		writes[i].dstBinding      = i;
+		writes[i].descriptorCount = 1;
+		writes[i].descriptorType  = vk::DescriptorType::eCombinedImageSampler;
+		writes[i].pImageInfo      = &images[i];
+	}
+	vk_command.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, m_framegen_layout, 0,
+						 static_cast<uint32_t>(writes.size()), writes.data());
+	vk_command.pushConstants(m_framegen_layout, vk::ShaderStageFlagBits::eFragment, 0,
+					sizeof(weight), &weight);
+	vk_command.bindPipeline(vk::PipelineBindPoint::eGraphics, m_framegen_pipeline);
+	vk::RenderingAttachmentInfo attachment {};
+	attachment.imageView   = m_image_views[m_image_index];
+	attachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+	attachment.loadOp      = vk::AttachmentLoadOp::eClear;
+	attachment.storeOp     = vk::AttachmentStoreOp::eStore;
+	vk::RenderingInfo rendering {};
+	rendering.renderArea.extent    = m_extent;
+	rendering.layerCount           = 1;
+	rendering.colorAttachmentCount = 1;
+	rendering.pColorAttachments    = &attachment;
+	vk_command.beginRendering(&rendering);
+	const vk::Viewport viewport {
+		0.0f, 0.0f, static_cast<float>(m_extent.width), static_cast<float>(m_extent.height),
+		0.0f, 1.0f};
+	const vk::Rect2D scissor {{0, 0}, m_extent};
+	vk_command.setViewport(0, 1, &viewport);
+	vk_command.setScissor(0, 1, &scissor);
+	vk_command.draw(3, 1, 0, 0);
+	vk_command.endRendering();
+	if (draw_overlay || draw_system_overlay) {
+		// Make the generated base visible to the overlay draws (same-layout barrier,
+		// exactly the inter-overlay barrier of the normal path).
+		vk::ImageMemoryBarrier overlay_vis {};
+		overlay_vis.sType               = vk::StructureType::eImageMemoryBarrier;
+		overlay_vis.srcAccessMask       = vk::AccessFlagBits::eColorAttachmentWrite;
+		overlay_vis.dstAccessMask       = vk::AccessFlagBits::eColorAttachmentRead |
+							  vk::AccessFlagBits::eColorAttachmentWrite;
+		overlay_vis.oldLayout           = vk::ImageLayout::eColorAttachmentOptimal;
+		overlay_vis.newLayout           = vk::ImageLayout::eColorAttachmentOptimal;
+		overlay_vis.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		overlay_vis.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		overlay_vis.image               = m_images[m_image_index];
+		overlay_vis.subresourceRange.aspectMask     = vk::ImageAspectFlagBits::eColor;
+		overlay_vis.subresourceRange.baseMipLevel   = 0;
+		overlay_vis.subresourceRange.levelCount     = 1;
+		overlay_vis.subresourceRange.baseArrayLayer = 0;
+		overlay_vis.subresourceRange.layerCount     = 1;
+		vk_command.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
+						 vk::PipelineStageFlagBits::eColorAttachmentOutput,
+						 vk::DependencyFlagBits::eByRegion, 0, nullptr, 0, nullptr, 1,
+						 &overlay_vis);
+		if (draw_overlay) {
+			DrawOverlay(vk_command, overlay);
+		}
+		if (draw_system_overlay) {
+			m_system_overlay->Record(vk_command, m_image_views[m_image_index]);
+		}
+	}
+	vk::ImageMemoryBarrier to_present {};
+	to_present.sType               = vk::StructureType::eImageMemoryBarrier;
+	to_present.srcAccessMask       = vk::AccessFlagBits::eColorAttachmentWrite;
+	to_present.dstAccessMask       = vk::AccessFlagBits::eMemoryRead;
+	to_present.oldLayout           = vk::ImageLayout::eColorAttachmentOptimal;
+	to_present.newLayout           = vk::ImageLayout::ePresentSrcKHR;
+	to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	to_present.image               = m_images[m_image_index];
+	to_present.subresourceRange.aspectMask     = vk::ImageAspectFlagBits::eColor;
+	to_present.subresourceRange.baseMipLevel   = 0;
+	to_present.subresourceRange.levelCount     = 1;
+	to_present.subresourceRange.baseArrayLayer = 0;
+	to_present.subresourceRange.layerCount     = 1;
+	vk_command.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
+					 vk::PipelineStageFlagBits::eAllCommands,
+					 vk::DependencyFlagBits::eByRegion, 0, nullptr, 0, nullptr, 1, &to_present);
+}
 uint64_t Swapchain::Submit(CommandScheduler& scheduler) {
 	if (m_frame_index >= m_image_acquired.size() || m_image_index >= m_render_complete.size()) {
 		return 0;
@@ -1449,6 +1703,88 @@ bool Presenter::PresentLastFrame() {
 	return true;
 }
 
+bool Presenter::PresentGeneratedFrame(float weight) {
+	Common::LockGuard lock(m_impl->present_mutex);
+	return m_impl->PresentGenerated(weight);
+}
+
+// v0.0.10pro phase 5: present one generated frame - the newest game frame with its motion
+// extended by `weight` of the frame-to-frame delta - into the acquired swapchain image.
+// Mirrors Present() (same swapchain recovery, same overlay stack, same frame-ownership
+// bookkeeping) but composites through the frame-generator pipeline instead of the plain
+// blit. Only the Vulkan swapchain path generates: the GL compatibility backend keeps its
+// simple repeat (its EGL ring has no second history image to sample).
+bool Presenter::Impl::PresentGenerated(float weight) {
+	KYTY_PROFILER_FUNCTION();
+	if (layers[0].frame == nullptr || framegen_history == nullptr) {
+		return false;
+	}
+	auto* const newest   = layers[0].frame;
+	auto* const previous = framegen_history;
+	// A generated frame is only meaningful between two frames of the same geometry.
+	if (newest->image.extent.width != previous->image.extent.width ||
+		newest->image.extent.height != previous->image.extent.height ||
+		newest->image.format != previous->image.format) {
+		return false;
+	}
+	if (swapchain.GlBackend()) {
+		return false;
+	}
+	const auto overlay_visual = GetSystemOverlayVisualState();
+	{
+		const auto format = newest->image.format;
+		swapchain.SetWantSrgb(format == vk::Format::eB8G8R8A8Srgb ||
+					format == vk::Format::eR8G8B8A8Srgb);
+	}
+	// Some window systems keep presenting an old swapchain after a resize.
+	if (swapchain.IsReady() && swapchain.NeedsResize()) {
+		RecoverSwapchain(Swapchain::Status::Recreate);
+	}
+	if (!swapchain.PrepareFrameGen()) {
+		return false;
+	}
+	for (uint32_t attempt = 0; attempt < 2; attempt++) {
+		if (!swapchain.IsReady()) {
+			RecoverSwapchain(Swapchain::Status::SurfaceLost);
+			if (!swapchain.IsReady()) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(16));
+				return false;
+			}
+		}
+		auto status = swapchain.AcquireNextImage();
+		if (status != Swapchain::Status::Success) {
+			RecoverSwapchain(status);
+			continue;
+		}
+		{
+			Common::LockGuard render_lock(renderer.GetMutex());
+			auto&             command = present_scheduler.BeginCommand();
+			const bool        draw_system_overlay =
+			    overlay_visual.active && swapchain.PrepareSystemOverlay();
+			swapchain.RecordFrameGenCommands(command, newest, previous, weight, layers[1],
+			                                draw_system_overlay);
+			const auto tick = swapchain.Submit(present_scheduler);
+			for (auto* frame: {newest, previous}) {
+				frame->present_tick = tick;
+			}
+			if (layers[1].frame != nullptr) {
+				layers[1].frame->present_tick = tick;
+			}
+		}
+		status = swapchain.Present();
+		if (status != Swapchain::Status::Success) {
+			RecoverSwapchain(status);
+			continue;
+		}
+		presented_overlay_revision.store(overlay_visual.revision, std::memory_order_release);
+		window.loop.presented_frames.fetch_add(1, std::memory_order_relaxed);
+		Common::Telemetry::RecordGeneratedFrame();
+		return true;
+	}
+	LOGF("frame generator: presentation retry exhausted; skipping generated frame\n");
+	return false;
+}
+
 bool Presenter::IsGuestPaused() const noexcept {
 	return m_impl->window.loop.paused.load(std::memory_order_acquire);
 }
@@ -1475,7 +1811,19 @@ void Presenter::Present(std::span<const Layer> layers) {
 		m_impl->frames.ValidateForPresent(layer.frame);
 		auto& previous = m_impl->layers[layer.bus];
 		if (previous.frame != nullptr) {
-			m_impl->frames.Release(previous.frame);
+			if (layer.bus == 0) {
+				// v0.0.10pro phase 5: bus 0 keeps one frame of history for the frame
+				// generator - the previous image the newest frame's motion is extended
+				// from. The older history goes back to the pool.
+				if (m_impl->framegen_history != previous.frame) {
+					if (m_impl->framegen_history != nullptr) {
+						m_impl->frames.Release(m_impl->framegen_history);
+					}
+					m_impl->framegen_history = previous.frame;
+				}
+			} else {
+				m_impl->frames.Release(previous.frame);
+			}
 		}
 		previous = layer;
 	}
@@ -1483,16 +1831,21 @@ void Presenter::Present(std::span<const Layer> layers) {
 }
 
 void Presenter::ClearLayer(int bus) {
-	if (static_cast<size_t>(bus) >= m_impl->layers.size()) {
-		return;
+		if (static_cast<size_t>(bus) >= m_impl->layers.size()) {
+			return;
+		}
+		Common::LockGuard lock(m_impl->present_mutex);
+		auto& layer = m_impl->layers[bus];
+		if (layer.frame != nullptr) {
+			m_impl->frames.Release(layer.frame);
+			layer = {};
+		}
+		if (bus == 0 && m_impl->framegen_history != nullptr) {
+			// v0.0.10pro phase 5: the port closed - drop the generator's history too.
+			m_impl->frames.Release(m_impl->framegen_history);
+			m_impl->framegen_history = nullptr;
+		}
 	}
-	Common::LockGuard lock(m_impl->present_mutex);
-	auto& layer = m_impl->layers[bus];
-	if (layer.frame != nullptr) {
-		m_impl->frames.Release(layer.frame);
-		layer = {};
-	}
-}
 
 void Presenter::Impl::Present() {
 	KYTY_PROFILER_FUNCTION();

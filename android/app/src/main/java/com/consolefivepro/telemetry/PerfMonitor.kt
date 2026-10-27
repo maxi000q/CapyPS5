@@ -16,6 +16,10 @@ import java.io.File
 data class PerfSnapshot(
     val fps: Float = 0f,
     val hostFps: Float = 0f,
+    /** v0.0.10pro phase 5: generated frames per second (the frame generator's share). */
+    val generatedPerSec: Float = 0f,
+    /** True while the frame generator is actively filling the presented cadence. */
+    val frameGenActive: Boolean = false,
     val frameTimeMs: Float = 0f,
     val maxFrameTimeMs: Float = 0f,
     val cpuPercent: Float? = null,
@@ -66,6 +70,9 @@ class PerfMonitor(private val context: Context) {
     private var lastStats: LongArray? = null
     /** Smoothed FPS; raw per-window counters make the overlay jump by whole frames. */
     private var fpsEma = 0f
+    /** Smoothed presented/generated rates (same 65/35 EMA as the game rate). */
+    private var hostEma = 0f
+    private var genEma = 0f
     private var lastCpuTotal = 0L
     private var lastCpuIdle = 0L
 
@@ -93,6 +100,13 @@ class PerfMonitor(private val context: Context) {
         // reacts to a real load change within about a second.
         fpsEma = if (fpsEma <= 0f || fpsRaw <= 0f) fpsRaw else 0.65f * fpsRaw + 0.35f * fpsEma
         val fps = fpsEma
+        val hostRaw = rate(NativeBridge.STAT_HOST_PRESENTS)
+        hostEma = if (hostEma <= 0f || hostRaw <= 0f) hostRaw else 0.65f * hostRaw + 0.35f * hostEma
+        val genRaw = rate(NativeBridge.STAT_GENERATED_FRAMES)
+        genEma = if (genEma <= 0f || genRaw <= 0f) genRaw else 0.65f * genRaw + 0.35f * genEma
+        // The generator counts as active once it sustains at least one generated
+        // frame per second; below that the overlay shows the plain game rate.
+        val frameGenActive = genEma >= 1f
         val memInfo = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
         val batteryIntent = context.registerReceiver(null, batteryChangedFilter)
         val batteryTemp = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
@@ -106,7 +120,9 @@ class PerfMonitor(private val context: Context) {
 
         return PerfSnapshot(
             fps = fps,
-            hostFps = rate(NativeBridge.STAT_HOST_PRESENTS),
+            hostFps = hostEma,
+            generatedPerSec = genEma,
+            frameGenActive = frameGenActive,
             frameTimeMs = if (fps > 0f) 1000f / fps else 0f,
             maxFrameTimeMs = (stats?.getOrNull(NativeBridge.STAT_MAX_FRAME_NS) ?: 0L) / 1e6f,
             cpuPercent = sampleCpu(),

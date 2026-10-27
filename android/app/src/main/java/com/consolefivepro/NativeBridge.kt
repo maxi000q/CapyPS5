@@ -59,6 +59,7 @@ object NativeBridge {
     const val STAT_NULL_BUFFERS = 5
     const val STAT_RUNNING = 6
     const val STAT_WORKLOAD_CLASS = 7 // locked turbo family: 0, 500, 501 or 502
+    const val STAT_GENERATED_FRAMES = 8 // frame-generator output; game frames + generated = host presents
 
     // Button bitmasks corresponding to PS5 DualSense
     const val BTN_SELECT = 1 shl 0

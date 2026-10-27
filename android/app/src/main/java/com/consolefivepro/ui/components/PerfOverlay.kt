@@ -64,20 +64,35 @@ fun PerfOverlay(
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // v0.0.10pro phase 5: while the frame generator is filling the cadence the
+            // headline shows what the display actually presents (game + generated - the
+            // same convention as PC frame generation), marked "gen"; the emulation rate
+            // stays visible in Full mode as "game" and still drives the graph below.
+            val displayFps = if (snapshot.frameGenActive && snapshot.hostFps > 0f) snapshot.hostFps else snapshot.fps
             Text(
                 buildAnnotatedString {
-                    withStyle(SpanStyle(color = fpsColor(snapshot.fps), fontWeight = FontWeight.Bold)) {
-                        append("%.0f".format(snapshot.fps))
+                    withStyle(SpanStyle(color = fpsColor(displayFps), fontWeight = FontWeight.Bold)) {
+                        append("%.0f".format(displayFps))
                     }
-                    withStyle(SpanStyle(color = Label)) { append(" FPS  ") }
-                    append("%.1f".format(snapshot.frameTimeMs))
+                    withStyle(SpanStyle(color = Label)) { append(" FPS") }
+                    if (snapshot.frameGenActive) {
+                        withStyle(SpanStyle(color = Label)) { append(" gen") }
+                    }
+                    withStyle(SpanStyle(color = Label)) { append("  ") }
+                    append("%.1f".format(if (displayFps > 0f) 1000f / displayFps else 0f))
                     withStyle(SpanStyle(color = Label)) { append(" ms") }
                     if (mode == OverlayMode.Full) {
                         withStyle(SpanStyle(color = Label)) { append("  max ") }
                         withStyle(SpanStyle(color = if (snapshot.maxFrameTimeMs > 50f) Capy.Warn else Capy.TextPrimary)) {
                             append("%.1f".format(snapshot.maxFrameTimeMs))
                         }
-                        if (snapshot.hostFps > 0f) {
+                        if (snapshot.frameGenActive) {
+                            // The honest split: the game's own rate and the generator's share.
+                            withStyle(SpanStyle(color = Label)) { append("  game ") }
+                            append("%.0f".format(snapshot.fps))
+                            withStyle(SpanStyle(color = Label)) { append("  gen ") }
+                            withStyle(SpanStyle(color = Capy.Good)) { append("%.0f".format(snapshot.generatedPerSec)) }
+                        } else if (snapshot.hostFps > 0f) {
                             withStyle(SpanStyle(color = Label)) { append("  host ") }
                             append("%.0f".format(snapshot.hostFps))
                         }

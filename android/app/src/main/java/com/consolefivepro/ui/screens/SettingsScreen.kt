@@ -270,6 +270,7 @@ fun SettingsScreen(
                         onStep = { settings.updateCoreOption(CoreOption.AdrenoProfile, cycle(adrenoValues, adrenoCurrent, it)) },
                     ),
                     coreItem(CoreOption.RefreshRate),
+                    coreItem(CoreOption.FrameGeneration),
                     coreItem(CoreOption.AsyncShaders),
                     coreItem(CoreOption.StreamingBuffer),
                     coreItem(CoreOption.ReadAhead),

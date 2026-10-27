@@ -138,6 +138,8 @@
     <string name="option_refresh_rate">Refresh rate</string>
     <string name="option_refresh_rate_desc">Display mode and emulated vblank for games paced by vblank (same graphics): Auto follows the display’s highest rate, so 90/120 Hz screens stop capping games at 60 FPS; 60 keeps the previous behaviour. Applies from the next game start.</string>
     <string name="refresh_auto">Auto (display)</string>
+    <string name="option_frame_generation">Frame generation</string>
+    <string name="option_frame_generation_desc">Fills idle display ticks with a generated in-between frame, so the presented image runs at the display rate. Real frames are untouched and still appear the moment they finish, so input response stays the same. On by default; turn it off for the raw cadence. Applies from the next game start.</string>
     <string name="refresh_60">60 Hz</string>
     <string name="refresh_90">90 Hz</string>
     <string name="refresh_120">120 Hz</string>
@@ -290,6 +292,9 @@
     <string name="trophies_card_next">Still to earn</string>
     <string name="whats_new_title">What\'s new in v%1$s</string>
     <string-array name="whats_new_items">
+        <item>New: frame generation (Settings → Performance, on by default). Idle display ticks now show a generated in-between frame instead of a repeat, so the presented image follows the display's rate — real frames still appear the moment they finish and input response is unchanged. Turn it off if you prefer the raw cadence.</item>
+        <item>Faster: the engine now recognises each game's workload on the fly (high-throughput 3D, layered compositing, forward-rendered 3D) and tunes its submit batching, download read-ahead and shader-compile workers to match, with a Mali/Adreno ladder per tier and a 4K policy of its own. The perf overlay shows the active engine family (T500/T501/T502).</item>
+        <item>New: a Vulkan version option on Mali (Settings → Graphics; 1.3 default, 1.1 for drivers that prefer it) and a custom on-screen controls editor (Settings → Controls) — move, resize and save your own button layout.</item>
         <item>Fixed: the freezes. A game could freeze for whole seconds and come back — and the worst sessions died on a crash right after the freeze. The freeze came from the shader pipeline: when a draw needed a pipeline that was still compiling, the renderer waited for the compile with no limit at all, so a storm of new shaders (a new area, material streaming) could park the whole renderer behind the compile queue for tens of seconds. No draw may wait more than 4 milliseconds now (debug.capy.pipeline_wait_ms): past the bound the draw is skipped, the compile lands in the background, and the next time the game draws it renders for real — the 28-second class of freezes is gone by construction. The same serialization was the 1–3 FPS crawl in heavy 3D games: frames flow again while the pipelines warm up.</item>
         <item>Fixed: the crash right after a freeze. The game’s own render worker, starved by the freeze above, timed out and tore its objects down, then wrote through the nulled pointer to address 0x1 — the session died with “the game made a null-pointer write”. Every such write below 64 KiB (the null guard page: it can never hold game data and nothing can ever read it back) is now skipped and the session continues, exactly like the read side already answers it with zeroes. A genuine null-write loop still gets the honest crash report (debug.capy.wild_store_recovery).</item>
         <item>Fixed: the library could crash the app on a duplicate entry (“Key … was already used”). The list is now deduplicated inside the game grid itself, so no future source of the list can crash the interface, whatever produced it.</item>
