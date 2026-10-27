@@ -232,9 +232,11 @@ bool CommandScheduler::InDeferredOperation() noexcept {
 	return g_deferred_callback_scheduler != nullptr;
 }
 
-CommandScheduler::CommandScheduler(RenderContext& context, GraphicContext& graphics)
+CommandScheduler::CommandScheduler(RenderContext& context, GraphicContext& graphics,
+                                   bool batch_submits)
     : m_master(graphics), m_context(context), m_graphics(graphics),
       m_command_pool(graphics, m_master), m_command(*this),
+      m_batch_submits(batch_submits),
       m_priority_thread([this](std::stop_token stop) { PriorityOperationsThread(stop); }) {}
 
 CommandScheduler::~CommandScheduler() {
@@ -264,6 +266,8 @@ void CommandScheduler::Shutdown() {
 	if (!m_command.IsInvalid()) {
 		Submit();
 	}
+	// v0.0.10pro phase 1: a batched submission may hold the highest reserved tick.
+	(void)FlushSubmitBatch();
 	m_master.Wait(CurrentTick() - 1);
 	PopPendingOperations();
 	DrainPriorityOperations();
@@ -320,6 +324,7 @@ void CommandScheduler::Flush(SubmitInfo& submit) {
 
 void CommandScheduler::FlushAndWait() {
 	const auto tick = Submit();
+	(void)FlushSubmitBatch();
 	SUBMIT_STATS_WAIT(m_master.Wait(tick));
 	BeginNext();
 }
@@ -330,6 +335,7 @@ void CommandScheduler::Finish() {
 	if (!m_command.IsInvalid()) {
 		Submit();
 	}
+	(void)FlushSubmitBatch();
 	SUBMIT_STATS_WAIT(m_master.Wait(CurrentTick() - 1));
 	BeginNext();
 	PopPendingOperations();
@@ -344,9 +350,11 @@ void CommandScheduler::Wait(uint64_t tick) {
 		// resources are released only at the next GPU operation boundary.
 		const auto submitted_tick = Submit();
 		EXIT_IF(submitted_tick != tick);
+		(void)FlushSubmitBatch();
 		SUBMIT_STATS_WAIT(m_master.Wait(tick));
 		BeginNext();
 	} else {
+		(void)FlushSubmitBatch();
 		SUBMIT_STATS_WAIT(m_master.Wait(tick));
 	}
 }
@@ -381,6 +389,13 @@ void CommandScheduler::QueueOperation(Common::UniqueFunction<void>&& operation, 
 	CS_LOG("QueueOperation called by %p priority=%d", __builtin_return_address(0), (int)priority);
 	CheckActive();
 	EXIT_IF(!operation);
+	// v0.0.10pro phase 1: flip completions and end-of-pipe writes wait on the tick the
+	// NEXT submission reserves. Forcing that submission to be a real one (instead of
+	// joining the batch) keeps the waiter's tick in flight; a stray flag without a
+	// following flush only costs one unbatched submit.
+	if (priority) {
+		m_force_submit.store(true, std::memory_order_release);
+	}
 	std::unique_lock lock(m_operation_mutex);
 	if (m_operation_state == OperationState::Open) {
 		auto& queue = priority ? m_priority_operations : m_pending_operations;
@@ -501,6 +516,45 @@ CommandBuffer& CommandScheduler::BeginCommand() {
 
 std::atomic<uint64_t> g_submit_count {0};
 
+// Console Five Pro (v0.0.10pro phase 1): drain the pending submission batch as ONE
+// vkQueueSubmit signalling the master timeline at the batch's last tick. Timeline
+// semaphores are monotonic, and every submission site flushes earlier ticks first, so
+// queue order keeps matching reservation order. Same-thread discipline as Submit().
+uint64_t CommandScheduler::FlushSubmitBatch() {
+	if (m_submit_batch_buffers.empty()) {
+		return m_master.CurrentTick() == 0 ? 0 : m_master.CurrentTick() - 1;
+	}
+	auto& graphics = m_graphics;
+	EXIT_IF(graphics.queue == nullptr);
+
+	const uint64_t last_tick = m_submit_batch_ticks.back();
+
+	vk::TimelineSemaphoreSubmitInfo timeline_info {};
+	timeline_info.signalSemaphoreValueCount = 1;
+	timeline_info.pSignalSemaphoreValues    = &last_tick;
+
+	vk::Semaphore master = m_master.Handle();
+	vk::SubmitInfo submit_info {};
+	submit_info.pNext                = &timeline_info;
+	submit_info.commandBufferCount   = static_cast<uint32_t>(m_submit_batch_buffers.size());
+	submit_info.pCommandBuffers      = m_submit_batch_buffers.data();
+	submit_info.signalSemaphoreCount = 1;
+	submit_info.pSignalSemaphores    = &master;
+
+	const auto result = [&] {
+		Common::LockGuard lock(graphics.queue_mutex);
+		return graphics.queue.submit(1, &submit_info, nullptr);
+	}();
+	if (result != vk::Result::eSuccess) {
+		ReportVulkanFatal("vkQueueSubmit", result, last_tick, 0, 0, 0, 0, 0, 0, 0);
+	}
+	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
+
+	m_submit_batch_buffers.clear();
+	m_submit_batch_ticks.clear();
+	return last_tick;
+}
+
 uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 	EXIT_IF(m_command.IsInvalid());
 	g_submit_count.fetch_add(1, std::memory_order_relaxed);
@@ -514,6 +568,36 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 	const auto buffer   = m_command.m_buffer;
 	auto&      graphics = m_graphics;
 	EXIT_IF(graphics.queue == nullptr);
+
+	// v0.0.10pro phase 1: batched queue submissions. Every guest command-buffer flush
+	// used to be its own vkQueueSubmit (heavy Unity titles push ~80 per game frame at
+	// low FPS); consecutive semaphore-free flushes are now merged into one submit with
+	// several command buffers. A priority deferral forces the next submission to be
+	// real (see QueueOperation), and every wait path drains the batch first
+	// (Wait/FlushAndWait/Finish/Shutdown). Semaphore-carrying submissions - the
+	// swapchain presenter's own scheduler - never batch.
+	static Common::DebugFlags::CachedValue batch_limit("debug.capy.submit_batch", 8);
+	const auto  max_batch = static_cast<uint32_t>(batch_limit.Get());
+	const bool  forced    = m_force_submit.exchange(false, std::memory_order_acq_rel);
+	const bool  batchable = m_batch_submits && max_batch > 1 && !forced &&
+	                      submit.num_wait_semaphores == 0 &&
+	                      submit.num_signal_semaphores == 0;
+	if (batchable) {
+		const uint64_t batch_tick = m_master.NextTick();
+		m_submit_batch_buffers.push_back(buffer);
+		m_submit_batch_ticks.push_back(batch_tick);
+		m_command.m_buffer = nullptr;
+		if (m_submit_batch_buffers.size() < max_batch) {
+			return batch_tick;
+		}
+		// Capacity reached: one vkQueueSubmit carries the whole batch.
+		const uint64_t flushed = FlushSubmitBatch();
+		EXIT_IF(flushed != batch_tick);
+		return batch_tick;
+	}
+	// A forced or semaphore-carrying submission flushes the batch first so the
+	// timeline stays ordered and forced ticks are in flight.
+	(void)FlushSubmitBatch();
 
 	vk::Result result;
 	uint64_t   tick;

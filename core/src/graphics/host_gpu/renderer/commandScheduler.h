@@ -27,7 +27,12 @@ extern std::atomic<uint64_t> g_submit_count;
 
 class CommandScheduler {
 public:
-	CommandScheduler(RenderContext& context, GraphicContext& graphics);
+	// v0.0.10pro phase 1: batch_submits enables queue-submit batching for this
+	// scheduler - only RenderContext's own scheduler opts in (one bare flush per guest
+	// command buffer); the presenter's scheduler never batches (its blank-frame ticks
+	// must be in flight immediately).
+	explicit CommandScheduler(RenderContext& context, GraphicContext& graphics,
+	                        bool batch_submits = false);
 	~CommandScheduler();
 	KYTY_CLASS_NO_COPY(CommandScheduler);
 
@@ -73,7 +78,9 @@ private:
 		vk::CommandBuffer Commit();
 
 	private:
-		static constexpr size_t GrowStep = 4;
+		// Console Five Pro (v0.0.10pro phase 1): 8 (was 4) - batched submissions hold
+		// several buffers in flight at once, so the pool grows in fewer, larger rounds.
+		static constexpr size_t GrowStep = 8;
 
 		size_t Grow();
 
@@ -96,6 +103,10 @@ private:
 	void PriorityOperationsThread(std::stop_token stop);
 	void QueueOperation(Common::UniqueFunction<void>&& operation, bool priority);
 	void RunOperation(Common::UniqueFunction<void>&& operation);
+	// Console Five Pro (v0.0.10pro phase 1): submit the pending batch (if any) as one
+	// vkQueueSubmit signalling the timeline at its last tick. Same-thread discipline as
+	// the recording command buffer itself.
+	uint64_t FlushSubmitBatch();
 
 	MasterSemaphore              m_master;
 	RenderContext&               m_context;
@@ -111,6 +122,15 @@ private:
 	bool                         m_priority_active      = false;
 	uint64_t                     m_priority_active_tick = 0;
 	OperationState               m_operation_state      = OperationState::Open;
+	// Console Five Pro (v0.0.10pro phase 1): batched queue submissions. Consecutive
+	// bare flushes are collected and submitted as one vkQueueSubmit; a priority deferral
+	// (flip completion) sets m_force_submit so the very next submission is real, keeping
+	// the flip waiter's tick in flight. All members follow the recording buffer's
+	// same-thread discipline except m_force_submit (atomic).
+	bool                         m_batch_submits       = false;
+	std::vector<vk::CommandBuffer> m_submit_batch_buffers;
+	std::vector<uint64_t>          m_submit_batch_ticks;
+	std::atomic<bool>              m_force_submit {false};
 };
 
 } // namespace Libs::Graphics

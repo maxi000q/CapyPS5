@@ -10,6 +10,7 @@
 #include <android/log.h>
 #endif
 #include "common/debugFlags.h"
+#include "common/gpuProfile.h"
 #if defined(__ANDROID__)
 #include "android/capyps5_jni.h"
 #endif
@@ -1977,7 +1978,12 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	// GREATER test and showed the fog colour with trails). Clearing one pixel, which the draw
 	// then overwrites, is enough. `debug.capy.depth_kick 0` disables it.
 	static Common::DebugFlags::CachedValue depth_kick("debug.capy.depth_kick", 1);
-	if (depth_kick.Get() != 0 && rendering.depth_stencil_attachment.has_depth &&
+	// v0.0.10pro phase 1: the kick is an Adreno driver workaround; on Mali it is pure
+	// per-draw cost (a tiler executes clearAttachments as real commands), so Mali skips
+	// it. debug.capy.depth_kick 1 still forces it on everywhere.
+	const bool depth_kick_on = depth_kick.Get() != 0 &&
+	                         (depth_kick.Get() == 1 ? !Common::GpuProfile::IsMali() : true);
+	if (depth_kick_on && rendering.depth_stencil_attachment.has_depth &&
 	    state.depth_info.depth_write_enable && state.depth_info.depth_compare_op == vk::CompareOp::eAlways) {
 		vk::ClearAttachment clear {};
 		clear.aspectMask                    = vk::ImageAspectFlagBits::eDepth;

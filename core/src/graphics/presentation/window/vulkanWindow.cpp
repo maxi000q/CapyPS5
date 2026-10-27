@@ -1300,7 +1300,8 @@ void WindowContext::CreateVulkan() {
 		Log::WriteToConsoleAndLog(fmt::format(
 			"GPU: {} - Mali performance profile enabled: hardware render-target clears "
 			"(AFBC-friendly), 128 MiB streaming buffer, +1 pipeline worker, "
-			"pass-split-free event barriers, batched compute submissions\n",
+			"pass-split-free event barriers, batched compute submissions, "
+			"batched queue submits, 2 MiB huge-page guest memory, no depth-pass kick\n",
 			device_properties.deviceName.data()));
 	}
 	// v0.0.9proQ1: render targets keep the driver framebuffer compression (AFBC on Mali,

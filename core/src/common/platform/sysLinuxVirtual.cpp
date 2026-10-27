@@ -9,6 +9,7 @@
 #else
 
 #include "common/assert.h"
+#include "common/debugFlags.h"
 #include "common/virtualMemory.h"
 
 #include <atomic>
@@ -608,8 +609,25 @@ bool Protect(uint64_t address, uint64_t size, Mode mode) {
 	const auto addr       = static_cast<uintptr_t>(address);
 	const auto page_start = addr >> 12u;
 	const auto page_end   = (addr + size - 1) >> 12u;
-	return mprotect(reinterpret_cast<void*>(page_start << 12u), (page_end - page_start + 1) << 12u,
-	                get_protection_flag(mode)) == 0;
+	const auto bytes      = (page_end - page_start + 1) << 12u;
+	if (mprotect(reinterpret_cast<void*>(page_start << 12u), bytes,
+	             get_protection_flag(mode)) != 0) {
+		return false;
+	}
+#if defined(__linux__)
+	// Console Five Pro (v0.0.10pro phase 1): transparent huge pages for guest memory.
+	// The multi-gigabyte guest heap is committed through this function; advising
+	// MADV_HUGEPAGE lets the kernel back it with 2 MiB pages, which means ~500x fewer
+	// soft page faults while the game touches its memory and far fewer TLB misses for
+	// every guest dereference the FEX translation makes. A no-op on kernels with THP
+	// disabled; never changes guest-visible contents. `debug.capy.thp 0` reverts.
+	static Common::DebugFlags::CachedValue thp("debug.capy.thp", 1);
+	constexpr uint64_t HugePageBytes = 2ull * 1024 * 1024;
+	if (mode != Mode::NoAccess && bytes >= HugePageBytes && thp.Get() != 0) {
+		(void)::madvise(reinterpret_cast<void*>(page_start << 12u), bytes, MADV_HUGEPAGE);
+	}
+#endif
+	return true;
 }
 
 bool FlushInstructionCache(uint64_t /*address*/, uint64_t /*size*/) {
