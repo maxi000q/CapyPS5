@@ -284,13 +284,19 @@ class Settings(context: Context) {
     /** Global value of a core option. */
     fun coreOption(option: CoreOption): Long = prefs.getLong("opt_${option.name}", gpuAwareDefault(option))
 
-    /** v0.0.9pro / v0.0.10pro: with either GPU profile active the streaming buffer defaults to 128 MB. */
-    private fun gpuAwareDefault(option: CoreOption): Long =
-        if (option == CoreOption.StreamingBuffer && (maliProfileActive() || adrenoProfileActive())) {
-            128L
-        } else {
-            option.default
+    /**
+     * v0.0.9pro / v0.0.10pro: with either GPU profile active the streaming buffer defaults to
+     * 128 MB and the GPU download read-ahead to 512 KB (heavy titles fault GPU-owned pages in
+     * long sequential sweeps - a wider window halves the fault+download count).
+     */
+    private fun gpuAwareDefault(option: CoreOption): Long {
+        if (!maliProfileActive() && !adrenoProfileActive()) return option.default
+        return when (option) {
+            CoreOption.StreamingBuffer -> 128L
+            CoreOption.ReadAhead -> 512L
+            else -> option.default
         }
+    }
 
     fun updateCoreOption(option: CoreOption, value: Long) {
         prefs.edit().putLong("opt_${option.name}", value).apply()
