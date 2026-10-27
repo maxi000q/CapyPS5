@@ -910,6 +910,10 @@ bool GuestGpu::Process(Submission& submission) {
 				}
 				if (!more_queued) {
 					cp.BufferFlush();
+					// v0.0.9proQ4 round 2: the work queue is empty - drain the
+					// submit batch so the frame tail reaches the GPU now instead of
+					// waiting for the next burst to fill it.
+					cp.GetScheduler().DrainSubmitBatch();
 				}
 			} else if (complete) {
 				m_renderer.RunGarbageCollector();
@@ -951,6 +955,10 @@ bool GuestGpu::Process(Submission& submission) {
 				}
 				if (!more_queued) {
 					cp.BufferFlush();
+					// v0.0.9proQ4 round 2: the work queue is empty - drain the
+					// submit batch so the frame tail reaches the GPU now instead of
+					// waiting for the next burst to fill it.
+					cp.GetScheduler().DrainSubmitBatch();
 				}
 			} else if (complete) {
 				m_renderer.RunGarbageCollector();

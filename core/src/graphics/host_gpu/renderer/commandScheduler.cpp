@@ -656,4 +656,17 @@ void CommandScheduler::BeginNext() {
 	BeginCommand();
 }
 
+// v0.0.9proQ4 round 2: called by the GPU thread when the guest submission queue
+// runs empty. The queue-empty BufferFlush() joins the batch like every other
+// semaphore-free submit, so without this the frame's tail work would sit
+// unsubmitted until the next burst fills the batch (16 under the mobile
+// profiles) or a wait path drains it - the GPU idles across the boundary and
+// the present-side host wait inherits the delay. A no-op when the batch is
+// already drained; order is untouched (same-tick, same-thread flush).
+void CommandScheduler::DrainSubmitBatch() {
+	if (!m_submit_batch_buffers.empty()) {
+		(void)FlushSubmitBatch();
+	}
+}
+
 } // namespace Libs::Graphics
