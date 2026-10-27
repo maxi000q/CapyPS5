@@ -75,6 +75,7 @@ import com.consolefivepro.telemetry.PerfSnapshot
 import com.consolefivepro.ui.NavKey
 import com.consolefivepro.ui.OnNavKey
 import com.consolefivepro.ui.components.LayersPanel
+import com.consolefivepro.ui.components.ControlsEditor
 import com.consolefivepro.ui.components.PerfOverlay
 import com.consolefivepro.ui.components.SettingsPanel
 import com.consolefivepro.ui.components.TouchpadOverlay
@@ -101,6 +102,8 @@ fun EmulationScreen(
     var showPauseMenu by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showLayers by remember { mutableStateOf(false) }
+    // v0.0.10pro phase 3: the custom controls editor over the running game.
+    var showControlsEditor by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var gamepadConnected by remember { mutableStateOf(hasPhysicalGamepad()) }
     var snapshot by remember { mutableStateOf(PerfSnapshot()) }
@@ -113,7 +116,7 @@ fun EmulationScreen(
     var perfMonitor by remember { mutableStateOf<PerfMonitor?>(null) }
 
     // While any menu is open, controller input drives the UI instead of the game.
-    val uiHasInput = showPauseMenu || showSettings || showLayers || loadError != null
+    val uiHasInput = showPauseMenu || showSettings || showLayers || showControlsEditor || loadError != null
     LaunchedEffect(uiHasInput) { InputRouter.setRouteToUi(uiHasInput) }
     DisposableEffect(Unit) {
         InputRouter.onPauseRequested = { showPauseMenu = true }
@@ -293,14 +296,18 @@ fun EmulationScreen(
                 },
         )
 
-        if (showTouch) {
+        // v0.0.10pro phase 3: while the layout editor is open it shows its own pad (input
+        // blocked, drag + resize live); the normal overlay steps aside so both never draw.
+        if (showTouch && !showControlsEditor) {
             VirtualGamepad(
                 modifier = Modifier.fillMaxSize(),
                 alpha = settings.controlsOpacity,
                 showTouchpad = settings.touchpadOverlay != TouchControlsMode.Never,
+                layout = settings.controlsLayout,
+                buttonLayout = settings.buttonLayout,
                 onMenuClick = { showPauseMenu = true },
             )
-        } else if (settings.touchpadOverlay == TouchControlsMode.Always) {
+        } else if (settings.touchpadOverlay == TouchControlsMode.Always && !showControlsEditor) {
             TouchpadOverlay(Modifier.fillMaxSize(), alpha = settings.controlsOpacity)
         }
 
@@ -332,6 +339,17 @@ fun EmulationScreen(
                 settings, versionText,
                 onClose = { showSettings = false },
                 modifier = Modifier.align(Alignment.CenterEnd),
+                onCustomControls = {
+                    showSettings = false
+                    showControlsEditor = true
+                },
+            )
+        }
+
+        if (showControlsEditor) {
+            ControlsEditor(
+                settings = settings,
+                onDone = { showControlsEditor = false },
             )
         }
 

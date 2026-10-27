@@ -47,6 +47,10 @@
     <string name="option_graphics_backend_desc">Vulkan renderiza y presenta directamente (lo más rápido). OpenGL ES muestra el fotograma final mediante EGL, una ruta de compatibilidad para dispositivos con la presentación Vulkan rota; vuelve a Vulkan si no está soportada. Se aplica desde el próximo inicio del juego.</string>
     <string name="backend_vulkan">Vulkan</string>
     <string name="backend_opengl">OpenGL ES</string>
+    <string name="option_vulkan_version">Versión de Vulkan</string>
+    <string name="option_vulkan_version_desc">Solo Mali, con el backend Vulkan: usar una instancia de Vulkan 1.3 (predeterminada) o de Vulkan 1.1. La 1.1 ayuda a los controladores Mali cuya ruta 1.3 falla o que solo exponen las funciones necesarias mediante extensiones. Se aplica desde el próximo inicio del juego.</string>
+    <string name="vulkan_version_1_3">Vulkan 1.3</string>
+    <string name="vulkan_version_1_1">Vulkan 1.1</string>
     <string name="option_resolution">Resolución interna</string>
     <string name="option_resolution_desc">Por eje: un juego 4K al 50 % se dibuja a 1080p (un cuarto del trabajo). Menos resolución alivia la GPU; algunos juegos no la admiten</string>
     <string name="resolution_native">Nativa</string>
@@ -156,6 +160,17 @@
     <string name="layout_standard">Estándar (Xbox)</string>
     <string name="layout_nintendo">Nintendo (PS5)</string>
     <string name="controls_opacity">Opacidad de los controles</string>
+    <string name="custom_controls">Controles personalizados</string>
+    <string name="custom_controls_desc">Mueve y cambia el tamaño de los botones en pantalla</string>
+    <string name="custom_controls_a">Editar disposición  Ⓐ</string>
+    <string name="custom_controls_hint">Arrastra un grupo para moverlo, toca para seleccionarlo</string>
+    <string name="controls_editor_type">Controles: %1$s · Botones: %2$s</string>
+    <string name="controls_size">Tamaño</string>
+    <string name="controls_reset">Restablecer</string>
+    <string name="controls_save">Guardar</string>
+    <string name="controls_cluster_left">Lado izquierdo</string>
+    <string name="controls_cluster_right">Lado derecho</string>
+    <string name="controls_cluster_top">Barra superior</string>
 
     <!-- Carpetas -->
     <string name="folder_add">Añadir carpeta</string>

@@ -49,6 +49,10 @@
     <string name="option_graphics_backend_desc">Vulkan renders and presents directly (fastest). OpenGL ES shows the final frame through EGL, a compatibility path for devices with a broken Vulkan present path; falls back to Vulkan when unsupported. Applies from the next game start.</string>
     <string name="backend_vulkan">Vulkan</string>
     <string name="backend_opengl">OpenGL ES</string>
+    <string name="option_vulkan_version">Vulkan version</string>
+    <string name="option_vulkan_version_desc">Mali only, with the Vulkan backend: run on a Vulkan 1.3 instance (the default) or a Vulkan 1.1 one. 1.1 helps Mali drivers whose 1.3 path misbehaves or that expose the required features only through extensions. Applies from the next game start.</string>
+    <string name="vulkan_version_1_3">Vulkan 1.3</string>
+    <string name="vulkan_version_1_1">Vulkan 1.1</string>
     <string name="option_resolution">Internal resolution</string>
     <string name="option_resolution_desc">Per axis: a 4K game at 50 % renders at 1080p (a quarter of the work). Lower resolution relieves the GPU; some games do not support it</string>
     <string name="resolution_native">Native</string>
@@ -158,6 +162,17 @@
     <string name="layout_standard">Standard (Xbox)</string>
     <string name="layout_nintendo">Nintendo (PS5)</string>
     <string name="controls_opacity">Controls opacity</string>
+    <string name="custom_controls">Custom controls</string>
+    <string name="custom_controls_desc">Move and resize the on-screen buttons to fit your hands</string>
+    <string name="custom_controls_a">Edit layout  Ⓐ</string>
+    <string name="custom_controls_hint">Drag a cluster to move it, tap to select</string>
+    <string name="controls_editor_type">Controls: %1$s · Buttons: %2$s</string>
+    <string name="controls_size">Size</string>
+    <string name="controls_reset">Reset</string>
+    <string name="controls_save">Save</string>
+    <string name="controls_cluster_left">Left side</string>
+    <string name="controls_cluster_right">Right side</string>
+    <string name="controls_cluster_top">Top bar</string>
 
     <!-- Folders -->
     <string name="folder_add">Add folder</string>

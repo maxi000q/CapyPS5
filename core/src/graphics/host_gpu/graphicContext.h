@@ -22,6 +22,41 @@ struct VulkanImage;
 
 inline constexpr uint32_t VULKAN_TARGET_API_VERSION = VK_API_VERSION_1_3;
 
+// v0.0.10pro phase 3: Mali devices can run the Vulkan backend on a Vulkan 1.1 instance
+// (frontend setting "Vulkan version", property debug.capy.vk_api, default 1.3). Some Mali
+// drivers implement the features the renderer needs only through extensions, or misbehave
+// on their 1.3 instance path; with the option at 1.1 the instance is created at 1.1 and
+// the promoted functionality is enabled through its extensions instead.
+inline constexpr uint32_t VULKAN_COMPAT_API_VERSION = VK_API_VERSION_1_1;
+
+// Functionality the renderer requires that Vulkan 1.2/1.3 promoted from extensions. On a
+// 1.1 instance each entry must be enabled through its extension at device creation, and a
+// device that lacks one cannot run the renderer - VulkanFindPhysicalDevice rejects it.
+inline constexpr const char* VULKAN11_MANDATORY_EXTENSIONS[] = {
+	"VK_KHR_dynamic_rendering",             // dynamicRendering (core 1.3)
+	"VK_KHR_synchronization2",             // synchronization2 (core 1.3)
+	"VK_KHR_timeline_semaphore",           // timelineSemaphore (core 1.2)
+	"VK_KHR_buffer_device_address",        // bufferDeviceAddress (core 1.2)
+	"VK_EXT_descriptor_indexing",          // shaderSampledImageArrayNonUniformIndexing (core 1.2)
+	"VK_KHR_sampler_mirror_clamp_to_edge", // samplerMirrorClampToEdge (core 1.2)
+	"VK_EXT_image_robustness",             // robustImageAccess (core 1.3)
+};
+
+// Promoted functionality the renderer only requests when the driver reports the feature:
+// each entry is enabled when present and the existing fallback paths cover its absence.
+inline constexpr const char* VULKAN11_OPTIONAL_EXTENSIONS[] = {
+	"VK_KHR_8bit_storage",                       // storageBuffer8BitAccess (core 1.2)
+	"VK_KHR_shader_draw_parameters",             // shaderDrawParameters (core 1.1)
+	"VK_EXT_subgroup_size_control",              // subgroupSizeControl (core 1.3)
+	"VK_EXT_shader_demote_to_helper_invocation", // shaderDemoteToHelperInvocation (core 1.3)
+	"VK_KHR_shader_terminate_invocation",        // shaderTerminateInvocation (core 1.3)
+	"VK_KHR_spirv_1_4",                          // SPIR-V 1.4 modules (mesh shaders) under 1.1
+};
+
+[[nodiscard]] inline constexpr bool Vulkan11Instance(uint32_t api_version) {
+	return api_version <= VULKAN_COMPAT_API_VERSION;
+}
+
 struct GraphicContext {
 	vk::Instance                       instance                              = nullptr;
 	vk::DebugUtilsMessengerEXT         debug_messenger                       = nullptr;
@@ -64,6 +99,11 @@ struct GraphicContext {
 	Common::Mutex                      queue_mutex;
 	uint32_t                           queue_family = static_cast<uint32_t>(-1);
 	vk::Queue                          queue        = nullptr;
+	// v0.0.10pro phase 3: API version of this session's instance - the 1.3 default, or 1.1
+	// when the frontend's Vulkan-version option picks the Mali compatibility mode. Set once
+	// in WindowContext::CreateVulkan before the instance exists; every later step (loader
+	// gate, application info, device selection, the allocator) follows it.
+	uint32_t                           api_version  = VULKAN_TARGET_API_VERSION;
 
 	[[nodiscard]] const vk::PhysicalDeviceProperties& GetPhysicalDeviceProperties() const {
 		return physical_device_properties;

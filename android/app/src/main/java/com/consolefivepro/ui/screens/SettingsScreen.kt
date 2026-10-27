@@ -60,6 +60,7 @@ import com.consolefivepro.Settings
 import com.consolefivepro.TouchControlsMode
 import com.consolefivepro.ui.NavKey
 import com.consolefivepro.ui.OnNavKey
+import com.consolefivepro.ui.components.ControlsEditor
 import com.consolefivepro.ui.theme.Capy
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -127,6 +128,8 @@ fun SettingsScreen(
     val context = LocalContext.current
     var message by remember { mutableStateOf<String?>(null) }
     var showDrivers by remember { mutableStateOf(false) }
+    // v0.0.10pro phase 3: the on-screen controls layout editor (full screen).
+    var showControlsEditor by remember { mutableStateOf(false) }
     var savesMessage by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val exportSaves = rememberLauncherForActivityResult(
@@ -185,8 +188,14 @@ fun SettingsScreen(
                 val current = settings.gpuDriver().takeIf { id -> id in ids }.orEmpty()
                 val scales = CoreOption.ResolutionScale.choices.map { it.first }
                 val ueScale = settings.ueResolution()
-                listOf(
+                // v0.0.10pro phase 3: the Vulkan-version option exists only on Mali devices and
+                // only while the Vulkan backend is selected (the row recomposes through
+                // optionsVersion when the backend changes).
+                val showVulkanVersion =
+                    GpuInfo.isMali && settings.coreOption(CoreOption.GraphicsBackend) == 0L
+                listOfNotNull(
                     coreItem(CoreOption.GraphicsBackend),
+                    if (showVulkanVersion) coreItem(CoreOption.VulkanVersion) else null,
                     coreItem(CoreOption.ResolutionScale),
                     SettingItem(
                         context.getString(R.string.ue_resolution),
@@ -309,6 +318,12 @@ fun SettingsScreen(
                     SettingItem(
                         context.getString(R.string.controls_opacity), null, "%.0f %%".format(settings.controlsOpacity * 100),
                         onStep = { settings.updateControlsOpacity((settings.controlsOpacity + it * 0.1f).coerceIn(0.1f, 1f)) },
+                    ),
+                    // v0.0.10pro phase 3: open the on-screen pad layout editor.
+                    SettingItem(
+                        context.getString(R.string.custom_controls),
+                        context.getString(R.string.custom_controls_desc),
+                        onConfirm = { showControlsEditor = true },
                     ),
                 )
             },
@@ -434,6 +449,11 @@ fun SettingsScreen(
 
     if (showDrivers) {
         DriverDownloadScreen(settings, onClose = { showDrivers = false })
+        return
+    }
+
+    if (showControlsEditor) {
+        ControlsEditor(settings, onDone = { showControlsEditor = false })
         return
     }
     Row(Modifier.fillMaxSize().background(Capy.Background)) {

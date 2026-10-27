@@ -39,6 +39,76 @@ enum class ScreenAspect(@StringRes val labelRes: Int) {
     fun label(context: Context) = context.getString(labelRes)
 }
 
+/** One on-screen control cluster: its centre as a fraction of the overlay, and its size. */
+data class ControlCluster(
+    val x: Float,
+    val y: Float,
+    val scale: Float = 1f,
+) {
+    fun clamped(): ControlCluster = ControlCluster(
+        x = x.coerceIn(0.02f, 0.98f),
+        y = y.coerceIn(0.02f, 0.98f),
+        scale = scale.coerceIn(0.6f, 1.8f),
+    )
+}
+
+/**
+ * Layout of the on-screen pad (v0.0.10pro phase 3): three clusters (left pad side, right pad
+ * side, top bar) the user can move and resize in the controls editor. Defaults reproduce the
+ * classic fixed layout on a phone screen; positions are stored as screen fractions so the
+ * layout survives rotation and works on any display.
+ */
+data class ControlsLayout(
+    val left: ControlCluster = ControlCluster(0.19f, 0.70f),
+    val right: ControlCluster = ControlCluster(0.81f, 0.70f),
+    val top: ControlCluster = ControlCluster(0.5f, 0.08f),
+) {
+    fun cluster(index: Int): ControlCluster = when (index) {
+        0 -> left
+        1 -> right
+        else -> top
+    }
+
+    fun withCluster(index: Int, value: ControlCluster): ControlsLayout = when (index) {
+        0 -> copy(left = value)
+        1 -> copy(right = value)
+        else -> copy(top = value)
+    }
+
+    /** Drag delta in screen fractions applied to one cluster, clamped on all axes. */
+    fun moved(index: Int, dx: Float, dy: Float): ControlsLayout =
+        withCluster(index, cluster(index).let { ControlCluster(it.x + dx, it.y + dy, it.scale) }.clamped())
+
+    /** Size step applied to one cluster, clamped to the editor bounds. */
+    fun scaled(index: Int, amount: Float): ControlsLayout =
+        withCluster(index, cluster(index).let { ControlCluster(it.x, it.y, it.scale + amount) }.clamped())
+
+    fun clamped(): ControlsLayout = ControlsLayout(left.clamped(), right.clamped(), top.clamped())
+
+    fun toJson(): String {
+        fun clusterJson(c: ControlCluster) =
+            org.json.JSONArray().put(c.x.toDouble()).put(c.y.toDouble()).put(c.scale.toDouble())
+        return org.json.JSONObject()
+            .put("left", clusterJson(left))
+            .put("right", clusterJson(right))
+            .put("top", clusterJson(top))
+            .toString()
+    }
+
+    companion object {
+        /** Reads a layout written by [toJson]; null when the text is absent or malformed. */
+        fun fromJson(text: String?): ControlsLayout? = runCatching {
+            if (text.isNullOrBlank()) return@runCatching null
+            val root = org.json.JSONObject(text)
+            fun cluster(name: String): ControlCluster {
+                val values = root.getJSONArray(name)
+                return ControlCluster(values.getDouble(0).toFloat(), values.getDouble(1).toFloat(), values.getDouble(2).toFloat())
+            }
+            ControlsLayout(cluster("left"), cluster("right"), cluster("top")).clamped()
+        }.getOrNull()
+    }
+}
+
 /**
  * Emulator core option, passed to the core as its debug.capy.* property before a game starts.
  * Each has a global value and an optional per-game override.
@@ -65,6 +135,23 @@ enum class CoreOption(
             1L to R.string.backend_opengl,
         ),
         0L,
+    ),
+    /**
+     * v0.0.10pro phase 3 (Mali only, shown when the backend is Vulkan): the API version of the
+     * session's Vulkan instance. 1.3 is the default; 1.1 asks the core to create a 1.1 instance
+     * and enable the functionality Vulkan 1.2/1.3 promoted from extensions through those
+     * extensions - for Mali drivers whose 1.3 path misbehaves or that implement the features
+     * only that way.
+     */
+    VulkanVersion(
+        R.string.option_vulkan_version,
+        R.string.option_vulkan_version_desc,
+        "debug.capy.vk_api",
+        listOf(
+            3L to R.string.vulkan_version_1_3,
+            1L to R.string.vulkan_version_1_1,
+        ),
+        3L,
     ),
     ResolutionScale(
         R.string.option_resolution,
@@ -451,5 +538,23 @@ class Settings(context: Context) {
     fun updateControlsOpacity(value: Float) {
         controlsOpacity = value
         prefs.edit().putFloat("controls_opacity", value).apply()
+    }
+
+    /**
+     * v0.0.10pro phase 3: the user's custom on-screen pad layout (see [ControlsLayout]); the
+     * fixed layout is used until the user saves one in the controls editor.
+     */
+    var controlsLayout by mutableStateOf(ControlsLayout.fromJson(prefs.getString("controls_layout", null)) ?: ControlsLayout())
+        private set
+
+    fun updateControlsLayout(value: ControlsLayout) {
+        controlsLayout = value.clamped()
+        prefs.edit().putString("controls_layout", value.clamped().toJson()).apply()
+    }
+
+    /** Restores the built-in layout (the editor's Reset button). */
+    fun resetControlsLayout() {
+        controlsLayout = ControlsLayout()
+        prefs.edit().remove("controls_layout").apply()
     }
 }

@@ -49,9 +49,13 @@ fun SettingsPanel(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     onPickLibrary: (() -> Unit)? = null,
+    onCustomControls: (() -> Unit)? = null,
 ) {
     var focused by remember { mutableIntStateOf(0) }
-    val rows = if (onPickLibrary != null) 5 else 4
+    // Rows: overlay, touch controls, opacity, auto-save, then custom controls (when offered)
+    // and the library picker (when offered).
+    val rows = 4 + (if (onCustomControls != null) 1 else 0) + (if (onPickLibrary != null) 1 else 0)
+    val libraryRow = if (onCustomControls != null) 5 else 4
 
     fun <T> cycle(values: Array<T>, current: T, delta: Int): T =
         values[(values.indexOf(current) + delta).mod(values.size)]
@@ -69,7 +73,11 @@ fun SettingsPanel(
             NavKey.Up -> focused = (focused - 1).mod(rows)
             NavKey.Down -> focused = (focused + 1).mod(rows)
             NavKey.Left -> adjust(focused, -1)
-            NavKey.Confirm -> if (focused == 4) onPickLibrary?.invoke() else adjust(focused, 1)
+            NavKey.Confirm -> when (focused) {
+                4 -> onCustomControls?.invoke()
+                libraryRow -> onPickLibrary?.invoke()
+                else -> adjust(focused, 1)
+            }
             NavKey.Right -> adjust(focused, 1)
             NavKey.Back, NavKey.Menu, NavKey.Secondary -> onClose()
             else -> Unit
@@ -133,8 +141,29 @@ fun SettingsPanel(
                 settings.updateAutoSave(it == 0)
             }
         }
+        if (onCustomControls != null) {
+            SettingRow(
+                stringResource(R.string.custom_controls),
+                stringResource(R.string.custom_controls_desc),
+                focused == 4,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Capy.Accent, RoundedCornerShape(8.dp))
+                        .clickable {
+                            focused = 4
+                            onCustomControls()
+                        }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(stringResource(R.string.custom_controls_a), style = MaterialTheme.typography.labelLarge, color = Color.White)
+                }
+            }
+        }
         if (onPickLibrary != null) {
-            SettingRow(stringResource(R.string.category_folders), stringResource(R.string.folder_add_desc), focused == 4) {
+            SettingRow(stringResource(R.string.category_folders), stringResource(R.string.folder_add_desc), focused == libraryRow) {
                 settings.libraryPaths.forEach { path ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -160,7 +189,7 @@ fun SettingsPanel(
                         .fillMaxWidth()
                         .background(Capy.Accent, RoundedCornerShape(8.dp))
                         .clickable {
-                            focused = 3
+                            focused = libraryRow
                             onPickLibrary()
                         }
                         .padding(vertical = 8.dp),

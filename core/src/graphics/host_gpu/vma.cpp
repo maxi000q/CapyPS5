@@ -42,7 +42,9 @@ bool GraphicContext::CreateAllocator() {
 	info.physicalDevice   = physical_device;
 	info.device           = device;
 	info.pVulkanFunctions = &functions;
-	info.vulkanApiVersion = VULKAN_TARGET_API_VERSION;
+	// v0.0.10pro phase 3: VMA picks its entry points for the instance's API version;
+	// a 1.1 compatibility session (debug.capy.vk_api, Mali) must not advertise 1.3.
+	info.vulkanApiVersion = api_version;
 	info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 	if (memory_budget_ext_enabled) {
 		info.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;

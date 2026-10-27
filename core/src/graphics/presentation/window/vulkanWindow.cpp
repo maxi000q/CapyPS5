@@ -173,7 +173,7 @@ static uint32_t VulkanFindQueueFamily(vk::PhysicalDevice device, vk::SurfaceKHR 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void VulkanFindPhysicalDevice(vk::Instance instance, vk::SurfaceKHR surface,
                                      const std::vector<const char*>& device_extensions,
-                                     SurfaceCapabilities&            out_capabilities,
+                                     uint32_t api_target, SurfaceCapabilities& out_capabilities,
                                      vk::PhysicalDevice& out_device, uint32_t& out_queue_family,
                                      std::string& out_rejections) {
 	EXIT_IF(instance == nullptr);
@@ -213,10 +213,12 @@ static void VulkanFindPhysicalDevice(vk::Instance instance, vk::SurfaceKHR surfa
 		};
 
 		LOGF("Vulkan device: %s\n", device_properties.deviceName.data());
-		if (device_properties.apiVersion < VULKAN_TARGET_API_VERSION) {
+		// v0.0.10pro phase 3: the required version follows the session's target -
+		// 1.1 in the compatibility mode, 1.3 otherwise.
+		if (device_properties.apiVersion < api_target) {
 			reject(fmt::format("Vulkan {}.{} is required, but device supports only {}.{}.{}",
-			                   VK_VERSION_MAJOR(VULKAN_TARGET_API_VERSION),
-			                   VK_VERSION_MINOR(VULKAN_TARGET_API_VERSION),
+			                   VK_VERSION_MAJOR(api_target),
+			                   VK_VERSION_MINOR(api_target),
 			                   VK_VERSION_MAJOR(device_properties.apiVersion),
 			                   VK_VERSION_MINOR(device_properties.apiVersion),
 			                   VK_VERSION_PATCH(device_properties.apiVersion)));
@@ -634,7 +636,13 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 		    features12.shaderSharedInt64Atomics != VK_FALSE,
 		    workgroup_layout.workgroupMemoryExplicitLayout != VK_FALSE));
 	}
-	graphics.mesh_shader_enabled = mesh_extension && supported_mesh.meshShader;
+	// v0.0.10pro phase 3: mesh-shader modules are SPIR-V 1.4; under a Vulkan 1.1
+	// instance that needs VK_KHR_spirv_1_4 enabled, otherwise the vertex-shader path
+	// takes over.
+	const bool mesh_spirv_available = !Vulkan11Instance(graphics.api_version) ||
+	                                  HasExtension(device_extensions, "VK_KHR_spirv_1_4");
+	graphics.mesh_shader_enabled =
+		mesh_extension && supported_mesh.meshShader && mesh_spirv_available;
 
 	vk::PhysicalDeviceSubgroupSizeControlProperties subgroup_size_control {};
 
@@ -999,7 +1007,7 @@ static VKAPI_ATTR vk::Result VKAPI_CALL VulkanCreateDebugUtilsMessengerEXT(
 	return vk::Result::eErrorExtensionNotPresent;
 }
 
-static void VulkanCheckInstanceVersion() {
+static void VulkanCheckInstanceVersion(uint32_t api_target) {
 	uint32_t version = VK_API_VERSION_1_0;
 
 	if (VULKAN_HPP_DEFAULT_DISPATCHER.vkEnumerateInstanceVersion != nullptr) {
@@ -1011,10 +1019,10 @@ static void VulkanCheckInstanceVersion() {
 
 	LOGF("Vulkan loader version: %u.%u.%u\n", VK_VERSION_MAJOR(version), VK_VERSION_MINOR(version),
 	     VK_VERSION_PATCH(version));
-	if (version < VULKAN_TARGET_API_VERSION) {
+	if (version < api_target) {
 		EXIT("Vulkan %u.%u is required, but loader supports only %u.%u.%u\n",
-		     VK_VERSION_MAJOR(VULKAN_TARGET_API_VERSION),
-		     VK_VERSION_MINOR(VULKAN_TARGET_API_VERSION), VK_VERSION_MAJOR(version),
+		     VK_VERSION_MAJOR(api_target),
+		     VK_VERSION_MINOR(api_target), VK_VERSION_MAJOR(version),
 		     VK_VERSION_MINOR(version), VK_VERSION_PATCH(version));
 	}
 }
@@ -1070,7 +1078,7 @@ static vk::SurfaceKHR CreatePlatformSurface(vk::Instance instance, SDL_Window* w
 #if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
 // A custom driver built for another GPU (a Turnip build for Adreno 7xx on an 8xx) loads but
 // reports no device. Probe with a throwaway instance so the system driver can take over.
-static bool VulkanDriverHasDevices(void* library) {
+static bool VulkanDriverHasDevices(void* library, uint32_t api_version) {
 	const auto get_proc =
 	    reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(library, "vkGetInstanceProcAddr"));
 	if (get_proc == nullptr) {
@@ -1081,7 +1089,9 @@ static bool VulkanDriverHasDevices(void* library) {
 		return false;
 	}
 	VkApplicationInfo app {VK_STRUCTURE_TYPE_APPLICATION_INFO};
-	app.apiVersion = VK_API_VERSION_1_3;
+	// v0.0.10pro phase 3: probe with the session's version; a driver that implements
+	// only 1.1 rejects a 1.3 application info out of hand.
+	app.apiVersion = api_version;
 	VkInstanceCreateInfo info {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
 	info.pApplicationInfo = &app;
 	VkInstance instance   = VK_NULL_HANDLE;
@@ -1111,6 +1121,24 @@ void WindowContext::CreateVulkan() {
 	EXIT_IF(graphic_ctx.device != nullptr);
 	EXIT_IF(surface != nullptr);
 
+	// v0.0.10pro phase 3: the frontend's "Vulkan version" option (Mali devices) picks the
+	// API version of this session's instance: 1.3, the default, or 1.1 - the compatibility
+	// path where every promoted feature the renderer needs is enabled through its extension
+	// instead. Read once, before any instance work; the same value drives the loader check,
+	// the application info, device selection and the allocator.
+	{
+		static Common::DebugFlags::CachedValue vk_api("debug.capy.vk_api", 3);
+		graphic_ctx.api_version =
+			vk_api.Get() == 1 ? VULKAN_COMPAT_API_VERSION : VULKAN_TARGET_API_VERSION;
+	}
+	const bool vulkan_11_instance = Vulkan11Instance(graphic_ctx.api_version);
+	if (vulkan_11_instance) {
+		Log::WriteToConsoleAndLog(fmt::format(
+			"Vulkan: creating a 1.1 instance (compatibility mode, debug.capy.vk_api=1); "
+			"{} mandatory promoted extensions required from the device\n",
+			std::size(VULKAN11_MANDATORY_EXTENSIONS)));
+	}
+
 #if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
 	void* libvulkan = nullptr;
 	// `setprop debug.capy.tu_debug <flags>` passes TU_DEBUG to a Turnip driver (e.g. noubwc,
@@ -1132,7 +1160,8 @@ void WindowContext::CreateVulkan() {
 		libvulkan = adrenotools_open_libvulkan(RTLD_NOW | RTLD_LOCAL, ADRENOTOOLS_DRIVER_CUSTOM,
 		                                       nullptr, hook_dir.c_str(), driver_dir.c_str(),
 		                                       driver.library.c_str(), nullptr, nullptr);
-		if (libvulkan != nullptr && !VulkanDriverHasDevices(libvulkan)) {
+		if (libvulkan != nullptr &&
+		    !VulkanDriverHasDevices(libvulkan, graphic_ctx.api_version)) {
 			Log::WriteToConsoleAndLog(fmt::format(
 			    "WARNING: GPU driver {}{} does not support this GPU; using the system driver\n",
 			    driver_dir, driver.library));
@@ -1165,14 +1194,14 @@ void WindowContext::CreateVulkan() {
 
 	VulkanExtensions r;
 	VulkanGetExtensions(r);
-	VulkanCheckInstanceVersion();
+	VulkanCheckInstanceVersion(graphic_ctx.api_version);
 
 	vk::ApplicationInfo app_info {};
 	app_info.pApplicationName   = "Kyty";
 	app_info.applicationVersion = 1;
 	app_info.pEngineName        = "Kyty";
 	app_info.engineVersion      = 1;
-	app_info.apiVersion         = VULKAN_TARGET_API_VERSION; // NOLINT
+	app_info.apiVersion         = graphic_ctx.api_version; // NOLINT
 
 	if (Config::SpirvDebugPrintfEnabled() && Config::GpuAssistedValidationEnabled()) {
 		EXIT("--spirv-debug-printf and --gpu-assisted-validation are mutually exclusive\n");
@@ -1267,6 +1296,15 @@ void WindowContext::CreateVulkan() {
 	device_extensions.push_back(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME);
 	device_extensions.push_back(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
 #endif
+	// v0.0.10pro phase 3: under a Vulkan 1.1 instance the promoted functionality the
+	// renderer requires is enabled through its extensions. Appending them to the base
+	// list makes VulkanFindPhysicalDevice reject any device that lacks one, and
+	// VulkanCreateDevice enables them at device creation.
+	if (vulkan_11_instance) {
+		for (const char* extension: VULKAN11_MANDATORY_EXTENSIONS) {
+			device_extensions.push_back(extension);
+		}
+	}
 
 #ifdef KYTY_ENABLE_DEBUG_PRINTF
 	if (Config::SpirvDebugPrintfEnabled()) {
@@ -1275,7 +1313,8 @@ void WindowContext::CreateVulkan() {
 #endif
 
 	std::string rejected_devices;
-	VulkanFindPhysicalDevice(graphic_ctx.instance, surface, device_extensions, surface_capabilities,
+	VulkanFindPhysicalDevice(graphic_ctx.instance, surface, device_extensions,
+	                         graphic_ctx.api_version, surface_capabilities,
 	                         graphic_ctx.physical_device, graphic_ctx.queue_family,
 	                         rejected_devices);
 
@@ -1391,6 +1430,16 @@ void WindowContext::CreateVulkan() {
 		                         }) {
 			if (HasExtension(available_extensions, extension)) {
 				device_extensions.push_back(extension);
+			}
+		}
+		// v0.0.10pro phase 3: optional promoted functionality under a 1.1 instance -
+		// each backs a feature the renderer only requests when the driver reports
+		// it, so absence falls back instead of rejecting the device.
+		if (vulkan_11_instance) {
+			for (const char* extension: VULKAN11_OPTIONAL_EXTENSIONS) {
+				if (HasExtension(available_extensions, extension)) {
+					device_extensions.push_back(extension);
+				}
 			}
 		}
 		if (HasExtension(available_extensions, VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME) &&
