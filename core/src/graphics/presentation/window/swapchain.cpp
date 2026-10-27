@@ -847,7 +847,7 @@ void Swapchain::RecordGlPresentCommands(CommandBuffer& command, Presenter::Frame
 		clear_attachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
 		clear_attachment.loadOp = vk::AttachmentLoadOp::eClear;
 		clear_attachment.storeOp = vk::AttachmentStoreOp::eStore;
-		clear_attachment.clearValue.color = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
+		clear_attachment.clearValue.color.float32 = std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f};
 		vk::RenderingInfo clear_rendering {};
 		clear_rendering.renderArea.extent = m_extent;
 		clear_rendering.layerCount = 1;
