@@ -6,6 +6,7 @@
 
 #include "common/abi.h"
 #include "common/assert.h"
+#include "common/contentProfile.h"
 #include "cpu/cpuBackend.h"
 #include "common/emulatorConfig.h"
 #include "common/file.h"
@@ -227,6 +228,14 @@ void Run(const RunOptions& options) {
 	if (options.elf.empty()) {
 		EXIT("ELF is required\n");
 	}
+
+	// Console Five Pro (v0.0.9proQ4 round 3): evaluate the content signature
+	// before any subsystem initialises. The runtime profiles must be settled
+	// by the time the first engine default is read (streaming buffers, guest
+	// read caches, worker pools), and re-evaluated for every game so two games
+	// launched from one process never inherit each other's defaults.
+	Common::ContentProfile::ActivateFromPaths(Common::PathToString(options.elf),
+	                                         Common::PathToString(options.app0_dir));
 
 	// PS5 games carry param.json; PS4 games carry the binary param.sfo.
 	auto param_json = options.app0_dir / "sce_sys" / "param.json";
