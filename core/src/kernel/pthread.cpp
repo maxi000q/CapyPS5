@@ -18,6 +18,9 @@
 #include "common/singleton.h"
 #include "common/stringUtils.h"
 #include "common/threads.h"
+// Console Five Pro (v0.0.9proQ4 round 4): guest-thread placement helpers
+// (Android-only inside the header; empty everywhere else).
+#include "common/perfCores.h"
 #include "common/timer.h"
 #include "common/virtualMemory.h"
 #include "kernel/memory.h"
@@ -3240,6 +3243,12 @@ int PthreadGetCurrentPriorityForKernel() {
 static void CleanupThread(void* arg) {
 	auto* thread = static_cast<Pthread>(arg);
 
+	// v0.0.9proQ4 round 4: give the guest-thread placement slot back
+	// (only counted when this thread actually took one).
+#if defined(__ANDROID__)
+	Common::ReleaseGuestThreadPlacement();
+#endif
+
 	LibcInternalExt::RunThreadAtexitDestructors();
 
 	auto thread_dtors = g_pthread_context->GetThreadDtors();
@@ -3294,6 +3303,16 @@ static void* RunThread(void* arg) {
 	     reinterpret_cast<uint64_t>(thread->entry), reinterpret_cast<uint64_t>(thread->arg),
 	     reinterpret_cast<uint64_t>(thread->attr->stack_addr),
 	     static_cast<uint64_t>(thread->attr->stack_size));
+
+	// v0.0.9proQ4 round 4: under the CPU-bound workload family this guest
+	// thread may take a bounded placement slot on the tier the compile
+	// workers vacated (common/perfCores.h). Threads started before the
+	// family locked, and threads beyond the slot budget, keep the
+	// scheduler's own balancing; the cleanup handler returns the slot.
+#if defined(__ANDROID__)
+	Common::AcquireGuestThreadPlacement(
+	    thread->name.empty() ? "guest" : thread->name.c_str());
+#endif
 
 	// NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
 	pthread_cleanup_push(CleanupThread, thread);

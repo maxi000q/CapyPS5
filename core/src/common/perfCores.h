@@ -9,11 +9,13 @@
 
 #if defined(__ANDROID__)
 
+#include "common/contentProfile.h"
 #include "common/debugFlags.h"
 
 #include <android/log.h>
 #include <sched.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 
@@ -47,6 +49,8 @@ struct CoreTopology {
 	cpu_set_t prime;       // cores of the top-frequency cluster (usually one Cortex-X)
 	cpu_set_t performance; // every core within 90% of the top frequency, minus prime
 	cpu_set_t combined;    // prime | performance - the Q2 "performance" set
+	cpu_set_t all;         // round 4: every core found at classification time
+	cpu_set_t efficiency;  // round 4: every detected core outside the combined set
 	int       detected = 0;  // CPUs found in sysfs (online at classification time)
 	bool      split = false; // prime and performance are genuinely distinct tiers
 };
@@ -161,6 +165,20 @@ inline const CoreTopology& ClassifyCores() {
 		result.combined = result.prime;
 		CPU_OR(&result.combined, &result.combined, &result.performance);
 		result.split = CPU_COUNT(&result.prime) > 0 && CPU_COUNT(&result.performance) > 0;
+		// Round 4: the full detected set and its complement against the fast
+		// set. The CPU-bound workload family steps the compile workers down
+		// onto exactly this complement (see PinToWorkerCoresForClass).
+		CPU_ZERO(&result.all);
+		CPU_ZERO(&result.efficiency);
+		for (int cpu = 0; cpu < kMaxCpus; ++cpu) {
+			if (freq[cpu] == 0) {
+				continue;
+			}
+			CPU_SET(cpu, &result.all);
+			if (!CPU_ISSET(cpu, &result.combined)) {
+				CPU_SET(cpu, &result.efficiency);
+			}
+		}
 		return result;
 	}();
 	return topology;
@@ -226,6 +244,149 @@ inline void PinToWorkerCores(const char* who) {
 		                    "%s: pinned to %d worker core(s) (prime reserved)",
 		                    who, CPU_COUNT(&cores));
 	}
+}
+
+// ------------------------------------------------------------------ round 4
+// v0.0.9proQ4 round 4: placement follows the runtime workload class
+// (common/contentProfile.h). The classes describe the shape of the
+// engine's own work, and the two families want opposite placements:
+//
+//   throughput family (500): compile workers keep the round-2
+//   performance-minus-prime tier and the pool may grow by one on
+//   backlog - the warm-up compile phase IS the critical path there.
+//
+//   CPU-bound compositing family (501): the content's own threads are
+//   the frame bottleneck, so the compile workers step DOWN onto the
+//   efficiency tier (freeing the whole performance tier for the
+//   content's threads) and guest threads that start while the family is
+//   locked may take a bounded number of placement slots there.
+
+enum class WorkerPlacement : uint32_t {
+	PerformanceMinusPrime = 0, // the round-2 default
+	Efficiency            = 1, // the CPU-bound family vacates the big cores
+};
+
+// Pure decision logic (no scheduler calls) so tests can execute it
+// directly.
+[[nodiscard]] inline WorkerPlacement WorkerSetForClass(bool cpu_bound_class) {
+	return cpu_bound_class ? WorkerPlacement::Efficiency
+	                       : WorkerPlacement::PerformanceMinusPrime;
+}
+
+// Pins the calling (worker) thread per the current class. Falls back to
+// the round-2 placement whenever the class does not ask for the
+// step-down or the efficiency tier is empty (single-cluster SoC,
+// locked-down sysfs). Toggles: debug.capy.worker_cores (0 = the Q2
+// behaviour) and the class kill-switches debug.capy.profile500 /
+// debug.capy.profile501.
+inline void PinToWorkerCoresForClass(const char* who) {
+	static DebugFlags::CachedValue enabled("debug.capy.worker_cores", 1);
+	if (enabled.Get() == 0) {
+		PinToPerformanceCores(who);
+		return;
+	}
+	const auto& topology = ClassifyCores();
+	const auto  placement =
+	    WorkerSetForClass(Common::ContentProfile::Profile501Enabled());
+	cpu_set_t   cores;
+	if (placement == WorkerPlacement::Efficiency && CPU_COUNT(&topology.efficiency) > 0) {
+		cores = topology.efficiency;
+	} else if (topology.split && CPU_COUNT(&topology.performance) > 0) {
+		cores = topology.performance;
+	} else if (CPU_COUNT(&topology.combined) > 0) {
+		cores = topology.combined;
+	} else {
+		return; // nothing detected: leave the affinity untouched
+	}
+	if (sched_setaffinity(0, sizeof(cores), &cores) == 0) {
+		__android_log_print(ANDROID_LOG_INFO, "CapyPS5-Core",
+		                    "%s: pinned to %d core(s) (class placement)",
+		                    who, CPU_COUNT(&cores));
+	}
+}
+
+// Guest-thread placement under the CPU-bound family: the content's own
+// threads get the tier the compile workers just vacated. Slots bound
+// the takeover so a thread-storming title cannot pile every thread onto
+// the big cores; threads beyond the slots (and threads that started
+// before the family locked) keep the scheduler's own balancing -
+// documented best effort.
+inline constexpr int kGuestPlacementSlots = 4;
+
+inline std::atomic<int>& GuestPlacementSlotsFree() {
+	static std::atomic<int> free_slots {kGuestPlacementSlots};
+	return free_slots;
+}
+
+thread_local inline bool      t_guest_placement_taken = false;
+thread_local inline cpu_set_t t_guest_placement_saved {};
+
+// Pure decision logic for tests: does the current class want guest
+// threads placed at all?
+[[nodiscard]] inline bool GuestPlacementWanted(bool cpu_bound_class) {
+	return cpu_bound_class;
+}
+
+// Called once at guest-thread start (kernel/pthread.cpp RunThread).
+// Returns whether this thread took a slot; ReleaseGuestThreadPlacement
+// (from the thread cleanup) gives it back. The original affinity mask is
+// saved and restored on release, so a spawning thread's own placement
+// never leaks into its children.
+inline bool AcquireGuestThreadPlacement(const char* who) {
+	// One placement per thread, ever: a second acquire from the same
+	// thread is already placed (and its slot is already held) - returning
+	// true keeps the call idempotent instead of leaking a slot.
+	if (t_guest_placement_taken) {
+		return true;
+	}
+	if (!GuestPlacementWanted(Common::ContentProfile::Profile501Enabled())) {
+		return false;
+	}
+	auto& slots    = GuestPlacementSlotsFree();
+	int   expected = slots.load(std::memory_order_relaxed);
+	while (expected > 0 &&
+	       !slots.compare_exchange_weak(expected, expected - 1,
+	                                    std::memory_order_relaxed)) {
+	}
+	if (expected <= 0) {
+		return false; // slots full: stay with the scheduler's balancing
+	}
+	const auto& topology = ClassifyCores();
+	cpu_set_t   cores;
+	if (topology.split && CPU_COUNT(&topology.performance) > 0) {
+		cores = topology.performance;
+	} else if (CPU_COUNT(&topology.combined) > 0 &&
+	           CPU_COUNT(&topology.combined) < topology.detected) {
+		cores = topology.combined;
+	} else {
+		// no distinct tier to place onto: give the slot back
+		slots.fetch_add(1, std::memory_order_relaxed);
+		return false;
+	}
+	cpu_set_t current;
+	if (sched_getaffinity(0, sizeof(current), &current) == 0) {
+		t_guest_placement_saved = current;
+	}
+	if (sched_setaffinity(0, sizeof(cores), &cores) == 0) {
+		t_guest_placement_taken = true;
+		__android_log_print(ANDROID_LOG_INFO, "CapyPS5-Core",
+		                    "%s: guest thread placed onto %d big core(s)",
+		                    who, CPU_COUNT(&cores));
+		return true;
+	}
+	slots.fetch_add(1, std::memory_order_relaxed); // the pin failed
+	return false;
+}
+
+// Called from the guest-thread cleanup handler; a no-op for threads that
+// never took a placement slot.
+inline void ReleaseGuestThreadPlacement() {
+	if (!t_guest_placement_taken) {
+		return;
+	}
+	t_guest_placement_taken = false;
+	GuestPlacementSlotsFree().fetch_add(1, std::memory_order_relaxed);
+	sched_setaffinity(0, sizeof(cpu_set_t), &t_guest_placement_saved);
 }
 
 // v0.0.9proQ4 round 2: the present thread must NOT be pinned onto the busy

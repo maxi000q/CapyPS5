@@ -1357,7 +1357,13 @@ void PipelineCache::AsyncWorker() {
 	// during a compile storm the emulation and GPU threads keep the fastest core to
 	// themselves (best effort; debug.capy.worker_cores 0 restores the Q2 placement,
 	// debug.capy.perf_cores 0 disables pinning entirely).
-	Common::PinToWorkerCores("Pipeline worker");
+	// v0.0.9proQ4 round 4: placement follows the runtime workload class -
+	// the CPU-bound layered-alpha class steps the compile workers down onto
+	// the efficiency cluster (the big cores belong to the content's own
+	// threads there); every other class keeps the round-2
+	// performance-minus-prime placement. The loop below re-pins when the
+	// classification moves.
+	Common::PinToWorkerCoresForClass("Pipeline worker");
 #endif
 	// v0.0.10pro phase 3: compile what the game is waiting on first. FIFO made a streaming
 	// storm's hundreds of one-shot pipelines delay the handful the current frame re-draws with,
@@ -1365,13 +1371,30 @@ void PipelineCache::AsyncWorker() {
 	// scan is O(queue) under the lock - trivial next to a ~100 ms pipeline compile.
 	// `setprop debug.capy.hot_pipelines 0` restores FIFO.
 	static Common::DebugFlags::CachedValue hot_pipelines("debug.capy.hot_pipelines", 1);
+	// v0.0.9proQ4 round 4: re-pin when the workload classification moves
+	// (the generation bumps on every lock/re-lock/reset), and grow the pool
+	// by one under the throughput class the first time the queue backs up
+	// (cap 7, one shot per run - PipelineCache is constructed per run, so
+	// this is per-game correct by construction).
+	thread_local uint32_t pinned_generation = 0;
 	for (;;) {
+		if (const uint32_t generation = Common::ContentProfile::PlacementGeneration();
+		    generation != pinned_generation) {
+			pinned_generation = generation;
+			Common::PinToWorkerCoresForClass("Pipeline worker");
+		}
 		std::shared_ptr<AsyncCompile> job;
 		{
 			std::unique_lock lock(m_async_mutex);
 			m_async_available.wait(lock, [this] { return m_async_stop || !m_async_queue.empty(); });
 			if (m_async_stop) {
 				return;
+			}
+			if (!m_turbo_worker_applied && m_async_queue.size() >= m_async_workers.size() &&
+			    m_async_workers.size() < 7u &&
+			    Common::ContentProfile::Profile500Enabled()) {
+				m_turbo_worker_applied = true;
+				m_async_workers.emplace_back([this] { AsyncWorker(); });
 			}
 			if (hot_pipelines.Get() != 0 && m_async_queue.size() > 1) {
 				auto best = m_async_queue.begin();

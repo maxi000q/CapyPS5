@@ -232,6 +232,10 @@ private:
 	std::deque<std::shared_ptr<AsyncCompile>> m_async_queue;
 	std::vector<std::thread>                m_async_workers;
 	bool                                    m_async_stop = false;
+	// v0.0.9proQ4 round 4: one-shot runtime pool growth (the throughput
+	// class locks only after rendering starts, so the constructor-time
+	// boost cannot see it yet; see AsyncWorker).
+	bool                                    m_turbo_worker_applied = false;
 	void                                    AsyncWorker();
 	void                                    StopAsyncWorkers();
 	/** Waits up to `wait_ms` (0 = no wait) for a pending async compile. Returns
