@@ -229,13 +229,13 @@ void Run(const RunOptions& options) {
 		EXIT("ELF is required\n");
 	}
 
-	// Console Five Pro (v0.0.9proQ4 round 3): evaluate the content signature
-	// before any subsystem initialises. The runtime profiles must be settled
-	// by the time the first engine default is read (streaming buffers, guest
-	// read caches, worker pools), and re-evaluated for every game so two games
-	// launched from one process never inherit each other's defaults.
-	Common::ContentProfile::ActivateFromPaths(Common::PathToString(options.elf),
-	                                         Common::PathToString(options.app0_dir));
+	// Console Five Pro (v0.0.9proQ4 round 4): reset the runtime workload
+	// profiles for this run. Classification is behavioural now - the engine
+	// watches its own draw/dispatch mix once the content actually renders and
+	// settles the policy a couple of windows in - so nothing is evaluated up
+	// front, and two games launched from one process never inherit each
+	// other's state.
+	Common::ContentProfile::ResetForNextGame();
 
 	// PS5 games carry param.json; PS4 games carry the binary param.sfo.
 	auto param_json = options.app0_dir / "sce_sys" / "param.json";

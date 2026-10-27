@@ -4,6 +4,7 @@
 
 #include "common/assert.h"
 #include "common/debugFlags.h"
+#include "common/contentProfile.h"
 #include "common/common.h"
 #include "common/emulatorConfig.h"
 #include "common/file.h"
@@ -345,6 +346,9 @@ static void RecordGuestDispatch(vk::CommandBuffer command, const GraphicContext&
                                 const DispatchGroups& groups,
                                 const ShaderRecompiler::IR::CompiledShaderInfo& program,
                                 const PipelineCache::Pipeline& pipeline) {
+	// Console Five Pro (v0.0.9proQ4 round 4): runtime workload telemetry -
+	// one relaxed increment per recorded guest dispatch.
+	Common::ContentProfile::ObserveDispatch();
 	const auto&          max = graphics.GetPhysicalDeviceProperties().limits.maxComputeWorkGroupCount;
 	const DispatchGroups limits {max[0], max[1], max[2]};
 	if (DispatchFits(groups, limits)) {

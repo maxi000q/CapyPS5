@@ -9,6 +9,7 @@
 #include <cmath>
 #include "common/debugFlags.h"
 #include "common/passInspector.h"
+#include "common/contentProfile.h"
 #include "common/common.h"
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
@@ -1541,6 +1542,9 @@ bool FlipQueue::Flip(uint32_t micros) {
 	}
 	if (due) {
 		Common::Telemetry::RecordGameFrame();
+		// Console Five Pro (v0.0.9proQ4 round 4): fold this frame's workload
+		// counters and run the runtime workload classifier.
+		Common::ContentProfile::OnFrameEnd();
 		Common::PassInspector::OnFlip();
 		Graphics::RenderDocOnGuestFlip(m_presenter.Renderer());
 		if (Config::GraphicsDebugDumpEnabled() &&

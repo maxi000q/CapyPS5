@@ -16,6 +16,7 @@
 #endif
 #include "common/file.h"
 #include "common/passInspector.h"
+#include "common/contentProfile.h"
 #include "common/telemetry.h"
 #include "common/emulatorConfig.h"
 #include "common/file.h"
@@ -1401,6 +1402,21 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	auto& ucfg = buffer.GetUserConfig();
 	if (CopyDepthToColor(buffer, draw, emit, state)) {
 		return;
+	}
+	// Console Five Pro (v0.0.9proQ4 round 4): runtime workload telemetry.
+	// Relaxed counters on the command-processing thread; they feed the
+	// runtime workload profiles (common/contentProfile.h). Only counts and
+	// ratios of the engine's own work are recorded - nothing about the
+	// content's identity is read here.
+	{
+		const auto& regs   = buffer.GetRegisters();
+		const auto  extent = state.color_count != 0 ? state.color_info[0].Extent()
+		                                            : vk::Extent2D {};
+		Common::ContentProfile::ObserveDraw(
+		    draw.index_count, draw.instance_count, regs.GetBlendControl(0).enable,
+		    state.color_count,
+		    state.vertex_info[0].stage.program->stage == ShaderType::Mesh, extent.width,
+		    extent.height);
 	}
 	// Bisection aid: `setprop debug.capy.skip_ps 0x<address>` drops draws using that pixel shader.
 	static Common::DebugFlags::CachedValue skip_ps("debug.capy.skip_ps", 0);
