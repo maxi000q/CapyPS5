@@ -1182,6 +1182,24 @@ bool AdoptFaultingGuestWindow(uint64_t fault_vaddr) noexcept {
 #endif
 }
 
+// Console Five Pro (v0.0.9proQ3): the wild-read recovery's predicate. A guest read
+// that faults in a range no virtual range covers (a reserved-but-never-committed
+// hole, e.g. 0x100040 just above the low reservation floor) cannot alias any guest
+// data, so the SIGSEGV handler may answer it with zeroes. Unlike
+// IsRangeOutsideGuestMemory this does NOT require the range to sit outside the
+// reservation: holes inside the reservation band are exactly the addresses a torn
+// guest pointer lands on. GPU-tracker pages and guarded copies are recovered before
+// the wild-read path, so their mappings are irrelevant here.
+bool IsRangeUncommittedGuestHole(uint64_t address, uint64_t size) noexcept {
+        if (size == 0 || UINT64_MAX - address < size) {
+                return false;
+        }
+        if (g_virtual_ranges == nullptr) {
+                return false;
+        }
+        return !g_virtual_ranges->HasOverlap(address, size);
+}
+
 bool IsRangeOutsideGuestMemory(uint64_t address, uint64_t size) noexcept {
 	// Console Five Pro (v0.0.10pro phase 1): the wild-store recovery runs in the SIGSEGV
 	// handler and needs to know whether a faulting access could ever alias guest memory.

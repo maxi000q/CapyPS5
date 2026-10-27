@@ -1468,6 +1468,167 @@ bool RecoverGuestNullRead(void* native_context, uint64_t fault_address) {
 #endif
 }
 
+// Console Five Pro (v0.0.9proQ3): guest wild-pointer READ recovery. The v0.0.9proQ2
+// log ended a Unity title's session with "Unhandled host exception ... access=1
+// address=0x0000000000100040" on its graphics worker: guest code in libc.prx read
+// through a torn pointer one page above the reservation floor - above the null page
+// (< 64 KiB, RecoverGuestNullRead) and below every guest mapping, in a hole no
+// virtual range covers. The game raced its own suspend path when the window lost
+// focus; on the next console suspendPoint it would have recovered, so the session
+// survives instead of dying. Same plain-load decoder as the null-read recovery
+// (GPR/SIMD, single and pair, unsigned/unscaled/register offset; no writeback, no
+// atomics, no exclusives): the destination receives zero, exactly what a zeroed
+// uncommitted page would return, and the PC advances. Reads below 64 KiB keep the
+// dedicated null-page path and its honest crash report; pages the GPU tracker or a
+// guarded copy owns are recovered earlier in the fault chain. A budget stops a
+// genuine wild-read loop from becoming a silent hang.
+// `setprop debug.capy.wild_read_recovery 0` restores the old behaviour.
+bool RecoverGuestWildRead(void* native_context, uint64_t fault_address) {
+#if defined(__aarch64__)
+	static Common::DebugFlags::CachedValue enabled("debug.capy.wild_read_recovery", 1);
+	if (enabled.Get() == 0) {
+	        return false;
+	}
+	// The null page keeps its dedicated recovery (and crash report).
+	if (fault_address < 0x10000) {
+	        return false;
+	}
+	static constexpr uint32_t kBudget = 64;
+	static std::atomic<uint32_t> recovered {0};
+	if (recovered.load(std::memory_order_relaxed) >= kBudget) {
+	        return false;
+	}
+
+	auto* context = static_cast<ucontext_t*>(native_context);
+	if (context == nullptr) {
+	        return false;
+	}
+	const uintptr_t pc   = static_cast<uintptr_t>(context->uc_mcontext.pc);
+	const uint32_t insn  = *reinterpret_cast<const uint32_t*>(pc);
+	uint64_t*       gprs = reinterpret_cast<uint64_t*>(context->uc_mcontext.regs);
+	const uint32_t  rt   = insn & 0x1fu;
+	const uint32_t  rt2  = (insn >> 10) & 0x1fu;
+
+	enum Dest { kNone, kGpr, kSimd };
+	Dest      dest  = kNone;
+	uint32_t  bytes = 0;
+	bool      pair  = false;
+
+	switch (insn & 0xFFC00000u) {
+	        case 0x39400000: dest = kGpr;  bytes = 1;  break; // LDRB Wt
+	        case 0x39800000: dest = kGpr;  bytes = 1;  break; // LDRSB Wt
+	        case 0x39C00000: dest = kGpr;  bytes = 1;  break; // LDRSB Xt
+	        case 0x79400000: dest = kGpr;  bytes = 2;  break; // LDRH Wt
+	        case 0x79800000: dest = kGpr;  bytes = 2;  break; // LDRSH Wt
+	        case 0x79C00000: dest = kGpr;  bytes = 2;  break; // LDRSH Xt
+	        case 0xB9400000: dest = kGpr;  bytes = 4;  break; // LDR Wt
+	        case 0xB9800000: dest = kGpr;  bytes = 4;  break; // LDRSW Xt
+	        case 0xF9400000: dest = kGpr;  bytes = 8;  break; // LDR Xt
+	        case 0x3D400000: dest = kSimd; bytes = 1;  break; // LDR Bt
+	        case 0x7D400000: dest = kSimd; bytes = 2;  break; // LDR Ht
+	        case 0xBD400000: dest = kSimd; bytes = 4;  break; // LDR St
+	        case 0xFD400000: dest = kSimd; bytes = 8;  break; // LDR Dt
+	        case 0x3DC00000: dest = kSimd; bytes = 16; break; // LDR Qt
+	        case 0x29400000: dest = kGpr;  bytes = 8;  pair = true; break; // LDP Wt1, Wt2
+	        case 0xA9400000: dest = kGpr;  bytes = 16; pair = true; break; // LDP Xt1, Xt2
+	        default: break;
+	}
+	if (dest == kNone) {
+	        switch (insn & 0xFFC00C00u) {
+	                case 0x38400000: dest = kGpr;  bytes = 1;  break; // LDURB Wt
+	                case 0x38800000: dest = kGpr;  bytes = 1;  break; // LDURSB Wt
+	                case 0x38C00000: dest = kGpr;  bytes = 1;  break; // LDURSB Xt
+	                case 0x78400000: dest = kGpr;  bytes = 2;  break; // LDURH Wt
+	                case 0x78800000: dest = kGpr;  bytes = 2;  break; // LDURSH Wt
+	                case 0x78C00000: dest = kGpr;  bytes = 2;  break; // LDURSH Xt
+	                case 0xB8400000: dest = kGpr;  bytes = 4;  break; // LDUR Wt
+	                case 0xB8800000: dest = kGpr;  bytes = 4;  break; // LDURSW Xt
+	                case 0xF8400000: dest = kGpr;  bytes = 8;  break; // LDUR Xt
+	                case 0x3C400000: dest = kSimd; bytes = 1;  break; // LDUR Bt
+	                case 0x7C400000: dest = kSimd; bytes = 2;  break; // LDUR Ht
+	                case 0xBC400000: dest = kSimd; bytes = 4;  break; // LDUR St
+	                case 0xFC400000: dest = kSimd; bytes = 8;  break; // LDUR Dt
+	                case 0x3CC00000: dest = kSimd; bytes = 16; break; // LDUR Qt
+	                default: break;
+	        }
+	}
+	if (dest == kNone) {
+	        switch (insn & 0xFFE00C00u) {
+	                case 0x38600800: dest = kGpr;  bytes = 1;  break; // LDRB Wt, [Xn, Xm]
+	                case 0x38A00800: dest = kGpr;  bytes = 1;  break; // LDRSB Wt, [Xn, Xm]
+	                case 0x38E00800: dest = kGpr;  bytes = 1;  break; // LDRSB Xt, [Xn, Xm]
+	                case 0x78600800: dest = kGpr;  bytes = 2;  break; // LDRH Wt, [Xn, Xm]
+	                case 0x78A00800: dest = kGpr;  bytes = 2;  break; // LDRSH Wt, [Xn, Xm]
+	                case 0x78E00800: dest = kGpr;  bytes = 2;  break; // LDRSH Xt, [Xn, Xm]
+	                case 0xB8600800: dest = kGpr;  bytes = 4;  break; // LDR Wt, [Xn, Xm]
+	                case 0xB8A00800: dest = kGpr;  bytes = 4;  break; // LDRSW Xt, [Xn, Xm]
+	                case 0xF8600800: dest = kGpr;  bytes = 8;  break; // LDR Xt, [Xn, Xm]
+	                case 0x3C600800: dest = kSimd; bytes = 1;  break; // LDR Bt, [Xn, Xm]
+	                case 0x7C600800: dest = kSimd; bytes = 2;  break; // LDR Ht, [Xn, Xm]
+	                case 0xBC600800: dest = kSimd; bytes = 4;  break; // LDR St, [Xn, Xm]
+	                case 0xFC600800: dest = kSimd; bytes = 8;  break; // LDR Dt, [Xn, Xm]
+	                case 0x3CE00800: dest = kSimd; bytes = 16; break; // LDR Qt, [Xn, Xm]
+	                default: break;
+	        }
+	}
+	if (dest == kNone) {
+	        return false;
+	}
+	if (fault_address + bytes < fault_address) { // wrapped: recover nothing
+	        return false;
+	}
+	// The whole access must lie in a hole no guest virtual range covers: a load
+	// reaching into committed guest memory could return data the game expects.
+	if (!Libs::LibKernel::Memory::IsRangeUncommittedGuestHole(fault_address, bytes)) {
+	        return false;
+	}
+	if (dest == kSimd) {
+	        auto*       reserved     = reinterpret_cast<uint8_t*>(context->uc_mcontext.__reserved);
+	        const auto* reserved_end = reserved + sizeof(context->uc_mcontext.__reserved);
+	        auto*       fpsimd       = static_cast<struct fpsimd_context*>(nullptr);
+	        while (reserved + sizeof(struct _aarch64_ctx) <= reserved_end) {
+	                const auto* head = reinterpret_cast<const struct _aarch64_ctx*>(reserved);
+	                if (head->magic == 0 || head->size < sizeof(struct _aarch64_ctx) ||
+	                    reserved + head->size > reserved_end) {
+	                        break;
+	                }
+	                if (head->magic == FPSIMD_MAGIC && head->size >= sizeof(struct fpsimd_context)) {
+	                        fpsimd = reinterpret_cast<struct fpsimd_context*>(reserved);
+	                        break;
+	                }
+	                reserved += head->size;
+	        }
+	        if (fpsimd == nullptr) {
+	                return false;
+	        }
+	        fpsimd->vregs[rt * 2]     = 0;
+	        fpsimd->vregs[rt * 2 + 1] = 0;
+	        if (pair) {
+	                fpsimd->vregs[rt2 * 2]     = 0;
+	                fpsimd->vregs[rt2 * 2 + 1] = 0;
+	        }
+	} else if (rt != 31) {
+	        gprs[rt] = 0;
+	        if (pair && rt2 != 31) {
+	                gprs[rt2] = 0;
+	        }
+	}
+	context->uc_mcontext.pc = static_cast<uint64_t>(pc + 4);
+	const auto count = recovered.fetch_add(1, std::memory_order_relaxed) + 1;
+	if (count <= 8 || count == kBudget) {
+	        ALOGW("CpuBackend: recovered guest wild read #%u/%u (pc=0x%llx vaddr=0x%llx) - "
+	              "uncommitted guest hole, returning zero and continuing",
+	              count, kBudget, static_cast<unsigned long long>(pc),
+	              static_cast<unsigned long long>(fault_address));
+	}
+	return true;
+#else
+	(void)native_context;
+	(void)fault_address;
+	return false;
+#endif
+}
+
 // Console Five Pro (v0.0.10pro phase 1): guest wild-pointer STORE recovery. The
 // v0.0.9proQ1 crash log ended a heavy Unity title's session with "Unhandled host
 // exception: type=1 code=11 access=1 address=0x3a0888c1" - the render worker stored

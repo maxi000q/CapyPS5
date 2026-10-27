@@ -49,6 +49,19 @@ bool RecoverGuestNullRead(void* native_context, uint64_t fault_address);
  * the instruction is not an exactly-matched plain store.
  */
 bool RecoverGuestWildStore(void* native_context, uint64_t fault_address);
+/**
+ * Recovers a guest plain READ through a wild pointer into an uncommitted hole of
+ * the guest address space (no virtual range covers the access): the load is
+ * emulated against a zero page - the destination register receives zero and
+ * execution resumes past the instruction. Nothing the game can read aliases such
+ * an address, so the zero is unobservable in guest-visible memory. Reads below
+ * 64 KiB keep the dedicated null-page recovery; GPU-tracker pages and guarded
+ * copies are recovered earlier in the fault chain. Returns false when the
+ * recovery is disabled (debug.capy.wild_read_recovery=0), the budget is spent,
+ * the access touches a committed guest range or the instruction is not an
+ * exactly-matched plain load.
+ */
+bool RecoverGuestWildRead(void* native_context, uint64_t fault_address);
 
 enum class BackendType {
 	Native,      // Direct x86_64 host execution (PC)

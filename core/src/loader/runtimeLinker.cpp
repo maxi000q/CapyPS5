@@ -742,6 +742,19 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 		    Cpu::RecoverGuestNullRead(info->native_context, info->access_violation_vaddr)) {
 			return true;
 		}
+		// Console Five Pro (v0.0.9proQ3): a read that faults in an uncommitted hole of the
+		// guest address space (no virtual range covers it - e.g. 0x100040, one page above
+		// the low reservation floor, from a Unity title's graphics worker right after
+		// window focus loss) used to end the session the same way. The hole cannot alias
+		// any guest data, so the load is answered with zeroes and the session continues;
+		// GPU-tracker pages, guarded copies and the null page are all recovered before
+		// this. debug.capy.wild_read_recovery=0 restores the old behaviour.
+		if (access == GpuAccess::Read && info->access_violation_vaddr >= 0x10000 &&
+		    Cpu::GuestRipFromHostPc(info->exception_address) != 0 &&
+		    Cpu::RecoverGuestWildRead(info->native_context, info->access_violation_vaddr)) {
+			return true;
+		}
+
 		// Console Five Pro (v0.0.10pro phase 1): a plain guest STORE through a wild pointer (a
 		// heavy Unity title's render worker wrote via a garbage base register to 0x3a0888c1)
 		// ended the session the same way. When the whole access lies outside every guest
