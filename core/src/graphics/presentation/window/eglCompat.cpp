@@ -18,7 +18,7 @@
 #include <GLES2/gl2ext.h>
 #include <android/hardware_buffer.h>
 #include <android/native_window.h>
-#include <sync.h>
+#include <sys/ioctl.h>
 #include <dlfcn.h>
 #include <functional>
 #include <thread>
@@ -33,6 +33,16 @@ namespace Libs::Graphics {
 // eglGetProcAddress. No build-time link against EGL or GLES is added.
 // ---------------------------------------------------------------------------
 namespace {
+
+// sync_wait() lives in bionic's <sync.h>, which the NDK sysroot does not ship
+// (<android/sync.h> is the legacy fence-info header and does not declare it).
+// The function is a one-ioctl wrapper with a stable kernel ABI, so the wait is
+// done here directly: SYNC_IOC_WAIT = _IOW('>', 0, int32_t); the argument is the
+// timeout in milliseconds; returns 0 when the fence signalled, -1 on error.
+int SyncFenceWait(int fence_fd, int timeout_ms) {
+	int timeout = timeout_ms;
+	return ioctl(fence_fd, 0x40043E00u /* SYNC_IOC_WAIT */, &timeout);
+}
 
 struct EglFunctions {
         bool loaded = false;
@@ -367,7 +377,7 @@ int GlCompatRenderer::Blit(AHardwareBuffer* buffer, int acquire_fence_fd) {
         }
         // The Vulkan blit must finish before GL reads the buffer.
         if (acquire_fence_fd >= 0) {
-                if (sync_wait(acquire_fence_fd, 1000) != 0) {
+                if (SyncFenceWait(acquire_fence_fd, 1000) != 0) {
                         LOGF("eglCompat: acquire fence wait timed out\n");
                 }
                 close(acquire_fence_fd);

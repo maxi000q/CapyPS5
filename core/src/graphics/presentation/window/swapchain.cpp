@@ -25,7 +25,7 @@
 // v0.0.9proQ3: OpenGL compatibility backend (see eglCompat.h).
 #include "graphics/presentation/window/eglCompat.h"
 #include <android/hardware_buffer.h>
-#include <sync.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <vulkan/vulkan_android.h>
 #endif
@@ -40,6 +40,16 @@
 // IWYU pragma: no_include <intrin.h>
 
 namespace Libs::Graphics {
+
+// sync_wait() lives in bionic's <sync.h>, which the NDK sysroot does not ship
+// (<android/sync.h> is the legacy fence-info header and does not declare it).
+// The function is a one-ioctl wrapper with a stable kernel ABI, so the wait is
+// done here directly: SYNC_IOC_WAIT = _IOW('>', 0, int32_t); the argument is the
+// timeout in milliseconds; returns 0 when the fence signalled, -1 on error.
+int SyncFenceWait(int fence_fd, int timeout_ms) {
+	int timeout = timeout_ms;
+	return ioctl(fence_fd, 0x40043E00u /* SYNC_IOC_WAIT */, &timeout);
+}
 
 struct Presenter::Frame {
 	VulkanImage   image;
@@ -603,7 +613,7 @@ void Swapchain::DestroyGlBackend() {
 	auto& graphics = m_window.graphic_ctx;
 	for (const auto fd: m_release_fd) {
 		if (fd >= 0) {
-			sync_wait(fd, 100);
+			SyncFenceWait(fd, 100);
 			close(fd);
 		}
 	}
@@ -981,7 +991,7 @@ Swapchain::Status Swapchain::AcquireNextImage() {
 		// the Vulkan pass overwrites the buffer.
 		auto& fd = m_release_fd[m_image_index];
 		if (fd >= 0) {
-			if (sync_wait(fd, 1000) != 0) {
+			if (SyncFenceWait(fd, 1000) != 0) {
 				LOGF("GL present: release fence wait timed out\n");
 			}
 			close(fd);
