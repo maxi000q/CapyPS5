@@ -85,6 +85,14 @@ fun PerfOverlay(
                             withStyle(SpanStyle(color = Label)) { append("  scale ") }
                             append("%d%%".format(adaptiveScale / 10))
                         }
+                        // v0.0.10pro phase 4: the locked turbo family - the on-device
+                        // proof of WHICH engine preset is driving the game. Absent while
+                        // the classifier is still watching (first windows of gameplay).
+                        if (snapshot.workloadClass > 0L) {
+                            withStyle(SpanStyle(color = Capy.Good, fontWeight = FontWeight.Bold)) {
+                                append("  T%d".format(snapshot.workloadClass))
+                            }
+                        }
                     }
                 },
                 color = Capy.TextPrimary, fontFamily = mono, fontSize = 12.sp,

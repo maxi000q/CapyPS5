@@ -32,6 +32,8 @@ data class PerfSnapshot(
     val syncTimeoutsPerSec: Float = 0f,
     val unmappedWaitsPerSec: Float = 0f,
     val nullBuffersPerSec: Float = 0f,
+    /** Locked turbo family: 0 none yet, 500/501/502 Game500Turbo/Game501Turbo/Game502Turbo. */
+    val workloadClass: Long = 0L,
 )
 
 /**
@@ -121,6 +123,7 @@ class PerfMonitor(private val context: Context) {
             syncTimeoutsPerSec = rate(NativeBridge.STAT_WAIT_TIMEOUTS),
             unmappedWaitsPerSec = rate(NativeBridge.STAT_WAIT_UNMAPPED),
             nullBuffersPerSec = rate(NativeBridge.STAT_NULL_BUFFERS),
+            workloadClass = stats?.getOrNull(NativeBridge.STAT_WORKLOAD_CLASS) ?: 0L,
         )
     }
 

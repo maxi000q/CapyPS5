@@ -4,6 +4,7 @@
 #include "android/capyps5_jni.h"
 
 #include "common/common.h"
+#include "common/contentProfile.h"
 #include "common/file.h"
 #include "common/debugFlags.h"
 #include "common/perfCores.h"
@@ -304,6 +305,10 @@ JNIEXPORT jlongArray JNICALL Java_com_consolefivepro_NativeBridge_nativeGetStats
 	    static_cast<jlong>(g_wait_reg_mem_unmapped.load(std::memory_order_relaxed)),
 	    static_cast<jlong>(g_null_buffer_fallbacks.load(std::memory_order_relaxed)),
 	    g_is_running.load() ? 1 : 0,
+	    // v0.0.10pro phase 4: the locked workload class (0/500/501/502) so the
+	    // perf overlay can show WHICH turbo family is driving the engine - the
+	    // on-device answer to "did the turbo even engage for this game".
+	    static_cast<jlong>(Common::ContentProfile::ActiveClass()),
 	};
 	constexpr auto count = static_cast<jsize>(sizeof(values) / sizeof(values[0]));
 	jlongArray     array = env->NewLongArray(count);
