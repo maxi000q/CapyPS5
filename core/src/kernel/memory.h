@@ -130,6 +130,10 @@ void                   InvalidateMemory(uint64_t vaddr, uint64_t size);
 void                   InstallGpuResources(Graphics::RenderContext* renderer) noexcept;
 [[nodiscard]] bool HandleGpuFault(Graphics::PageFaultAccess access, uint64_t fault_vaddr) noexcept;
 [[nodiscard]] bool AdoptFaultingGuestWindow(uint64_t fault_vaddr) noexcept;
+// Console Five Pro (v0.0.10pro phase 1): true when [address, address+size) aliases no guest
+// memory - neither the big guest reservation nor any registered virtual range. The wild-store
+// recovery calls this from the SIGSEGV handler, mirroring AdoptFaultingGuestWindow's checks.
+[[nodiscard]] bool IsRangeOutsideGuestMemory(uint64_t address, uint64_t size) noexcept;
 
 int KYTY_SYSV_ABI KernelMapNamedFlexibleMemory(void** addr_in_out, size_t len, int prot, int flags,
                                                const char* name);

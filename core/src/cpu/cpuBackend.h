@@ -39,6 +39,16 @@ uint64_t GuestRipFromHostPc(uint64_t host_pc);
  * fault as before. Writes are never faked.
  */
 bool RecoverGuestNullRead(void* native_context, uint64_t fault_address);
+/**
+ * Recovers a guest plain STORE through a wild pointer by skipping it: when the whole
+ * access lies outside every guest mapping and reservation, nothing the game can read
+ * aliases the target, so dropping the store is unobservable. No register state changes
+ * (store destinations are sources); the PC advances past the instruction. Returns false
+ * when the recovery is disabled (debug.capy.wild_store_recovery=0), the budget is spent,
+ * the address is a true null dereference (below 64 KiB keeps the honest crash report) or
+ * the instruction is not an exactly-matched plain store.
+ */
+bool RecoverGuestWildStore(void* native_context, uint64_t fault_address);
 
 enum class BackendType {
 	Native,      // Direct x86_64 host execution (PC)

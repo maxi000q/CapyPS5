@@ -1468,6 +1468,123 @@ bool RecoverGuestNullRead(void* native_context, uint64_t fault_address) {
 #endif
 }
 
+// Console Five Pro (v0.0.10pro phase 1): guest wild-pointer STORE recovery. The
+// v0.0.9proQ1 crash log ended a heavy Unity title's session with "Unhandled host
+// exception: type=1 code=11 access=1 address=0x3a0888c1" - the render worker stored
+// through a garbage base register to an address that is neither null nor inside any
+// guest mapping. Nothing the game can ever read aliases such an address, so the store
+// is skipped and the session continues instead of dying on a one-off wild write (a
+// race, an HLE gap returning garbage). Exactly-matched plain stores only: STR/STUR
+// (unsigned/unscaled immediate), STP (signed offset, no writeback) and register-offset
+// STR, GPR and SIMD - no post/pre-index writeback, no atomics, no exclusives. Store
+// destinations are sources, so no register state is touched; only the PC advances.
+// True null dereferences (below 64 KiB) keep the honest crash report; a budget stops
+// a genuine wild-store loop from becoming a silent hang.
+// `setprop debug.capy.wild_store_recovery 0` restores the old behaviour.
+bool RecoverGuestWildStore(void* native_context, uint64_t fault_address) {
+#if defined(__aarch64__)
+	static Common::DebugFlags::CachedValue enabled("debug.capy.wild_store_recovery", 1);
+	if (enabled.Get() == 0) {
+		return false;
+	}
+	// A store below 64 KiB is a genuine null dereference: report it as before instead of
+	// silently dropping stores into the null page.
+	if (fault_address < 0x10000) {
+		return false;
+	}
+	static constexpr uint32_t kBudget = 64;
+	static std::atomic<uint32_t> recovered {0};
+	if (recovered.load(std::memory_order_relaxed) >= kBudget) {
+		return false;
+	}
+
+	auto* context = static_cast<ucontext_t*>(native_context);
+	if (context == nullptr) {
+		return false;
+	}
+	const uintptr_t pc = static_cast<uintptr_t>(context->uc_mcontext.pc);
+	const uint32_t insn = *reinterpret_cast<const uint32_t*>(pc);
+
+	uint32_t bytes = 0;
+	// The masked groups below are the store mirrors of the null-read decoder's load
+	// tables (bit 22 clear = store). `bytes` is the memory the store touches; no
+	// destination register is written, so a single size per form is all that matters.
+	switch (insn & 0xFFC00000u) {
+		// GPR stores, unsigned immediate offset (no writeback forms in this group).
+		case 0x39000000: bytes = 1;  break; // STRB Wt
+		case 0x79000000: bytes = 2;  break; // STRH Wt
+		case 0xB9000000: bytes = 4;  break; // STR Wt
+		case 0xF9000000: bytes = 8;  break; // STR Xt
+		// SIMD&FP stores, unsigned immediate offset.
+		case 0x3D000000: bytes = 1;  break; // STR Bt
+		case 0x7D000000: bytes = 2;  break; // STR Ht
+		case 0xBD000000: bytes = 4;  break; // STR St
+		case 0xFD000000: bytes = 8;  break; // STR Dt
+		case 0x3D800000: bytes = 16; break; // STR Qt
+		// Store pair, signed offset (the masked bits keep post/pre-index out).
+		case 0x29000000: bytes = 8;  break; // STP Wt1, Wt2
+		case 0xA9000000: bytes = 16; break; // STP Xt1, Xt2
+		case 0x2D000000: bytes = 8;  break; // STP St1, St2
+		case 0x6D000000: bytes = 16; break; // STP Dt1, Dt2
+		case 0xAD000000: bytes = 32; break; // STP Qt1, Qt2
+		default: break;
+	}
+	if (bytes == 0) {
+		// Unscaled-offset stores. Bits 11:10 masked to 00: the STUR encoding, which never
+		// writes back.
+		switch (insn & 0xFFC00C00u) {
+			case 0x38000000: bytes = 1;  break; // STURB Wt
+			case 0x78000000: bytes = 2;  break; // STURH Wt
+			case 0xB8000000: bytes = 4;  break; // STUR Wt
+			case 0xF8000000: bytes = 8;  break; // STUR Xt
+			case 0x3C000000: bytes = 1;  break; // STUR Bt
+			case 0x7C000000: bytes = 2;  break; // STUR Ht
+			case 0xBC000000: bytes = 4;  break; // STUR St
+			case 0xFC000000: bytes = 8;  break; // STUR Dt
+			case 0x3C800000: bytes = 16; break; // STUR Qt
+			default: break;
+		}
+	}
+	if (bytes == 0) {
+		// Register-offset stores (Xm-indexed; bits 11:10 masked to 10, the register
+		// encoding, which never writes back).
+		switch (insn & 0xFFE00C00u) {
+			case 0x38200800: bytes = 1;  break; // STRB Wt, [Xn, Xm]
+			case 0x78200800: bytes = 2;  break; // STRH Wt, [Xn, Xm]
+			case 0xB8200800: bytes = 4;  break; // STR Wt, [Xn, Xm]
+			case 0xF8200800: bytes = 8;  break; // STR Xt, [Xn, Xm]
+			case 0x3C200800: bytes = 1;  break; // STR Bt, [Xn, Xm]
+			case 0x7C200800: bytes = 2;  break; // STR Ht, [Xn, Xm]
+			case 0xBC200800: bytes = 4;  break; // STR St, [Xn, Xm]
+			case 0xFC200800: bytes = 8;  break; // STR Dt, [Xn, Xm]
+			case 0x3CA00800: bytes = 16; break; // STR Qt, [Xn, Xm]
+			default: break;
+		}
+	}
+	if (bytes == 0) {
+		return false;
+	}
+	// The whole access must lie outside every guest mapping and reservation: a store
+	// reaching into guest memory is never dropped.
+	if (!Libs::LibKernel::Memory::IsRangeOutsideGuestMemory(fault_address, bytes)) {
+		return false;
+	}
+	context->uc_mcontext.pc = static_cast<uint64_t>(pc + 4);
+	const auto count = recovered.fetch_add(1, std::memory_order_relaxed) + 1;
+	if (count <= 4 || count == kBudget) {
+		ALOGW("CpuBackend: skipped guest wild store #%u/%u (pc=0x%llx vaddr=0x%llx) - "
+		      "target aliases no guest memory, continuing",
+		      count, kBudget, static_cast<unsigned long long>(pc),
+		      static_cast<unsigned long long>(fault_address));
+	}
+	return true;
+#else
+	(void)native_context;
+	(void)fault_address;
+	return false;
+#endif
+}
+
 CpuBackend* CpuBackend::Instance() {
 #if defined(__x86_64__) || defined(_M_X64)
 	static NativeCpuBackend instance;

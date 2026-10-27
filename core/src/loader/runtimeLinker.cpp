@@ -735,6 +735,16 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 		    Cpu::RecoverGuestNullRead(info->native_context, info->access_violation_vaddr)) {
 			return true;
 		}
+		// Console Five Pro (v0.0.10pro phase 1): a plain guest STORE through a wild pointer (a
+		// heavy Unity title's render worker wrote via a garbage base register to 0x3a0888c1)
+		// ended the session the same way. When the whole access lies outside every guest
+		// mapping and reservation, nothing the game can read aliases the target - skip the
+		// store and continue. debug.capy.wild_store_recovery=0 restores the old behaviour.
+		if (access == GpuAccess::Write &&
+		    Cpu::GuestRipFromHostPc(info->exception_address) != 0 &&
+		    Cpu::RecoverGuestWildStore(info->native_context, info->access_violation_vaddr)) {
+			return true;
+		}
 	}
 	// Report whatever guest context can be read safely before terminating: which guest thread
 	// faulted, the register file, the faulting code bytes and the top of its stack.

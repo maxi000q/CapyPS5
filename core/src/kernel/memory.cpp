@@ -1092,6 +1092,24 @@ bool AdoptFaultingGuestWindow(uint64_t fault_vaddr) noexcept {
 #endif
 }
 
+bool IsRangeOutsideGuestMemory(uint64_t address, uint64_t size) noexcept {
+	// Console Five Pro (v0.0.10pro phase 1): the wild-store recovery runs in the SIGSEGV
+	// handler and needs to know whether a faulting access could ever alias guest memory.
+	// Same ownership checks as AdoptFaultingGuestWindow: the big guest reservation plus
+	// every registered virtual range. An empty or wrapped range counts as guest-owned
+	// (recover nothing).
+	if (size == 0 || UINT64_MAX - address < size) {
+		return false;
+	}
+	if (g_guest_address_space != nullptr && g_guest_address_space->Owns(address, size)) {
+		return false;
+	}
+	if (g_virtual_ranges != nullptr && g_virtual_ranges->HasOverlap(address, size)) {
+		return false;
+	}
+	return true;
+}
+
 struct PrtAperture {
 	uint64_t address = 0;
 	uint64_t size    = 0;
