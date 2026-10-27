@@ -5,7 +5,11 @@
 #include "common/assert.h"
 #include "common/common.h"
 #include "common/debugFlags.h"
+#include "common/contentProfile.h"
+#include "common/common.h"
+#include "common/contentProfile.h"
 #include "common/gpuProfile.h"
+#include "common/renderPassMode.h"
 #include "common/profiler.h"
 #include "common/threads.h"
 #include "graphics/host_gpu/graphicContext.h"
@@ -95,11 +99,18 @@ void CommandBuffer::BeginRendering(const RenderState& state) const {
 	// memory traffic. An explicit `setprop debug.capy.rp_mode` still wins.
 	static Common::DebugFlags::CachedValue rp_mode("debug.capy.rp_mode", -1);
 	const auto mode = [&] {
-		const auto requested = rp_mode.Get();
-		if (requested >= 0 && requested <= 3) {
-			return requested;
-		}
-		return static_cast<int64_t>(Common::GpuProfile::MaliProfileEnabled() ? 0 : 3);
+		// v0.0.9proQ4 round 4: mode 4 (hybrid) joins the set - colour clears
+		// go through loadOp (the previous colour contents are never loaded:
+		// on a multi-megapixel target that is tens of MiB of memory traffic
+		// per cleared pass), while depth and stencil clears keep the in-pass
+		// treatment of mode 3 so the documented Adreno depth-write
+		// workaround keeps applying to depth exactly as before. Default: 0
+		// on Mali, 4 on Adreno and under the resolution policy, 3 elsewhere
+		// (common/renderPassMode.h).
+		return Common::RenderPass::SelectMode(rp_mode.Get(),
+		                                      Common::GpuProfile::MaliProfileEnabled(),
+		                                      Common::GpuProfile::AdrenoProfileEnabled(),
+		                                      Common::ContentProfile::HighResolutionPolicyActive());
 	}();
 	if (mode == 1 && m_rendering && WithoutClears(m_render_state) == state) {
 		return;
@@ -138,6 +149,32 @@ void CommandBuffer::BeginRendering(const RenderState& state) const {
 		if (count != 0) {
 			Handle().clearAttachments(count, clears.data(), 1, &rect);
 		}
+		return;
+	}
+	if (mode == 4 && (state.depth_stencil_attachment.depth_clear ||
+		               state.depth_stencil_attachment.stencil_clear)) {
+		// Hybrid: strip only the depth/stencil clears from the pass (colour
+		// clears keep their loadOp CLEAR in the main path below), then clear
+		// depth in-pass - the depth path behaves exactly as in mode 3, the
+		// colour path stops paying a load it immediately overwrites.
+		const auto& ds = state.depth_stencil_attachment;
+		RenderState stripped = state;
+		stripped.depth_stencil_attachment.depth_clear   = false;
+		stripped.depth_stencil_attachment.stencil_clear = false;
+		BeginRendering(stripped);
+		vk::ClearAttachment clear {};
+		if (ds.has_depth && ds.depth_clear) {
+			clear.aspectMask |= vk::ImageAspectFlagBits::eDepth;
+		}
+		if (ds.has_stencil && ds.stencil_clear) {
+			clear.aspectMask |= vk::ImageAspectFlagBits::eStencil;
+		}
+		clear.clearValue.depthStencil.depth   = std::bit_cast<float>(ds.clear_value[0]);
+		clear.clearValue.depthStencil.stencil = ds.clear_value[1];
+		vk::ClearRect rect {};
+		rect.rect.extent = vk::Extent2D {state.width, state.height};
+		rect.layerCount  = state.num_layers;
+		Handle().clearAttachments(1, &clear, 1, &rect);
 		return;
 	}
 	static thread_local bool splitting = false;
