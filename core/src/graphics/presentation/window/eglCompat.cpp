@@ -168,7 +168,7 @@ bool GlCompatRenderer::LoadEgl() {
         resolve(reinterpret_cast<void**>(&g_egl.glShaderSource), "glShaderSource");
         resolve(reinterpret_cast<void**>(&g_egl.glTexParameteri), "glTexParameteri");
         resolve(reinterpret_cast<void**>(&g_egl.glUniform1i), "glUniform1i");
-        resolve(reinterpret_cast<void**>&g_egl.glUseProgram, "glUseProgram");
+        resolve(reinterpret_cast<void**>(&g_egl.glUseProgram), "glUseProgram");
         resolve(reinterpret_cast<void**>(&g_egl.glVertexAttribPointer), "glVertexAttribPointer");
         resolve(reinterpret_cast<void**>(&g_egl.glViewport), "glViewport");
         resolve(reinterpret_cast<void**>(&g_egl.glGenTextures), "glGenTextures");

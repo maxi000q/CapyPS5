@@ -41,14 +41,14 @@ SessionStats& Stats() {
 const char* StageName(ShaderType stage) {
         switch (stage) {
                 case ShaderType::Vertex: return "vs";
-                case ShaderType::Fragment: return "ps";
+                case ShaderType::Pixel: return "ps";
                 case ShaderType::Compute: return "cs";
-                case ShaderType::Geometry: return "gs";
-                case ShaderType::Export: return "es";
-                case ShaderType::Hull: return "hs";
-                case ShaderType::Local: return "ls";
+                case ShaderType::Fetch: return "fetch";
                 case ShaderType::Mesh: return "mesh";
-                case ShaderType::Task: return "task";
+                case ShaderType::Local: return "ls";
+                case ShaderType::TessellationControl: return "tcs";
+                case ShaderType::TessellationEvaluation: return "tes";
+                case ShaderType::Unknown:
                 default: return "shader";
         }
 }
