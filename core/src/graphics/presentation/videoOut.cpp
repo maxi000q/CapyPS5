@@ -1006,11 +1006,15 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 		LOGF("Present thread: priority boost unavailable (nice -6 denied)\n");
 	}
 #if defined(__ANDROID__)
-	// v0.0.9proQ3: the present thread runs the vblank cascade on the critical
-	// path of every game frame; on big.LITTLE SoCs a little-core present thread
-	// holding the very locks the big-core game threads want amplifies the
-	// 60-120 Hz vblank cost (best effort, toggle debug.capy.perf_cores).
-	Common::PinToPerformanceCores("Present thread");
+	// v0.0.9proQ4 round 2: the Q3 round pinned the present thread onto the
+	// performance cluster - the very cores the emulation, GPU and pipeline-worker
+	// threads saturate. The present thread sleeps ~98% of the time and its
+	// per-vblank burst is tiny; a floating placement (the Q2 behaviour) lets the
+	// scheduler run it next to whoever is idle instead of preempting the hot
+	// threads. `setprop debug.capy.pin_present 1` restores the Q3 pinning.
+	if (Common::PresentThreadShouldPin()) {
+		Common::PinToPerformanceCores("Present thread");
+	}
 #endif
 #endif
 	const auto frequency = Common::Timer::QueryPerformanceFrequency();

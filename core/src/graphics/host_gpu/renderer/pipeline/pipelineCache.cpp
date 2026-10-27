@@ -1338,9 +1338,12 @@ void PipelineCache::AsyncWorker() {
 	// Console Five Pro tweak (v0.0.7pro): the scheduler tends to park background-niced
 	// threads on the little cores entirely, which makes shader warm-up crawl exactly when
 	// the game streams new materials. Keep the workers on the big cores; their low nice
-	// value already yields to the game threads, so they only use spare big-core time
-	// (best effort, toggle debug.capy.perf_cores).
-	Common::PinToPerformanceCores("Pipeline worker");
+	// value already yields to the game threads, so they only use spare big-core time.
+	// v0.0.9proQ4 round 2: workers take the performance tier WITHOUT the prime core -
+	// during a compile storm the emulation and GPU threads keep the fastest core to
+	// themselves (best effort; debug.capy.worker_cores 0 restores the Q2 placement,
+	// debug.capy.perf_cores 0 disables pinning entirely).
+	Common::PinToWorkerCores("Pipeline worker");
 #endif
 	// v0.0.10pro phase 3: compile what the game is waiting on first. FIFO made a streaming
 	// storm's hundreds of one-shot pipelines delay the handful the current frame re-draws with,
