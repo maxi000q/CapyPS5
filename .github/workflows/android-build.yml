@@ -205,7 +205,15 @@ jobs:
           VERSION="$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)"
           TAG="${GITHUB_REF_NAME}"
           cat > /tmp/release_notes.md <<'NOTES'
-          **Console Five Pro v0.0.9proQ2** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
+          **Console Five Pro v0.0.9proQ3** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
+
+          ## v0.0.9proQ3 — crash fix, the Mali regression and the frame-drop round (same graphics)
+
+          - **Fixed: the crash from the latest report.** A Unity-engine title could die the moment the window lost focus (switching apps, opening the volume menu): its graphics worker read through a torn pointer into a never-mapped hole of the guest address space (one page above the low reservation floor). Reads whose whole access lies in a hole no guest mapping covers now return zero — the hole cannot hold game data — using the same proven plain-load decoder as the null-page recovery, budget-capped. `debug.capy.wild_read_recovery=0` restores the old behaviour.
+          - **Fixed: the Mali performance regression and heavy drops.** The Q2 refresh unlock ran the emulated vblank at the display's maximum (120 Hz on most phones): the present thread woke 240x/s, took the driver-wide and per-port locks on every tick, and every guest vblank waiter woke twice per frame — pure overhead while the game could not even fill 60 FPS. An adaptive governor now paces the emulated vblank at 60 Hz and unlocks to the configured rate only while the game sustains 55+ flips/s (two one-second windows), falling back below 50. Games that earn high refresh keep every frame of it; mode queries still report the configured rate. `debug.capy.vblank_governor=0` pins the configured rate.
+          - **Faster vblank tick (every GPU).** Per-port interest counters now gate the vblank/flip event triggers (an empty registration queue used to be copied on every tick — 60-120x/s per open port — plus one weak_ptr lock per registration) and the waiterless `SignalAll` (a futex syscall per port per tick). Firing into an empty queue was always a no-op; now it is a skip. Over-counts only ever keep the slow path. `debug.capy.vblank_fastpath=0` restores unconditional triggers. The present thread also joined the big-core pinning of the emulator/GPU threads, and closing a video port now wakes its vblank waiters (a waiter on a closing port could previously sleep forever).
+          - **Fixed: memory-stall frame drops.** Guest memory is backed by 4 KiB pages on Android again — under the allocation pressure a heavy game creates, a 2 MiB huge-page fault could stall for milliseconds in synchronous kernel compaction, the signature of the "many drops" reports on 8 GB devices. Desktop builds keep huge pages; `setprop debug.capy.thp 1` re-enables them on Android. Mali also returns to the 256 KB GPU-download read-ahead window (bandwidth-bound; Adreno keeps 512 KB).
+          - Same graphics everywhere: every change is pacing, overhead or recovery — not a single pixel is drawn differently, and every new default is guarded by a `debug.capy.*` property.
 
           ## v0.0.9proQ2 — heavy-game crash fix, 90/120 Hz unlock, hot-pipeline compilation, deeper Snapdragon + Mali profiles (same graphics)
 
@@ -252,7 +260,7 @@ jobs:
           - Upstream **CapyPS5 v0.0.3** by Ghael-V; this project is an independent rebranded build of it.
           - KytyPS5 and the original Kyty by InoriRus, and the FEX project.
 
-          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.9proQ2)
+          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.9proQ3)
           NOTES
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets."
