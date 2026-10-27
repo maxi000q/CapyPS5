@@ -4,6 +4,7 @@
 
 #include "kernel/memory.h"
 #include "common/debugFlags.h"
+#include "common/gpuProfile.h"
 
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -259,11 +260,33 @@ static void InvalidateGuestReadCache() {
 
 namespace {
 struct GuestReadCache {
-	static constexpr uint32_t Slots = 512;
+	// v0.0.10pro phase 3: the backing array is sized for the largest setting; the live slot
+	// count comes from GuestReadCacheSlots() below (512 by default, 4096 under the
+	// Mali/Adreno profiles). 4096 slots cover 16 MiB per thread - UE's shader resource
+	// walker reads gigabytes of scattered descriptors, and every hit skips a
+	// process_vm_readv syscall (they were 27% of the GPU thread when uncached).
+	static constexpr uint32_t MaxSlots = 4096;
 	uint64_t                  generation = 0;
-	std::array<uint64_t, Slots> pages {};
+	std::array<uint64_t, MaxSlots> pages {};
 };
 thread_local GuestReadCache t_guest_read_cache;
+
+// `setprop debug.capy.read_cache_slots N` overrides (rounded down to a power of two, 64+).
+static uint64_t GuestReadCacheSlots() {
+	static Common::DebugFlags::CachedValue slots("debug.capy.read_cache_slots", -1);
+	const int64_t                          requested = slots.Get();
+	if (requested >= 64) {
+		uint64_t power = 64;
+		while (power * 2 <= static_cast<uint64_t>(requested) &&
+		       power * 2 <= GuestReadCache::MaxSlots) {
+			power *= 2;
+		}
+		return power;
+	}
+	return (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
+	           ? 4096
+	           : 512;
+}
 } // namespace
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_LINUX
@@ -322,7 +345,7 @@ bool RecoverGuardedGuestRead(uint64_t fault_addr) noexcept {
 	const auto first_page = guard.addr / CachePage;
 	const auto last_page  = (guard.addr + guard.size - 1) / CachePage;
 	for (auto page = first_page; page <= last_page; page++) {
-		cache.pages[page % GuestReadCache::Slots] = 0;
+		cache.pages[page % GuestReadCacheSlots()] = 0;
 	}
 	siglongjmp(guard.jump, 1);
 }
@@ -1232,7 +1255,7 @@ bool ReadGuestMemory(uint64_t vaddr, void* data, uint64_t size) {
 		}
 		bool hit = true;
 		for (auto page = first_page; page <= last_page && hit; page++) {
-			hit = cache.pages[page % GuestReadCache::Slots] == page + 1;
+			hit = cache.pages[page % GuestReadCacheSlots()] == page + 1;
 		}
 		if (hit) {
 			if (!GuardedGuestCopy(data, reinterpret_cast<const void*>(vaddr), size)) {
@@ -1259,7 +1282,7 @@ bool ReadGuestMemory(uint64_t vaddr, void* data, uint64_t size) {
 		if (use_cache && g_guest_address_space != nullptr &&
 		    g_guest_address_space->BackingContains(first_page * CachePage, (last_page - first_page + 1) * CachePage)) {
 			for (auto page = first_page; page <= last_page; page++) {
-				cache.pages[page % GuestReadCache::Slots] = page + 1;
+				cache.pages[page % GuestReadCacheSlots()] = page + 1;
 			}
 		}
 		return true;

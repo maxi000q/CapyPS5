@@ -11,6 +11,7 @@
 #include "graphics/host_gpu/renderer/gpuProfiler.h"
 #include "common/assert.h"
 #include "common/debugFlags.h"
+#include "common/gpuProfile.h"
 #include "common/logging/log.h"
 #include "graphics/host_gpu/graphicContext.h"
 
@@ -576,8 +577,18 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 	// real (see QueueOperation), and every wait path drains the batch first
 	// (Wait/FlushAndWait/Finish/Shutdown). Semaphore-carrying submissions - the
 	// swapchain presenter's own scheduler - never batch.
-	static Common::DebugFlags::CachedValue batch_limit("debug.capy.submit_batch", 8);
-	const auto  max_batch = static_cast<uint32_t>(batch_limit.Get());
+	// v0.0.10pro phase 3: under the Mali/Adreno profiles the batch doubles to 16 - every
+	// vkQueueSubmit carries fixed driver+kernel overhead that dominates when a heavy game
+	// frame pushes ~80 flushes at single-digit FPS. `setprop debug.capy.submit_batch N`
+	// still overrides (the previous default was 8).
+	static Common::DebugFlags::CachedValue batch_limit("debug.capy.submit_batch", -1);
+	const auto max_batch = static_cast<uint32_t>(
+	    batch_limit.Get() >= 0
+	        ? batch_limit.Get()
+	        : ((Common::GpuProfile::MaliProfileEnabled() ||
+	            Common::GpuProfile::AdrenoProfileEnabled())
+	               ? 16
+	               : 8));
 	const bool  forced    = m_force_submit.exchange(false, std::memory_order_acq_rel);
 	const bool  batchable = m_batch_submits && max_batch > 1 && !forced &&
 	                      submit.num_wait_semaphores == 0 &&

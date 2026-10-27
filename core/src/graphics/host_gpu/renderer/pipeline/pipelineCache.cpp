@@ -999,6 +999,10 @@ struct PipelineCache::AsyncCompile {
 	PipelineStaticParameters           static_params;
 	std::unique_ptr<Pipeline>          pipeline;
 	std::atomic<bool>                  done {false};
+	// v0.0.10pro phase 3 (hot pipelines): every re-request of a still-pending pipeline bumps
+	// this - the game is actively drawing with it, so it must compile before the one-shot
+	// background backlog. Workers pick the highest count first (ties: oldest).
+	std::atomic<uint32_t>              requests {1};
 };
 
 PipelineCache::Pipeline* PipelineCache::GetGraphicsPipeline(
@@ -1195,6 +1199,10 @@ PipelineCache::Pipeline* PipelineCache::GetGraphicsPipeline(
 	if (auto pending = m_pending_pipelines.find(key); pending != m_pending_pipelines.end()) {
 		auto job = pending->second;
 		if (!job->done.load(std::memory_order_acquire)) {
+			// v0.0.10pro phase 3: the game asked for this pipeline again while it is still
+			// compiling - it is on the critical path right now (draws are being skipped or a
+			// flush is waiting on it), so raise its compile priority.
+			(void)job->requests.fetch_add(1, std::memory_order_relaxed);
 			if (!allow_async) {
 				// A draw that cannot be skipped needs it now: wait for the worker.
 				std::unique_lock lock(m_async_mutex);
@@ -1304,6 +1312,12 @@ void PipelineCache::AsyncWorker() {
 	// (best effort, toggle debug.capy.perf_cores).
 	Common::PinToPerformanceCores("Pipeline worker");
 #endif
+	// v0.0.10pro phase 3: compile what the game is waiting on first. FIFO made a streaming
+	// storm's hundreds of one-shot pipelines delay the handful the current frame re-draws with,
+	// so draws were skipped and heavy titles crawled exactly during material streaming. The
+	// scan is O(queue) under the lock - trivial next to a ~100 ms pipeline compile.
+	// `setprop debug.capy.hot_pipelines 0` restores FIFO.
+	static Common::DebugFlags::CachedValue hot_pipelines("debug.capy.hot_pipelines", 1);
 	for (;;) {
 		std::shared_ptr<AsyncCompile> job;
 		{
@@ -1312,18 +1326,41 @@ void PipelineCache::AsyncWorker() {
 			if (m_async_stop) {
 				return;
 			}
-			job = std::move(m_async_queue.front());
-			m_async_queue.pop_front();
+			if (hot_pipelines.Get() != 0 && m_async_queue.size() > 1) {
+				auto best = m_async_queue.begin();
+				for (auto it = m_async_queue.begin() + 1; it != m_async_queue.end(); ++it) {
+					if ((*it)->requests.load(std::memory_order_relaxed) >
+				    (*best)->requests.load(std::memory_order_relaxed)) {
+						best = it;
+					}
+				}
+				job = std::move(*best);
+				m_async_queue.erase(best);
+			} else {
+				job = std::move(m_async_queue.front());
+				m_async_queue.pop_front();
+			}
 		}
 		auto pipeline = std::make_unique<Pipeline>();
 		CreatePipelineInternal(m_graphics, *pipeline, job->rendering, job->vertex_input, job->vertex_info,
 		                       job->has_pixel ? &job->pixel_info : nullptr, job->programs, job->static_params,
 		                       m_driver_cache);
 		job->pipeline = std::move(pipeline);
+		size_t queue_left = 0;
 		{
 			std::lock_guard lock(m_async_mutex);
 			job->done.store(true, std::memory_order_release);
+			queue_left = m_async_queue.size();
 		}
+#if defined(__ANDROID__)
+		{
+			const auto waits = job->requests.load(std::memory_order_relaxed);
+			if (waits >= 8) {
+				__android_log_print(ANDROID_LOG_INFO, "CapyPS5-Pipeline",
+				    "hot pipeline compiled after %u re-requests (queue %zu left)", waits, queue_left);
+			}
+		}
+#endif
 		m_async_available.notify_all();
 	}
 }

@@ -413,7 +413,13 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 		// waited for the GPU on its own. Download the GPU-written pages that follow in the same
 		// buffer too, so one wait serves the whole sequential read.
 		// `setprop debug.capy.read_ahead_kb N` sets the window (0 downloads the faulting pages only).
-		static Common::DebugFlags::CachedValue read_ahead_kb("debug.capy.read_ahead_kb", 256);
+		// v0.0.10pro phase 3: 512 KB under the Mali/Adreno profiles - heavy titles fault GPU-owned
+		// pages in long sequential sweeps, and a wider window halves the fault+download count.
+		static Common::DebugFlags::CachedValue read_ahead_kb(
+		    "debug.capy.read_ahead_kb",
+		    (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
+		        ? 512
+		        : 256);
 		const uint64_t read_ahead   = static_cast<uint64_t>(std::max<int64_t>(read_ahead_kb.Get(), 0)) * 1024u;
 		const uint64_t buffer_end   = buffer.CpuAddress() + buffer.Size();
 		const uint64_t download_low = std::max(Common::AlignDown(vaddr, TRACKER_PAGE_SIZE), buffer.CpuAddress());
