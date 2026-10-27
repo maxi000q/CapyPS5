@@ -304,6 +304,13 @@ static uint64_t GuestReadCacheSlots() {
 	if (Common::ContentProfile::Profile500Enabled()) {
 		return GuestReadCache::MaxSlots;
 	}
+	// v0.0.9proQ4 round 4: the layered-compositing family is guest-CPU-bound
+	// - its logic loop walks a wide descriptor/header working set every
+	// frame. 8192 slots (32 MiB per thread) halve the conflict misses the
+	// mobile profile's 4096-entry table shows on that working-set size.
+	if (Common::ContentProfile::Profile501Enabled()) {
+		return 8192;
+	}
 	return (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
 	           ? 4096
 	           : 512;

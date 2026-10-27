@@ -55,7 +55,13 @@ constexpr uint32_t SweeperNice         = 8;     // background, never steals game
 // win for the rest of the session. The sweeper stays nice-8 background
 // work either way.
 uint32_t ActiveSweepIntervalMs() {
-        return Common::ContentProfile::Profile500Enabled() ? 1000 : ActiveSweepMs;
+        // v0.0.9proQ4 round 4: the compositing family shares the fast
+        // cadence - its guest heap is as hot as any, and the TLB win
+        // compounds the same way for a CPU-bound frame loop.
+        return (Common::ContentProfile::Profile500Enabled() ||
+                Common::ContentProfile::Profile501Enabled())
+                   ? 1000
+                   : ActiveSweepMs;
 }
 
 enum class ThpMode : int32_t {

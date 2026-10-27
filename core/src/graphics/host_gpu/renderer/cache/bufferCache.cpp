@@ -433,9 +433,14 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 		static Common::DebugFlags::CachedValue read_ahead_kb("debug.capy.read_ahead_kb", -1);
 		int64_t                                 window_kb = read_ahead_kb.Get();
 		if (window_kb < 0) {
-			window_kb = Common::ContentProfile::Profile500Enabled()
-			                ? 768
-			                : (Common::GpuProfile::AdrenoProfileEnabled() ? 512 : 256);
+			// v0.0.9proQ4 round 4: the layered-compositing class streams its
+			// art in the longest sweeps of any family - 1 MiB base windows.
+			window_kb = Common::ContentProfile::Profile501Enabled()
+			                ? 1024
+			                : (Common::ContentProfile::Profile500Enabled()
+			                       ? 768
+			                       : (Common::GpuProfile::AdrenoProfileEnabled() ? 512
+			                                                              : 256));
 		}
 		const uint64_t base_window  = static_cast<uint64_t>(std::max<int64_t>(window_kb, 0)) * 1024u;
 		// v0.0.9proQ4 round 2: adaptive window. A static window is wrong twice: a
@@ -453,9 +458,14 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 			// v0.0.9proQ4 round 3: profile 500 doubles the ceiling to 2 MiB - a
 			// sweep-outrunning stream keeps doubling the window instead of
 			// stalling at 1 MiB and paying a GPU wait per window.
-			const uint64_t kWindowMax = Common::ContentProfile::Profile500Enabled()
-			                            ? (2ull << 20)
-			                            : (1ull << 20);
+			// v0.0.9proQ4 round 4: the compositing class quadruples it to 4 MiB
+			// - its background/parallax art streams are the longest there are.
+			const uint64_t kWindowMax =
+			    Common::ContentProfile::Profile501Enabled()
+			        ? (4ull << 20)
+			        : (Common::ContentProfile::Profile500Enabled()
+			              ? (2ull << 20)
+			              : (1ull << 20));
 			constexpr uint64_t kWindowMin = 64ull * 1024;
 			if (m_read_ahead_window == 0) {
 				m_read_ahead_window = base_window;
