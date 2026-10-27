@@ -237,7 +237,7 @@ jobs:
 
           ## From v0.0.8pro — the stability release
 
-          Malformed GPU packets no longer kill the emulator; corrupted ELF/SELF images fail cleanly; guest page faults resolve on a dedicated fault thread; Unreal Engine games no longer die at boot with LowLevelFatalError (sceKernelBatchMap 0x8002000c, e.g. Enotria); auto-save snapshots; import/export all saves; exit button fix; build hardening.
+          Malformed GPU packets no longer kill the emulator; corrupted ELF/SELF images fail cleanly; guest page faults resolve on a dedicated fault thread; Unreal Engine games no longer die at boot with LowLevelFatalError (sceKernelBatchMap 0x8002000c, e.g. one Unreal Engine souls-like); auto-save snapshots; import/export all saves; exit button fix; build hardening.
 
           ## Requirements
 
@@ -252,7 +252,7 @@ jobs:
           - Upstream **CapyPS5 v0.0.3** by Ghael-V; this project is an independent rebranded build of it.
           - KytyPS5 and the original Kyty by InoriRus, and the FEX project.
 
-          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.9proQ1)
+          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.9proQ2)
           NOTES
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets."
