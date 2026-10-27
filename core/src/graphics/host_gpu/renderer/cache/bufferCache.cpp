@@ -439,17 +439,18 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 		// GPU wait per window when the window is narrow.
 		static Common::DebugFlags::CachedValue read_ahead_kb("debug.capy.read_ahead_kb", -1);
 		int64_t                                 window_kb = read_ahead_kb.Get();
+		// v0.0.9proQ4 round 5: the ladder lives in common/enginePolicy.h
+		// with its Mali column - the base window governs the FIRST fault
+		// after a jump, and on a UMA Mali device the junk a too-wide base
+		// copies is bandwidth stolen from the GPU, so Mali bases run at
+		// half the Adreno tier of the same class (256/384/512 KB against
+		// 512/768/1024); the adaptive caps stay vendor-shared. Declared at
+		// function scope: the adaptive window below reads the cap too.
+		const auto& engine_tuning = Common::EnginePolicy::TuningFor(
+		    Common::GpuProfile::MaliProfileEnabled(),
+		    Common::GpuProfile::AdrenoProfileEnabled(),
+		    Common::EnginePolicy::CurrentTier());
 		if (window_kb < 0) {
-			// v0.0.9proQ4 round 5: the ladder lives in common/enginePolicy.h
-			// with its Mali column - the base window governs the FIRST fault
-			// after a jump, and on a UMA Mali device the junk a too-wide base
-			// copies is bandwidth stolen from the GPU, so Mali bases run at
-			// half the Adreno tier of the same class (256/384/512 KB against
-			// 512/768/1024); the adaptive caps stay vendor-shared.
-			const auto& engine_tuning = Common::EnginePolicy::TuningFor(
-			    Common::GpuProfile::MaliProfileEnabled(),
-			    Common::GpuProfile::AdrenoProfileEnabled(),
-			    Common::EnginePolicy::CurrentTier());
 			window_kb = engine_tuning.read_ahead_base_kb;
 		}
 		const uint64_t base_window  = static_cast<uint64_t>(std::max<int64_t>(window_kb, 0)) * 1024u;
