@@ -43,6 +43,10 @@ public:
 	void           Flush(SubmitInfo& submit);
 	void           FlushAndWait();
 	void           Finish();
+	// v0.0.9proQ4 round 2: drain a stale submit batch when no more guest work is
+	// queued (owner thread only, same discipline as FlushSubmitBatch). Public: the
+	// GPU thread calls it at queue-empty so the frame tail reaches the GPU at once.
+	void DrainSubmitBatch();
 	CommandBuffer& BeginCommand();
 	uint64_t       Submit(SubmitInfo submit = {});
 	// Deferred callbacks can observe an externally owned drain, but cannot initiate shutdown:
@@ -100,10 +104,6 @@ private:
 	};
 
 	void BeginNext();
-	// v0.0.9proQ4 round 2: drain a stale submit batch when no more guest work is
-	// queued (owner thread only, same discipline as FlushSubmitBatch). Public: the
-	// GPU thread calls it at queue-empty so the frame tail reaches the GPU at once.
-	void DrainSubmitBatch();
 	void PriorityOperationsThread(std::stop_token stop);
 	void QueueOperation(Common::UniqueFunction<void>&& operation, bool priority);
 	void RunOperation(Common::UniqueFunction<void>&& operation);

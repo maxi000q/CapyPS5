@@ -913,7 +913,7 @@ bool GuestGpu::Process(Submission& submission) {
 					// v0.0.9proQ4 round 2: the work queue is empty - drain the
 					// submit batch so the frame tail reaches the GPU now instead of
 					// waiting for the next burst to fill it.
-					cp.GetScheduler().DrainSubmitBatch();
+					m_renderer.GetCommandScheduler().DrainSubmitBatch();
 				}
 			} else if (complete) {
 				m_renderer.RunGarbageCollector();
@@ -958,7 +958,7 @@ bool GuestGpu::Process(Submission& submission) {
 					// v0.0.9proQ4 round 2: the work queue is empty - drain the
 					// submit batch so the frame tail reaches the GPU now instead of
 					// waiting for the next burst to fill it.
-					cp.GetScheduler().DrainSubmitBatch();
+					m_renderer.GetCommandScheduler().DrainSubmitBatch();
 				}
 			} else if (complete) {
 				m_renderer.RunGarbageCollector();
