@@ -25,7 +25,7 @@
 // v0.0.9proQ3: OpenGL compatibility backend (see eglCompat.h).
 #include "graphics/presentation/window/eglCompat.h"
 #include <android/hardware_buffer.h>
-#include <android/sync.h>
+#include <sync.h>
 #include <unistd.h>
 #include <vulkan/vulkan_android.h>
 #endif

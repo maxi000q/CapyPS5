@@ -18,7 +18,7 @@
 #include <GLES2/gl2ext.h>
 #include <android/hardware_buffer.h>
 #include <android/native_window.h>
-#include <android/sync.h>
+#include <sync.h>
 #include <dlfcn.h>
 #include <functional>
 #include <thread>
