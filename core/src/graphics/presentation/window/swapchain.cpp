@@ -711,8 +711,8 @@ bool Swapchain::TryCreateGlBackend() {
 			return fail();
 		}
 
-		VkExternalMemoryImageInfo external {};
-		external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_INFO;
+		VkExternalMemoryImageCreateInfo external {};
+		external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
 		external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
 		VkImageCreateInfo image_info {};
 		image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -847,7 +847,7 @@ void Swapchain::RecordGlPresentCommands(CommandBuffer& command, Presenter::Frame
 		clear_attachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
 		clear_attachment.loadOp = vk::AttachmentLoadOp::eClear;
 		clear_attachment.storeOp = vk::AttachmentStoreOp::eStore;
-		clear_attachment.clearValue.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+		clear_attachment.clearValue.color = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
 		vk::RenderingInfo clear_rendering {};
 		clear_rendering.renderArea.extent = m_extent;
 		clear_rendering.layerCount = 1;
