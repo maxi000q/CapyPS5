@@ -1719,19 +1719,19 @@ bool RecoverGuestWildRead(void* native_context, uint64_t fault_address) {
 // (unsigned/unscaled immediate), STP (signed offset, no writeback) and register-offset
 // STR, GPR and SIMD - no post/pre-index writeback, no atomics, no exclusives. Store
 // destinations are sources, so no register state is touched; only the PC advances.
-// True null dereferences (below 64 KiB) keep the honest crash report; a
-// per-instruction budget stops a genuine wild-store loop from becoming a silent
-// hang while spread-out faults are skipped for the whole session.
+// Console Five Pro (v0.0.9proQ4): stores into the NULL GUARD REGION (below 64 KiB) are
+// recovered too. Two field crash logs (10-27) died exactly there: after a ~28 s stall
+// the game's render worker wrote through its nulled object pointer to 0x1 / 0x20 and
+// the session ended with 'the game made a null-pointer write'. The null page can
+// never hold game data and no guest access can ever read it back (they all fault),
+// so skipping such a store loses nothing - the read side already answers it with
+// zeroes. The per-instruction budget still cuts a genuine tight null-write loop
+// with the honest crash report; spread-out faults are skipped for the whole session.
 // `setprop debug.capy.wild_store_recovery 0` restores the old behaviour.
 bool RecoverGuestWildStore(void* native_context, uint64_t fault_address) {
 #if defined(__aarch64__)
 	static Common::DebugFlags::CachedValue enabled("debug.capy.wild_store_recovery", 1);
 	if (enabled.Get() == 0) {
-		return false;
-	}
-	// A store below 64 KiB is a genuine null dereference: report it as before instead of
-	// silently dropping stores into the null page.
-	if (fault_address < 0x10000) {
 		return false;
 	}
 	static std::atomic<uint32_t> recovered {0};
@@ -1805,9 +1805,14 @@ bool RecoverGuestWildStore(void* native_context, uint64_t fault_address) {
 	if (bytes == 0) {
 		return false;
 	}
-	// The whole access must lie outside every guest mapping and reservation: a store
-	// reaching into guest memory is never dropped.
-	if (!Libs::LibKernel::Memory::IsRangeOutsideGuestMemory(fault_address, bytes)) {
+	// Console Five Pro (v0.0.9proQ4): eligibility. A store into the null guard region
+	// (< 64 KiB) is always droppable: nothing can ever alias it, no guest access can
+	// read it back, every access there faults. Above 64 KiB the whole access must lie
+	// outside every guest mapping and reservation: a store reaching into guest memory
+	// is never dropped.
+	const bool null_page = fault_address < 0x10000;
+	if (!null_page &&
+		!Libs::LibKernel::Memory::IsRangeOutsideGuestMemory(fault_address, bytes)) {
 		return false;
 	}
 	// Per-instruction budget: a tight loop at this exact instruction is cut
@@ -1819,8 +1824,9 @@ bool RecoverGuestWildStore(void* native_context, uint64_t fault_address) {
 	context->uc_mcontext.pc = static_cast<uint64_t>(pc + 4);
 	const auto count = recovered.fetch_add(1, std::memory_order_relaxed) + 1;
 	if (count <= 4 || (count & 0xFFu) == 0) {
-		ALOGW("CpuBackend: skipped guest wild store #%u (pc=0x%llx vaddr=0x%llx) - "
+		ALOGW("CpuBackend: skipped guest %s store #%u (pc=0x%llx vaddr=0x%llx) - "
 		      "target aliases no guest memory, continuing",
+		      null_page ? "null-page" : "wild",
 		      count, static_cast<unsigned long long>(pc),
 		      static_cast<unsigned long long>(fault_address));
 	}

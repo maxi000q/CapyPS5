@@ -1209,9 +1209,29 @@ PipelineCache::Pipeline* PipelineCache::GetGraphicsPipeline(
 			// flush is waiting on it), so raise its compile priority.
 			(void)job->requests.fetch_add(1, std::memory_order_relaxed);
 			if (!allow_async) {
-				// A draw that cannot be skipped needs it now: wait for the worker.
-				std::unique_lock lock(m_async_mutex);
-				m_async_available.wait(lock, [&] { return job->done.load(std::memory_order_acquire); });
+				// Console Five Pro (v0.0.9proQ4): this used to be an UNBOUNDED wait on the compile
+				// queue. A storm of first-visit pipelines (new area, material streaming, LUT passes)
+				// serialized the GPU thread behind the workers for whole seconds: the guest's render
+				// worker timed out (~28 s), tore its objects down and died on a null-pointer write -
+				// the freeze-then-crash reports. Wait a few milliseconds instead (the priority bump
+				// above already jumps this pipeline to the front of the queue); on timeout skip this
+				// draw exactly like the async path - the compile lands and the next occurrence
+				// renders for real. `setprop debug.capy.pipeline_wait_ms N` tunes the bound
+				// (0 = never wait, a large N restores the old blocking behaviour).
+				static Common::DebugFlags::CachedValue wait_ms("debug.capy.pipeline_wait_ms", 4);
+				const int64_t ms = std::max<int64_t>(wait_ms.Get(), 0);
+				bool ready = false;
+				if (ms == 0) {
+					ready = job->done.load(std::memory_order_acquire);
+				} else {
+					std::unique_lock lock(m_async_mutex);
+					ready = m_async_available.wait_for(
+						lock, std::chrono::milliseconds(ms),
+						[&] { return job->done.load(std::memory_order_acquire); });
+				}
+				if (!ready) {
+					return nullptr;
+				}
 			} else {
 				return nullptr;
 			}
@@ -1262,7 +1282,12 @@ PipelineCache::Pipeline* PipelineCache::GetGraphicsPipeline(
 #endif
 	// `setprop debug.capy.async_pipelines 0` compiles every pipeline on the GPU thread.
 	static Common::DebugFlags::CachedValue async_pipelines("debug.capy.async_pipelines", 1);
-	if (allow_async && async_pipelines.Get() != 0 && !m_async_workers.empty()) {
+	// Console Five Pro (v0.0.9proQ4): the first miss is queued for EVERY draw, not only
+	// the skippable ones - an inline compile on the GPU thread is a stall by definition,
+	// and `allow_async` now only picks the wait bound above (a few ms) vs. skipping at
+	// once. A draw whose pipeline is not ready is skipped either way; the compile lands
+	// and the next occurrence draws for real.
+	if (async_pipelines.Get() != 0 && !m_async_workers.empty()) {
 		auto job          = std::make_shared<AsyncCompile>();
 		job->rendering    = rendering;
 		job->vertex_input = key.vertex_input;

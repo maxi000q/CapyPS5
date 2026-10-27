@@ -735,8 +735,9 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 		// (mmap_min_addr), so the faulting load is emulated against a zero page
 		// instead - a one-off hiccup (a race, an HLE gap, an unused pointer) keeps
 		// running, while a real null-deref loop still terminates once the recovery
-		// budget is spent. Writes are never faked; debug.capy.null_read_recovery=0
-		// restores the old behaviour.
+		// budget is spent. Writes are never faked - a write into the null guard region
+		// is SKIPPED (v0.0.9proQ4, RecoverGuestWildStore: nothing can ever read it back);
+		// debug.capy.null_read_recovery=0 restores the old read behaviour.
 		if (access == GpuAccess::Read && info->access_violation_vaddr < 0x10000 &&
 		    Cpu::GuestRipFromHostPc(info->exception_address) != 0 &&
 		    Cpu::RecoverGuestNullRead(info->native_context, info->access_violation_vaddr)) {
@@ -759,7 +760,9 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 		// heavy Unity title's render worker wrote via a garbage base register to 0x3a0888c1)
 		// ended the session the same way. When the whole access lies outside every guest
 		// mapping and reservation, nothing the game can read aliases the target - skip the
-		// store and continue. debug.capy.wild_store_recovery=0 restores the old behaviour.
+		// store and continue. v0.0.9proQ4: the same recovery now covers the null guard region
+		// (< 64 KiB) - the two 10-27 field crashes died on writes to 0x1/0x20 there after a
+		// ~28 s stall. debug.capy.wild_store_recovery=0 restores the old behaviour.
 		if (access == GpuAccess::Write &&
 		    Cpu::GuestRipFromHostPc(info->exception_address) != 0 &&
 		    Cpu::RecoverGuestWildStore(info->native_context, info->access_violation_vaddr)) {

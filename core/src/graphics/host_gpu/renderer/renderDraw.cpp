@@ -1667,7 +1667,10 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	}
 	// A draw may be skipped while its pipeline compiles in the background, unless skipping it
 	// would lose something for good: shader buffer writes, or a small target (LUTs and similar
-	// are often rendered once).
+	// are often rendered once). Those draws wait a few milliseconds for the compile
+	// (v0.0.9proQ4; `debug.capy.pipeline_wait_ms`, 0 = never wait) instead of blocking the
+	// GPU thread without bound like before; on timeout the draw is skipped and the next
+	// occurrence draws for real.
 	bool allow_async = !mesh_emulated && !mesh_active;
 	for (const auto& stage: vertex_stages) {
 		allow_async &= !HasShaderBufferWrites(stage.stage);

@@ -150,8 +150,10 @@ public:
 	                                const HW::ShaderRegisters&   sh,
 	                                ShaderComputeInputInfo&      input_info);
 
-	/** Returns nullptr while a pipeline that `allow_async` let compile in the background is not
-	 * ready yet; the caller skips the draw. */
+	/** Returns nullptr while a pipeline is still compiling in the background; the caller skips
+	 * the draw. Every miss is queued to the async workers (v0.0.9proQ4); `allow_async` only
+	 * picks the wait bound: false = wait up to `debug.capy.pipeline_wait_ms` (default 4 ms)
+	 * for draws whose side effects matter, true = return at once. */
 	Pipeline* GetGraphicsPipeline(std::span<const RenderColorInfo>       colors,
 	                              const RenderDepthInfo&                 depth,
 	                              std::span<const ShaderVertexInputInfo> vertex_info,
