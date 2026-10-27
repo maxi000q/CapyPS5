@@ -459,7 +459,7 @@ static bool FrameGenerationEnabled() {
 
 static double FrameGenerationWeight() {
 	static Common::DebugFlags::CachedValue lambda("debug.capy.framegen_lambda", 60);
-	return std::clamp(lambda.Get(), 0, 100) / 100.0;
+	return std::clamp(lambda.Get(), int64_t {0}, int64_t {100}) / 100.0;
 }
 
 static void DeleteVideoOutEvents(const VideoOutEventQueues& queues, VideoOutEventKind kind) {
