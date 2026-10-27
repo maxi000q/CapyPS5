@@ -652,7 +652,7 @@ RenderState RenderExecutor::AcquireRenderTargets(CommandBuffer& buffer, RenderCo
 			             ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT
 			             : vk::ImageLayout::eGeneral;
 		}
-		// Keep the layout the attachment already has when it also serves this draw: Stray
+		// Keep the layout the attachment already has when it also serves this draw: one launch title
 		// alternates stencil-writing and read-only draws on its 4K depth, and switching between
 		// the two read-only layouts ended the pass at every draw.
 		// `setprop debug.capy.keep_ds_layout 0` picks the layout per draw as before.
@@ -669,7 +669,7 @@ RenderState RenderExecutor::AcquireRenderTargets(CommandBuffer& buffer, RenderCo
 		    !(DepthReadableAspects(layout) & ~DepthReadableAspects(current_layout) & sampled_aspects)) {
 			layout = current_layout;
 		}
-		// When neither layout serves both draws (God of War Sons of Sparta and Stray alternate a
+		// When neither layout serves both draws (one heavy first-party action title and one launch title alternate a
 		// draw that samples the stencil with one that writes it), switching ended the pass at every
 		// draw. The feedback-loop layout allows both; draws that sample the attachment then enable
 		// the feedback loop for those aspects. `setprop debug.capy.ds_feedback_merge 0` disables it.
@@ -1973,8 +1973,8 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		probe_clear_depth();
 	}
 	// Adreno: a pass that loads depth and starts with a depth-writing ALWAYS draw lost that draw's
-	// depth writes unless something cleared depth in the pass first (Ratchet & Clank: Size
-	// Matters' per-frame depth clear draw kept the previous frame's depth, so the scene failed its
+	// depth writes unless something cleared depth in the pass first (one cross-generation
+	// platformer's per-frame depth clear draw kept the previous frame's depth, so the scene failed its
 	// GREATER test and showed the fog colour with trails). Clearing one pixel, which the draw
 	// then overwrites, is enough. `debug.capy.depth_kick 0` disables it.
 	static Common::DebugFlags::CachedValue depth_kick("debug.capy.depth_kick", 1);
@@ -2017,9 +2017,9 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		shader_write_stages |= vk::PipelineStageFlagBits::eFragmentShader;
 	}
 	// Draws whose shaders write memory need a barrier before later work reads it. Ending the pass
-	// for it split Stray's 4K G-buffer pass (7 targets) at every draw; dependent draws inside a
+	// for it split one launch title's 4K G-buffer pass (7 targets) at every draw; dependent draws inside a
 	// pass are ordered by the game's own wait events, so the barrier could wait for the pass end.
-	// Deferring it blindly (1) made Stray's layers flicker: some draws read what earlier draws of
+	// Deferring it blindly (1) made one launch title's layers flicker: some draws read what earlier draws of
 	// the pass wrote. 2 (default) defers it and records the written ranges, so a later draw of the
 	// pass that reads one ends the pass first. 0 ends the pass after every such draw.
 	static Common::DebugFlags::CachedValue defer_write_barrier("debug.capy.defer_write_barrier", 2);

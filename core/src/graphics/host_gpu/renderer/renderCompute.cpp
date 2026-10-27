@@ -277,7 +277,7 @@ bool RenderExecutor::TryConsumeComputeImageClear(const ShaderComputeInputInfo& i
 		// `setprop debug.capy.cpu_fill 0` runs these fills on the GPU again.
 		static Common::DebugFlags::CachedValue cpu_fill("debug.capy.cpu_fill", 1);
 		// UE transient memory aliases the metadata keys with large dead images, which kept these
-		// fills on the GPU and made every later metadata read wait for it (Guri, EDF). The fill
+		// fills on the GPU and made every later metadata read wait for it (the tech demo, one bug-hunting shooter). The fill
 		// still runs in command order, so an image only aliasing the range loses nothing it
 		// still needs. `setprop debug.capy.cpu_fill_alias 0` keeps such fills on the GPU.
 		static Common::DebugFlags::CachedValue cpu_fill_alias("debug.capy.cpu_fill_alias", 1);

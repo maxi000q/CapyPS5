@@ -240,7 +240,7 @@ bool RenderContext::HandleFaultDeferred(PageFaultAccess access, uint64_t fault_v
 	}
 	if (access == PageFaultAccess::Write) {
 		// Games fill dynamic buffers page after page, and each 4 KiB page faulted on its own
-		// (signal, mprotect, tracker lock contended by Stray's task threads). Release a whole
+		// (signal, mprotect, tracker lock contended by one launch title's task threads). Release a whole
 		// window around the fault when nothing in it is GPU-written (that would need a download).
 		// `setprop debug.capy.write_fault_kb N` sets the window (4 = one page as before).
 		static Common::DebugFlags::CachedValue write_fault_kb("debug.capy.write_fault_kb", 64);
@@ -300,7 +300,7 @@ void RenderContext::UnmapMemory(uint64_t vaddr, uint64_t size, bool discard) {
 		// access a range with no cached data, so they must finish before it is unmapped.
 		// Only GPU-written data must be read back (finishing the GPU) before the range goes away;
 		// images are destroyed after the GPU is done with them. Finishing on every registered
-		// range made Monster Boy, which unmaps memory the GPU used every frame, wait for the
+		// range made one 2D platformer, which unmaps memory the GPU used every frame, wait for the
 		// whole GPU each frame (14 FPS). `debug.capy.unmap_finish 1` restores that.
 		static Common::DebugFlags::CachedValue unmap_finish("debug.capy.unmap_finish", 0);
 		const bool needs_gpu =

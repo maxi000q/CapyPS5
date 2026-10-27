@@ -10,7 +10,7 @@ because every anchor keeps its own newlines):
   android/.../values/strings.xml    - new strings + whats-new items + aapt2 fix
   android/.../values-es/strings.xml - same, Spanish
 
-The v0.0.9pro crash log: "Key .../imported/UP9000-....pkg was already used" -
+The v0.0.9pro crash log: "Key .../imported/TITLEID-....pkg was already used" -
 importing the same executable twice (a retry after a game crash) added two grid
 entries with the same key and Compose aborted the app. Fixes:
   * a second pick while an import is running is ignored

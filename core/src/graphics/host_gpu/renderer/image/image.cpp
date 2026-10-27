@@ -243,7 +243,7 @@ Image::Barriers Image::GetBarriers(vk::ImageLayout                      destinat
 
 	// Inside a render pass, an attachment that draws also sample (read-only depth, feedback
 	// loops) alternates between attachment access and attachment plus shader read without a
-	// layout change. A barrier there only ends the pass (Stray split its 4K passes per draw), so
+	// layout change. A barrier there only ends the pass (one launch title split its 4K passes per draw), so
 	// the accesses are merged and the barrier is left to the next real transition.
 	// `setprop debug.capy.merge_access 0` emits the barriers as before.
 	static Common::DebugFlags::CachedValue merge_access("debug.capy.merge_access", 1);

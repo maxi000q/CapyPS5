@@ -174,7 +174,7 @@ uint32_t EmitClassMaskF16(EmitterState& state, uint32_t bits, uint32_t mask) {
 uint32_t EmitMinMaxF32Value(EmitterState& state, uint32_t lhs, uint32_t rhs, bool max_value) {
 	// NMin/NMax return the non-NaN operand like RDNA, in one native instruction; only the order
 	// of a +0/-0 pair is left to the driver. The exact emulation below costs four selects per
-	// operation and dominated heavy compute shaders (Guri: ~10k selects, 2 FPS).
+	// operation and dominated heavy compute shaders (the tech demo: ~10k selects, 2 FPS).
 	// `setprop debug.capy.exact_minmax 1` restores it.
 	static Common::DebugFlags::CachedValue exact_minmax("debug.capy.exact_minmax", 0);
 	if (exact_minmax.Get() == 0) {

@@ -62,7 +62,7 @@
     <string name="stream_mb_192">192 MB</string>
     <string name="stream_mb_256">256 MB</string>
     <string name="option_read_ahead">Ventana de lectura anticipada</string>
-    <string name="option_read_ahead_desc">KB descargados por espera cuando un juego lee búferes escritos por la GPU página a página (hilo de render de Stray). Mayor puede acelerar lecturas secuenciales; demasiado grande desperdicia ancho de banda en acceso aleatorio</string>
+    <string name="option_read_ahead_desc">KB descargados por espera cuando un juego lee búferes escritos por la GPU página a página (hilo de render de un título de lanzamiento). Mayor puede acelerar lecturas secuenciales; demasiado grande desperdicia ancho de banda en acceso aleatorio</string>
     <string name="read_ahead_64">64 KB</string>
     <string name="read_ahead_128">128 KB</string>
     <string name="read_ahead_256">256 KB (predeterminado)</string>

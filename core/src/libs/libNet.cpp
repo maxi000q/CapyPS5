@@ -2979,7 +2979,7 @@ namespace LibNpUtility {
 
 LIB_VERSION("NpUtility", 1, "NpUtility", 1, 1);
 
-// Bandwidth test (Sackboy: A Big Adventure runs one while loading and retried it forever when
+// Bandwidth test (one platformer launch title runs one while loading and retried it forever when
 // the unresolved stubs never reported a finished test). It finishes at once with a fixed result.
 struct NpBandwidthTestResult {
 	double  upload_bps;

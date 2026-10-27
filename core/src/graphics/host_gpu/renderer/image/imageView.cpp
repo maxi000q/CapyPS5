@@ -19,7 +19,7 @@ namespace {
 /**
  * Guest packed 16-bit formats put channel X (red) in the lowest bits; the Vulkan formats they map
  * to order channels from the top. Re-route the swizzle so samples see the guest's channels:
- * 5_5_5_1 as A1R5G5B5 swaps red and blue (Ratchet & Clank: Size Matters' sand looked blue), and
+ * 5_5_5_1 as A1R5G5B5 swaps red and blue (one cross-generation platformer's sand looked blue), and
  * 4_4_4_4 as R4G4B4A4 reverses all four.
  */
 [[nodiscard]] vk::ComponentMapping PackedChannelOrder(vk::Format format, vk::ComponentMapping mapping) {

@@ -1273,7 +1273,7 @@ static bool ReplaceFixedRangeWithReserved(uint64_t start, uint64_t size);
 
 // Reservations clipped below what the game asked for (Unreal reserves 512 GiB): base and the
 // requested length. A fixed mapping into a free part of that logical range reserves it then
-// (Guri maps 128 GiB above its base, past the 64 GiB actually reserved).
+// (the built-in tech demo maps 128 GiB above its base, past the 64 GiB actually reserved).
 static std::mutex                                 g_clipped_reservations_mutex;
 static std::vector<std::pair<uint64_t, uint64_t>> g_clipped_reservations;
 
@@ -3427,7 +3427,7 @@ int KYTY_SYSV_ABI KernelCheckedReleaseDirectMemory(int64_t start, size_t len) {
 }
 
 // The ABI entry points and batch operations hold g_memory_operation_mutex.
-// Logs which check of MapDirectMemoryUnfolded ran out (Guri's BatchMap failed with ENOMEM).
+// Logs which check of MapDirectMemoryUnfolded ran out (the tech demo's batch map failed with ENOMEM).
 static int MapDirectNoMemory(int line) {
 #if defined(__ANDROID__)
 	static std::atomic<uint32_t> logged {0};
@@ -3600,8 +3600,8 @@ static int MapDirectMemoryUnfolded(void** addr, size_t len, int prot, int flags,
 				// Console Five Pro fix (v0.0.6proplus): a PS5-style fixed target such as
 				// 0xe3ffffc000 folds to an address above HOST_USER_MAX (here 0x63ffffc000),
 				// a band no startup reservation covers. Games treat MAP_FIXED as guaranteed
-				// and write through the pointer whatever mmap returns, which terminated My
-				// First Gran Turismo with status 321. Adopt exactly the window the folded
+				// and write through the pointer whatever mmap returns, which terminated one
+				// first-party racing demo with status 321. Adopt exactly the window the folded
 				// address names: the JIT folds guest data accesses the same way, so the
 				// backing view placed here is what the game touches.
 				UnmapGpuRange(in_addr, len, true);

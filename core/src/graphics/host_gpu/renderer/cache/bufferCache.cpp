@@ -405,7 +405,7 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 		Common::DebugFlags::FrameTrace("  cpu fault download 0x%llx size=%llu write=%d buffer=0x%llx+%llu",
 		    static_cast<unsigned long long>(vaddr), static_cast<unsigned long long>(size), is_write ? 1 : 0,
 		    static_cast<unsigned long long>(buffer.CpuAddress()), static_cast<unsigned long long>(buffer.Size()));
-		// Stray's render thread reads GPU-written buffers page after page, and each page fault
+		// one launch title's render thread reads GPU-written buffers page after page, and each page fault
 		// waited for the GPU on its own. Download the GPU-written pages that follow in the same
 		// buffer too, so one wait serves the whole sequential read.
 		// `setprop debug.capy.read_ahead_kb N` sets the window (0 downloads the faulting pages only).

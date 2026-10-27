@@ -26,7 +26,7 @@ uint32_t              EmitConvertU8U32(EmitterState& state, uint32_t arg0);
 uint32_t              EmitConvertF16F32(EmitterState& state, uint32_t arg0);
 // A 16-bit lane read is BitFieldUExtract(x, 0|16, 16) -> ConvertU16U32 -> BitCastF16U16.
 // Unpacking the whole register and taking the lane's component gives both lanes of a register
-// one shared UnpackHalf2x16, which packed F16 code (Guri's sort: ~6500 unpacks) leans on.
+// one shared UnpackHalf2x16, which packed F16 code (the tech demo's sort: ~6500 unpacks) leans on.
 inline uint32_t EmitConvertF32F16(ValueEmitContext& ctx, const IR::Inst& inst) {
 	const auto producer = [](const IR::Value& value, IR::ValueOpcode opcode) -> const IR::Inst* {
 		if (value.IsImmediate()) {
