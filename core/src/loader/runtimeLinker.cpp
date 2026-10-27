@@ -716,6 +716,13 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 		if (Libs::LibKernel::Memory::HandleGpuFault(access, info->access_violation_vaddr)) {
 			return true;
 		}
+		// Console Five Pro (v0.0.10pro phase 2): a read fault inside a guarded guest copy
+		// (ReadGuestMemory's cache hit or protected fallback - e.g. a GPU-driven draw batch
+		// whose argument buffer was freed) unwinds to the guard instead of ending the session.
+		if (access == GpuAccess::Read &&
+		    Libs::LibKernel::Memory::RecoverGuardedGuestRead(info->access_violation_vaddr)) {
+			return true;
+		}
 		// Console Five Pro fix (v0.0.6proplus): a data fault from guest code on an unmapped
 		// window above the guest reservation (see Memory::AdoptFaultingGuestWindow) used to
 		// end the session; recover it instead.

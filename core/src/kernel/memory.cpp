@@ -52,6 +52,7 @@
 #elif KYTY_PLATFORM == KYTY_PLATFORM_LINUX
 #include <cerrno>
 #include <fcntl.h>
+#include <setjmp.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
@@ -264,6 +265,72 @@ struct GuestReadCache {
 };
 thread_local GuestReadCache t_guest_read_cache;
 } // namespace
+
+#if KYTY_PLATFORM == KYTY_PLATFORM_LINUX
+// Console Five Pro (v0.0.10pro phase 2): a GPU-driven draw batch can point at a guest address
+// whose host mapping disappeared while this thread's read cache still remembers the page, or at
+// a range the bookkeeping still lists as valid - the raw memcpy then faulted inside libc and
+// ended the session ("Unhandled host exception ... in DrawIndirectMulti": a UE title's wild
+// indirect-args pointer read at a freed GPU address). The two raw copies of ReadGuestMemory now
+// run behind a sigsetjmp guard: a read fault inside the guarded range unwinds to
+// GuardedGuestCopy and the read fails cleanly (the draw batch is skipped), exactly what
+// process_vm_readv already does for unmapped pages. Faults the GPU tracker can fix still
+// recover first: KytyExceptionHandler asks HandleGpuFault before RecoverGuardedGuestRead, so a
+// protected page downloads and the memcpy resumes - only truly unreadable memory unwinds here.
+// `setprop debug.capy.guarded_reads 0` restores the raw copies.
+struct GuestReadGuard {
+	sigjmp_buf jump {};
+	uint64_t   addr   = 0;
+	uint64_t   size   = 0;
+	bool       active = false;
+};
+static thread_local GuestReadGuard t_guest_read_guard;
+
+static bool GuardedGuestCopy(void* dst, const void* src, uint64_t size) {
+	static Common::DebugFlags::CachedValue guarded("debug.capy.guarded_reads", 1);
+	if (size == 0) {
+		return true;
+	}
+	if (guarded.Get() == 0) {
+		std::memcpy(dst, src, size);
+		return true;
+	}
+	auto& guard  = t_guest_read_guard;
+	guard.addr   = reinterpret_cast<uint64_t>(src);
+	guard.size   = size;
+	guard.active = true;
+	std::atomic_signal_fence(std::memory_order_seq_cst);
+	if (sigsetjmp(guard.jump, 1) == 0) {
+		std::memcpy(dst, src, size);
+		guard.active = false;
+		std::atomic_signal_fence(std::memory_order_seq_cst);
+		return true;
+	}
+	guard.active = false;
+	return false;
+}
+
+bool RecoverGuardedGuestRead(uint64_t fault_addr) noexcept {
+	auto& guard = t_guest_read_guard;
+	if (!guard.active || fault_addr < guard.addr || fault_addr - guard.addr >= guard.size) {
+		return false;
+	}
+	// Never trust that page again from this thread: drop its cache slots so the next read takes
+	// the process_vm_readv path, which fails cleanly instead of faulting again.
+	auto&      cache      = t_guest_read_cache;
+	constexpr uint64_t CachePage = 4096;
+	const auto first_page = guard.addr / CachePage;
+	const auto last_page  = (guard.addr + guard.size - 1) / CachePage;
+	for (auto page = first_page; page <= last_page; page++) {
+		cache.pages[page % GuestReadCache::Slots] = 0;
+	}
+	siglongjmp(guard.jump, 1);
+}
+#else
+bool RecoverGuardedGuestRead(uint64_t) noexcept {
+	return false;
+}
+#endif
 
 #include "memoryAddressSpace.inc"
 
@@ -1168,7 +1235,16 @@ bool ReadGuestMemory(uint64_t vaddr, void* data, uint64_t size) {
 			hit = cache.pages[page % GuestReadCache::Slots] == page + 1;
 		}
 		if (hit) {
-			std::memcpy(data, reinterpret_cast<const void*>(vaddr), size);
+			if (!GuardedGuestCopy(data, reinterpret_cast<const void*>(vaddr), size)) {
+				// The cached page stopped being readable (a freed GPU buffer behind the
+				// bookkeeping): report the read as failed instead of crashing.
+				Common::DebugFlags::NoteOnce(
+				    "CapyPS5-Mem", vaddr >> 12u,
+				    "guarded guest read faulted at 0x%llx size=%llu: unreadable cached page",
+				    static_cast<unsigned long long>(vaddr),
+				    static_cast<unsigned long long>(size));
+				return false;
+			}
 			return true;
 		}
 	}
@@ -1201,7 +1277,16 @@ bool ReadGuestMemory(uint64_t vaddr, void* data, uint64_t size) {
 		                             "protected guest read 0x%llx size=%llu: reading through the fault handler",
 		                             static_cast<unsigned long long>(vaddr),
 		                             static_cast<unsigned long long>(size));
-		std::memcpy(data, reinterpret_cast<const void*>(vaddr), size);
+		if (!GuardedGuestCopy(data, reinterpret_cast<const void*>(vaddr), size)) {
+			// The range is registered but its host mapping is gone (stale bookkeeping behind a
+			// freed GPU buffer): the guarded copy unwound instead of crashing.
+			Common::DebugFlags::NoteOnce(
+			    "CapyPS5-Mem", (vaddr >> 12u) ^ 0x56ull,
+			    "guarded guest read faulted at 0x%llx size=%llu: registered range unreadable",
+			    static_cast<unsigned long long>(vaddr),
+			    static_cast<unsigned long long>(size));
+			return false;
+		}
 		return true;
 	}
 	// Sparse regions without a host mapping read as zero.

@@ -122,6 +122,12 @@ bool                   TryReadBufferBacking(uint64_t vaddr, void* data, uint64_t
 bool                   TryReadSparseBacking(uint64_t vaddr, void* data, uint64_t size);
 // Reads guest memory as the guest sees it, failing (not faulting) on unmapped pages.
 bool                   ReadGuestMemory(uint64_t vaddr, void* data, uint64_t size);
+// Console Five Pro (v0.0.10pro phase 2): consumes a read fault that landed inside the guarded
+// copy of ReadGuestMemory (stale cached page / registered-but-unmapped range behind a
+// GPU-driven draw's arguments) by unwinding to it - the read then fails cleanly instead of
+// ending the session. Called from KytyExceptionHandler on the faulting thread; never returns
+// on success.
+bool                   RecoverGuardedGuestRead(uint64_t fault_vaddr) noexcept;
 // True if every page of the range is mapped and readable in this process.
 bool                   IsHostRangeMapped(uint64_t vaddr, uint64_t size);
 [[nodiscard]] uint64_t ClampRangeSize(uint64_t vaddr, uint64_t size);

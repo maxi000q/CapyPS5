@@ -1503,7 +1503,21 @@ void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_coun
 
 	uint32_t draw_count = max_count_or_count;
 	if (count_addr != nullptr) {
-		draw_count = *count_addr;
+		// Console Five Pro (v0.0.10pro phase 2): the count lives in guest memory that may have
+		// been freed or unmapped (the phase-2 crash log had a wild count/args pointer). Reading
+		// it through ReadGuestMemory fails cleanly - the batch is skipped, like a GPU that reads
+		// zero from an unmapped address - instead of faulting the host.
+		uint32_t indirect_count = 0;
+		if (!Libs::LibKernel::Memory::ReadGuestMemory(reinterpret_cast<uint64_t>(count_addr),
+		                                          &indirect_count, sizeof(indirect_count))) {
+			Common::DebugFlags::NoteOnce(
+			    "CapyPS5-Indirect", 0x434e5431ull,
+			    "DrawIndirectMulti: count at 0x%llx unreadable: skipping batch of %u draws",
+			    static_cast<unsigned long long>(reinterpret_cast<uint64_t>(count_addr)),
+			    max_count_or_count);
+			return;
+		}
+		draw_count = indirect_count;
 		if (draw_count > max_count_or_count) {
 			draw_count = max_count_or_count;
 		}
