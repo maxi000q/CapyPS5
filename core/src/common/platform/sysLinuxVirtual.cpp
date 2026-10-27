@@ -10,6 +10,7 @@
 
 #include "common/assert.h"
 #include "common/debugFlags.h"
+#include "common/hugePages.h"
 #include "common/virtualMemory.h"
 
 #include <atomic>
@@ -90,6 +91,12 @@ static std::atomic<uintptr_t> g_low_arena_next {LOW_ARENA_LIMIT};
 
 // Caller holds g_virtual_mutex.
 static void record_alloc(uintptr_t addr, size_t size) {
+	// Console Five Pro (v0.0.9proQ4 round 2): every new anonymous mapping passes
+	// here; the huge-page engine (common/hugePages.h) applies the mode's advice
+	// once per big reservation and feeds the background collapse sweeper. It only
+	// takes its own mutex (never this one), so the lock order is safe.
+	Common::HugePages::OnReservationCreated(static_cast<uint64_t>(addr),
+	                                         static_cast<uint64_t>(size));
 	auto next = g_allocs->upper_bound(addr);
 	if (next != g_allocs->begin()) {
 		auto       it         = std::prev(next);
@@ -615,25 +622,40 @@ bool Protect(uint64_t address, uint64_t size, Mode mode) {
 		return false;
 	}
 #if defined(__linux__)
-	// Console Five Pro (v0.0.10pro phase 1): transparent huge pages for guest memory.
-	// The multi-gigabyte guest heap is committed through this function; advising
-	// MADV_HUGEPAGE lets the kernel back it with 2 MiB pages, which means ~500x fewer
-	// soft page faults while the game touches its memory and far fewer TLB misses for
-	// every guest dereference the FEX translation makes. A no-op on kernels with THP
-	// disabled; never changes guest-visible contents. `debug.capy.thp 0` reverts.
-	// v0.0.9proQ3: huge pages are a win on desktop, but on Android a 2 MiB
-	// huge-page fault under memory pressure can stall for milliseconds in
-	// synchronous direct compaction - exactly the "many frame drops" a heavy
-	// title produces on an 8 GB phone (the guest heap alone takes several GB).
-	// Android defaults to 4 KiB pages again; `setprop debug.capy.thp 1` re-enables.
+	// Console Five Pro (v0.0.9proQ4 round 2) huge-page engine v3 - see
+	// common/hugePages.h. Q2's MADV_HUGEPAGE advice was the biggest constant win
+	// this emulator ever got (roughly 500x fewer soft faults, far fewer TLB misses
+	// on every guest dereference the FEX translation makes). Q3 turned it off on
+	// Android because a fault-path huge-page allocation can stall in synchronous
+	// direct compaction - and paid the whole win back as a constant frame-rate
+	// loss on every device. Round 2 keeps both sides:
+	//   debug.capy.thp = 2 (desktop default): the Q2 behaviour unchanged -
+	//     MADV_HUGEPAGE advised on every commit >= 2 MiB, fault-path huge
+	//     allocation.
+	//   debug.capy.thp = 1 (Android default): first-touch faults stay on 4 KiB
+	//     pages, so no direct-compaction stall can ever hit a game thread; a
+	//     low-priority background sweeper (common/platform/hugePages.cpp)
+	//     collapses every fully resident 2 MiB chunk with MADV_COLLAPSE, off the
+	//     gameplay threads. Kernels without MADV_COLLAPSE (pre-6.1) fall back to
+	//     the Q2 advice automatically.
+	//   debug.capy.thp = 0: off entirely (the Q3 behaviour).
+	static Common::DebugFlags::CachedValue thp("debug.capy.thp",
 #if defined(__ANDROID__)
-	static Common::DebugFlags::CachedValue thp("debug.capy.thp", 0);
+	                                           1
 #else
-	static Common::DebugFlags::CachedValue thp("debug.capy.thp", 1);
+	                                           2
 #endif
-	constexpr uint64_t HugePageBytes = 2ull * 1024 * 1024;
-	if (mode != Mode::NoAccess && bytes >= HugePageBytes && thp.Get() != 0) {
-		(void)::madvise(reinterpret_cast<void*>(page_start << 12u), bytes, MADV_HUGEPAGE);
+	);
+	constexpr uint64_t HugePageBytes     = 2ull * 1024 * 1024;
+	constexpr uint64_t CommitNotifyBytes = 64ull * 1024;
+	const auto         thp_mode         = static_cast<int32_t>(thp.Get());
+	if (mode != Mode::NoAccess) {
+		if (thp_mode == 2 && bytes >= HugePageBytes) {
+			(void)::madvise(reinterpret_cast<void*>(page_start << 12u), bytes, MADV_HUGEPAGE);
+		} else if (thp_mode == 1 && bytes >= CommitNotifyBytes) {
+			// Feed the merged-interval table of the background collapse sweeper.
+			Common::HugePages::OnCommit(static_cast<uint64_t>(page_start << 12u), bytes);
+		}
 	}
 #endif
 	return true;
