@@ -122,6 +122,17 @@
     <string name="mali_profile_auto">Auto</string>
     <string name="mali_profile_on">On</string>
     <string name="mali_profile_off">Off</string>
+    <string name="option_adreno_profile">Adreno GPU optimization</string>
+    <string name="option_adreno_profile_desc">Snapdragon-tuned defaults (same graphics): a 128 MB streaming buffer, one more shader-compile worker and an extra swapchain image for high-refresh presenting. Auto applies it only on Adreno GPUs; applies from the next game start.</string>
+    <string name="adreno_profile_auto">Auto</string>
+    <string name="adreno_profile_on">On</string>
+    <string name="adreno_profile_off">Off</string>
+    <string name="option_refresh_rate">Refresh rate</string>
+    <string name="option_refresh_rate_desc">Display mode and emulated vblank for games paced by vblank (same graphics): Auto follows the display’s highest rate, so 90/120 Hz screens stop capping games at 60 FPS; 60 keeps the previous behaviour. Applies from the next game start.</string>
+    <string name="refresh_auto">Auto (display)</string>
+    <string name="refresh_60">60 Hz</string>
+    <string name="refresh_90">90 Hz</string>
+    <string name="refresh_120">120 Hz</string>
     <string name="reset_game_settings">Reset to global settings</string>
     <string name="reset_game_settings_desc">Clear this game\'s overrides (options and GPU driver).</string>
     <string name="reset_game_settings_done">Game overrides cleared.</string>

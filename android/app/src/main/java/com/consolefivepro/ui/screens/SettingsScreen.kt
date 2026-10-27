@@ -238,6 +238,14 @@ fun SettingsScreen(
                     0L -> context.getString(R.string.mali_profile_off)
                     else -> context.getString(R.string.mali_profile_auto)
                 }) + " \u00B7 " + GpuInfo.label
+                // v0.0.10pro phase 2: Snapdragon-tuned defaults, same shape as the Mali row.
+                val adrenoValues = listOf(2L, 1L, 0L)
+                val adrenoCurrent = settings.coreOption(CoreOption.AdrenoProfile)
+                val adrenoLabel = (when (adrenoCurrent) {
+                    1L -> context.getString(R.string.adreno_profile_on)
+                    0L -> context.getString(R.string.adreno_profile_off)
+                    else -> context.getString(R.string.adreno_profile_auto)
+                }) + " \u00B7 " + GpuInfo.label
                 listOf(
                     SettingItem(
                         context.getString(R.string.option_mali_profile),
@@ -245,6 +253,13 @@ fun SettingsScreen(
                         maliLabel,
                         onStep = { settings.updateCoreOption(CoreOption.MaliProfile, cycle(maliValues, maliCurrent, it)) },
                     ),
+                    SettingItem(
+                        context.getString(R.string.option_adreno_profile),
+                        context.getString(R.string.option_adreno_profile_desc),
+                        adrenoLabel,
+                        onStep = { settings.updateCoreOption(CoreOption.AdrenoProfile, cycle(adrenoValues, adrenoCurrent, it)) },
+                    ),
+                    coreItem(CoreOption.RefreshRate),
                     coreItem(CoreOption.AsyncShaders),
                     coreItem(CoreOption.StreamingBuffer),
                     coreItem(CoreOption.ReadAhead),

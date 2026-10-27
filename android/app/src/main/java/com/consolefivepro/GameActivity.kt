@@ -7,12 +7,54 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Process
+import kotlin.math.roundToInt
 import androidx.activity.compose.setContent
 import com.consolefivepro.model.GameItem
 import org.libsdl.app.SDL
 import com.consolefivepro.ui.screens.EmulationScreen
 import com.consolefivepro.ui.theme.CapyPS5Theme
 import java.io.File
+
+/**
+ * v0.0.10pro phase 2: display refresh selection shared by the activity and the game surface.
+ * The window used to stay at Android's default 60 Hz and the core's emulated vblank at a fixed
+ * 60 Hz, so games paced on vblank never exceeded 60 FPS even on 90/120 Hz displays. The chosen
+ * rate (per-game RefreshRate option, Auto = the display's highest) now drives both the window
+ * mode and the emulated vblank; games that do not pace on vblank are unaffected.
+ */
+object RefreshPolicy {
+    /** Highest refresh the default display supports, rounded, capped at 120 (0 when unknown). */
+    @Suppress("DEPRECATION")
+    fun displayMaxHz(context: Context): Int = runCatching {
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+        val display = windowManager?.defaultDisplay ?: return 0
+        display.supportedModes.maxOfOrNull { it.refreshRate }?.roundToInt()?.coerceAtMost(120) ?: 0
+    }.getOrDefault(0)
+
+    /**
+     * The applied refresh: the option's cap (0 = follow the display), never above what the
+     * display supports and never below 60.
+     */
+    fun effectiveHz(context: Context, settings: Settings, titleId: String): Int {
+        val max = displayMaxHz(context).coerceAtLeast(60)
+        val cap = settings.effectiveOption(titleId, CoreOption.RefreshRate).toInt()
+        return if (cap <= 0) max else cap.coerceAtMost(max)
+    }
+
+    /** Asks the window to run in the display mode with (at least) that refresh rate. */
+    @Suppress("DEPRECATION")
+    fun applyToWindow(context: Context, hz: Int): Boolean = runCatching {
+        if (hz <= 0) return false
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+        val display = windowManager?.defaultDisplay ?: return false
+        val activity = context as? android.app.Activity ?: return false
+        val best = display.supportedModes
+            .filter { it.refreshRate >= hz - 0.5f }
+            .maxByOrNull { it.refreshRate } ?: return false
+        activity.window.attributes = activity.window.attributes.also { it.preferredDisplayModeId = best.modeId }
+        true
+    }.getOrDefault(false)
+}
 
 /**
  * Runs one game in its own process (":game"). The native core cannot be torn down and started
@@ -80,6 +122,14 @@ class GameActivity : CapyActivity() {
             driverDir = driver?.dir?.absolutePath.orEmpty(),
             library = driver?.library.orEmpty(),
         )
+        // v0.0.10pro phase 2: run the display at the chosen rate and pass it as the emulated
+        // vblank - the core's present thread flips at most once per vblank, which was the
+        // invisible 60 FPS ceiling. Must be set before nativeStartGame.
+        val refreshHz = RefreshPolicy.effectiveHz(this, settings, game.titleId)
+        if (RefreshPolicy.applyToWindow(this, refreshHz)) {
+            android.util.Log.i("CapyPS5-Refresh", "window display mode set for ${refreshHz} Hz")
+        }
+        NativeBridge.nativeSetOption("debug.capy.vblank_hz", refreshHz.toLong())
         val versionText = Updater.versionText(this)
         setContent {
             CapyPS5Theme {

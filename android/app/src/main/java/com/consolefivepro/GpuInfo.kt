@@ -25,6 +25,9 @@ object GpuInfo {
     /** Mali GPUs (Mali-G52, G76, G710, ...) get the v0.0.9pro Mali performance profile. */
     val isMali: Boolean by lazy { renderer.contains("mali", ignoreCase = true) }
 
+    /** Adreno GPUs (Snapdragon) get the v0.0.10pro Adreno performance profile. */
+    val isAdreno: Boolean by lazy { renderer.contains("adreno", ignoreCase = true) }
+
     /** Short label for the settings rows; falls back when the probe found nothing. */
     val label: String get() = renderer.ifBlank { "GPU" }
 

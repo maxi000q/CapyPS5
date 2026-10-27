@@ -158,6 +158,29 @@ enum class CoreOption(
         ),
         2L,
     ),
+    AdrenoProfile(
+        R.string.option_adreno_profile,
+        R.string.option_adreno_profile_desc,
+        "debug.capy.adreno_profile",
+        listOf(
+            2L to R.string.adreno_profile_auto,
+            1L to R.string.adreno_profile_on,
+            0L to R.string.adreno_profile_off,
+        ),
+        2L,
+    ),
+    RefreshRate(
+        R.string.option_refresh_rate,
+        R.string.option_refresh_rate_desc,
+        "debug.capy.refresh_hz",
+        listOf(
+            0L to R.string.refresh_auto,
+            60L to R.string.refresh_60,
+            90L to R.string.refresh_90,
+            120L to R.string.refresh_120,
+        ),
+        0L,
+    ),
     ;
 
     fun title(context: Context) = context.getString(titleRes)
@@ -248,12 +271,26 @@ class Settings(context: Context) {
         else -> GpuInfo.isMali
     }
 
-    /** Global value of a core option. */
-    fun coreOption(option: CoreOption): Long = prefs.getLong("opt_${option.name}", maliAwareDefault(option))
+    /**
+     * v0.0.10pro phase 2: the Adreno performance profile is active - forced on, or Auto on a
+     * Snapdragon device (the core makes the same check from the Vulkan device name).
+     */
+    fun adrenoProfileActive(): Boolean = when (prefs.getLong("opt_AdrenoProfile", 2L)) {
+        1L -> true
+        0L -> false
+        else -> GpuInfo.isAdreno
+    }
 
-    /** v0.0.9pro: with the Mali profile active the streaming buffer defaults to 128 MB. */
-    private fun maliAwareDefault(option: CoreOption): Long =
-        if (option == CoreOption.StreamingBuffer && maliProfileActive()) 128L else option.default
+    /** Global value of a core option. */
+    fun coreOption(option: CoreOption): Long = prefs.getLong("opt_${option.name}", gpuAwareDefault(option))
+
+    /** v0.0.9pro / v0.0.10pro: with either GPU profile active the streaming buffer defaults to 128 MB. */
+    private fun gpuAwareDefault(option: CoreOption): Long =
+        if (option == CoreOption.StreamingBuffer && (maliProfileActive() || adrenoProfileActive())) {
+            128L
+        } else {
+            option.default
+        }
 
     fun updateCoreOption(option: CoreOption, value: Long) {
         prefs.edit().putLong("opt_${option.name}", value).apply()

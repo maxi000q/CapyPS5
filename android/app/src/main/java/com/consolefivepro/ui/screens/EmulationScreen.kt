@@ -62,6 +62,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import com.consolefivepro.CoreOption
 import com.consolefivepro.GameSaves
+import com.consolefivepro.RefreshPolicy
 import com.consolefivepro.InputRouter
 import com.consolefivepro.NativeBridge
 import com.consolefivepro.OverlayMode
@@ -226,6 +227,16 @@ fun EmulationScreen(
                         private var started = false
 
                         override fun surfaceCreated(holder: SurfaceHolder) {
+                            // v0.0.10pro phase 2: the surface adds its own vote for the chosen
+                            // display rate (some vendors listen to the surface, not the window).
+                            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                                runCatching {
+                                    holder.surface.setFrameRate(
+                                        RefreshPolicy.effectiveHz(context, settings, game.titleId).toFloat(),
+                                        android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT,
+                                    )
+                                }
+                            }
                             NativeBridge.nativeSetSurface(holder.surface)
                             if (started) return
                             started = true

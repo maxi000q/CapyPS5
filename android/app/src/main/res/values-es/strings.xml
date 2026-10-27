@@ -120,6 +120,17 @@
     <string name="mali_profile_auto">Auto</string>
     <string name="mali_profile_on">Activado</string>
     <string name="mali_profile_off">Desactivado</string>
+    <string name="option_adreno_profile">Optimización GPU Adreno</string>
+    <string name="option_adreno_profile_desc">Valores predeterminados ajustados a los Snapdragon (misma imagen): un búfer de streaming de 128 MB, un trabajador de compilación más y una imagen adicional de swapchain para presentar a alta frecuencia. Auto la activa solo en GPU Adreno; se aplica desde el próximo inicio del juego.</string>
+    <string name="adreno_profile_auto">Auto</string>
+    <string name="adreno_profile_on">Activado</string>
+    <string name="adreno_profile_off">Desactivado</string>
+    <string name="option_refresh_rate">Frecuencia de refresco</string>
+    <string name="option_refresh_rate_desc">Modo de pantalla y vblank emulado para juegos guiados por el vblank (misma imagen): Auto sigue la frecuencia máxima de la pantalla, así que las de 90/120 Hz dejan de limitar los juegos a 60 FPS; 60 mantiene el comportamiento anterior. Se aplica desde el próximo inicio del juego.</string>
+    <string name="refresh_auto">Auto (pantalla)</string>
+    <string name="refresh_60">60 Hz</string>
+    <string name="refresh_90">90 Hz</string>
+    <string name="refresh_120">120 Hz</string>
     <string name="reset_game_settings">Restablecer ajustes globales</string>
     <string name="reset_game_settings_desc">Borra las anulaciones de este juego (opciones y controlador de GPU).</string>
     <string name="reset_game_settings_done">Anulaciones del juego borradas.</string>
