@@ -155,6 +155,17 @@ private:
 	RangeSet                                          m_async_download_ranges;
 	std::mutex                                        m_async_download_lock;
 	MemoryTracker                                     m_memory_tracker;
+	// v0.0.9proQ4 round 2: adaptive read-ahead. The last fault's downloaded
+	// window drives the next: a fault just past it means a sequential sweep
+	// outran the prefetch (grow x2, cap 1 MiB); a fault far from it means a
+	// scattered pattern (halve, floor 64 KiB). Written on the faulting thread
+	// only; ReadMemory is the single caller.
+	uint64_t                                          m_read_ahead_window    = 0;
+	uint64_t                                          m_last_fault_addr      = 0;
+	uint64_t                                          m_last_fault_end       = 0;
+	uint64_t                                          m_fault_count          = 0;
+	uint64_t                                          m_fault_bytes          = 0;
+	std::chrono::steady_clock::time_point             m_fault_log_time {};
 	StreamBuffer                                      m_staging_buffer;
 	StreamBuffer                                      m_stream_buffer;
 	StreamBuffer                                      m_descriptor_buffer;

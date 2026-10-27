@@ -421,13 +421,57 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 		    // wider download copies more bytes per fault; Adreno has the headroom for
 		    // the 512 KB window the Q2 round gave it.
 		    Common::GpuProfile::AdrenoProfileEnabled() ? 512 : 256);
-		const uint64_t read_ahead   = static_cast<uint64_t>(std::max<int64_t>(read_ahead_kb.Get(), 0)) * 1024u;
+		const uint64_t base_window  = static_cast<uint64_t>(std::max<int64_t>(read_ahead_kb.Get(), 0)) * 1024u;
+		// v0.0.9proQ4 round 2: adaptive window. A static window is wrong twice: a
+		// long sequential sweep pays one GPU wait per window (under-prefetch), a
+		// scattered pattern copies whole windows it never reads (bandwidth waste
+		// on every fault - exactly what a bandwidth-bound Mali must not do). The
+		// last fault's downloaded range tells the two apart: a fault just past its
+		// end means the sweep outran the prefetch (grow x2, cap 1 MiB); a fault far
+		// away means scattered access (halve, floor 64 KiB); a re-fault inside it is
+		// the GPU redirtying a render-loop buffer (keep).
+		// `setprop debug.capy.read_ahead_adaptive 0` restores the static window.
+		static Common::DebugFlags::CachedValue adaptive("debug.capy.read_ahead_adaptive", 1);
+		uint64_t read_ahead = base_window;
+		if (adaptive.Get() != 0) {
+			constexpr uint64_t kWindowMax = 1ull << 20;
+			constexpr uint64_t kWindowMin = 64ull * 1024;
+			if (m_read_ahead_window == 0) {
+				m_read_ahead_window = base_window;
+			} else if (vaddr >= m_last_fault_end && vaddr < m_last_fault_end + 2 * m_read_ahead_window) {
+				// The sweep ran past the prefetched window: widen for the next fault.
+				m_read_ahead_window = std::min(m_read_ahead_window * 2, kWindowMax);
+			} else if (vaddr + size + 4 * m_read_ahead_window < m_last_fault_addr ||
+				           vaddr > m_last_fault_end + 4 * m_read_ahead_window) {
+				// A jump to a different region: scattered pattern, narrow the window.
+				m_read_ahead_window = std::max(m_read_ahead_window / 2, kWindowMin);
+			}
+			read_ahead = m_read_ahead_window;
+			m_last_fault_addr = vaddr;
+			m_last_fault_end  = vaddr + size + read_ahead;
+		}
 		const uint64_t buffer_end   = buffer.CpuAddress() + buffer.Size();
 		const uint64_t download_low = std::max(Common::AlignDown(vaddr, TRACKER_PAGE_SIZE), buffer.CpuAddress());
 		const uint64_t download_end =
 		    std::max(std::min(Common::AlignUp(vaddr + size, TRACKER_PAGE_SIZE) + read_ahead, buffer_end), vaddr + size);
 		const uint64_t download_size = read_ahead != 0 ? download_end - download_low : size;
 		const uint64_t download_addr = read_ahead != 0 ? download_low : vaddr;
+		// v0.0.9proQ4 round 2: fault telemetry - faults/s and downloaded bytes/s
+		// under CapyPS5-BufCache (once per second, measured not modelled).
+		m_fault_count++;
+		m_fault_bytes += download_size;
+		if (std::chrono::steady_clock::now() - m_fault_log_time >= std::chrono::seconds(1)) {
+			m_fault_log_time = std::chrono::steady_clock::now();
+#if defined(__ANDROID__)
+			__android_log_print(ANDROID_LOG_INFO, "CapyPS5-BufCache",
+			                    "read faults: %llu, downloaded %llu KB (window %llu KB)",
+			                    static_cast<unsigned long long>(m_fault_count),
+			                    static_cast<unsigned long long>(m_fault_bytes / 1024),
+			                    static_cast<unsigned long long>(m_read_ahead_window / 1024));
+#endif
+			m_fault_count = 0;
+			m_fault_bytes = 0;
+		}
 		(void)DownloadBufferMemory<false>(buffer, download_addr, download_size);
 		m_memory_tracker.UnmarkRegionAsGpuModified(download_addr, download_size);
 		if (is_write) {
