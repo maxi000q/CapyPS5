@@ -66,23 +66,42 @@
 // for any affected knob (setprop debug.capy.*) always wins at the call site,
 // and the vendor profiles themselves are kill-switchable
 // (debug.capy.mali_profile / debug.capy.adreno_profile / profile500 /
-// profile501 = 0) before they reach this table.
+// profile501 / profile502 = 0) before they reach this table.
 namespace Common::EnginePolicy {
 
 // The resolved workload tier: which behavioural class (if any) the runtime
-// classifier has locked, after the debug.capy.profile500/501 kill-switches.
+// classifier has locked, after the debug.capy.profile500/501/502 kill-switches.
 enum class WorkloadTier : uint32_t {
-        General      = 0,
+        General        = 0,
         Throughput500  = 500, // high-throughput 3D family
         Compositing501 = 501, // layered alpha compositing family
+        Forward3D502   = 502, // forward-rendered 3D family
 };
 
-/** The tier whose knob set the engine should be running right now. */
+/** The tier whose knob set the engine should be running right now.
+ *
+ * v0.0.10pro phase 4: the resolution-keyed policy now floors the tier at
+ * Throughput500. Rounds 4-5 gave the multi-megapixel policy exactly one lever
+ * (the render-pass clear mode) and that lever is a no-op on Mali - mode 0 is
+ * already the cheapest clear strategy there, so `SelectMode` ignores the
+ * policy on Mali by design. The measured consequence on a Mali device: a 4K
+ * game flipped the policy latch and NOTHING changed - no knob moved anywhere.
+ * From now on the 4K policy carries the full throughput knob set (deep submit
+ * batches, the 16384-slot read cache, the extra compile workers, the fast
+ * huge-page sweep) on EVERY vendor, until the game's own class locks and takes
+ * over. A locked class always wins over the floor: it is the more specific
+ * measurement of the same content. */
 [[nodiscard]] inline WorkloadTier CurrentTier() {
         if (Common::ContentProfile::Profile501Enabled()) {
                 return WorkloadTier::Compositing501;
         }
         if (Common::ContentProfile::Profile500Enabled()) {
+                return WorkloadTier::Throughput500;
+        }
+        if (Common::ContentProfile::Profile502Enabled()) {
+                return WorkloadTier::Forward3D502;
+        }
+        if (Common::ContentProfile::HighResolutionPolicyActive()) {
                 return WorkloadTier::Throughput500;
         }
         return WorkloadTier::General;
@@ -112,6 +131,12 @@ struct EngineTuning {
 // are regression-locked by the p8 battery, so Mali is the only column that
 // moves. When both profiles claim to be active (a forced-on pair of setprops)
 // the Mali row wins: its driver model is the more conservative one to assume.
+//
+// v0.0.10pro phase 4 adds the Forward3D502 row per vendor, at the same values
+// as that vendor's Throughput500 row: a forward-rendered 3D title wants the
+// same throughput preset (deep submits, big read caches, doubled compile pool
+// growth on Mali) - the row exists separately so the two families can diverge
+// once on-device measurements say they should.
 [[nodiscard]] inline const EngineTuning& TuningFor(bool mali_profile, bool adreno_profile,
                                                    WorkloadTier tier) {
         static const EngineTuning table[] = {
@@ -120,19 +145,23 @@ struct EngineTuning {
                 {/*General*/      24, 256, 1ull << 20, 8192, 1, 0, 6, 2000},
                 {/*Throughput*/   32, 384, 2ull << 20, 16384, 1, 2, 8, 750},
                 {/*Compositing*/  40, 512, 4ull << 20, 8192, 1, 0, 6, 750},
+                {/*Forward3D*/    32, 384, 2ull << 20, 16384, 1, 2, 8, 750},
                 // ------------------------------------------------- Adreno
                 {/*General*/      16, 512, 1ull << 20, 4096, 1, 0, 6, 2000},
                 {/*Throughput*/   24, 768, 2ull << 20, 16384, 1, 1, 7, 1000},
                 {/*Compositing*/  32, 1024, 4ull << 20, 8192, 1, 0, 6, 1000},
+                {/*Forward3D*/    24, 768, 2ull << 20, 16384, 1, 1, 7, 1000},
                 // ------------------------------------------------- everything else
                 {/*General*/      8, 256, 1ull << 20, 512, 0, 0, 6, 2000},
                 {/*Throughput*/   24, 768, 2ull << 20, 16384, 0, 1, 7, 1000},
                 {/*Compositing*/  32, 1024, 4ull << 20, 8192, 0, 0, 6, 1000},
+                {/*Forward3D*/    24, 768, 2ull << 20, 16384, 0, 1, 7, 1000},
         };
-        const auto row = mali_profile ? 0 : (adreno_profile ? 3 : 6);
+        const auto row = mali_profile ? 0 : (adreno_profile ? 4 : 8);
         switch (tier) {
                 case WorkloadTier::Throughput500:  return table[row + 1];
                 case WorkloadTier::Compositing501: return table[row + 2];
+                case WorkloadTier::Forward3D502:   return table[row + 3];
                 default:                           return table[row];
         }
 }

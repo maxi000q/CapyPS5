@@ -32,8 +32,10 @@ constexpr uint32_t kWindowFrames = 32;
 
 // A window with less than this much work in it (boot logos, static menus,
 // loading screens) carries no classification signal - it neither locks nor
-// breaks a class by itself, it simply does not count.
-constexpr uint64_t kWindowMinDraws        = 2000;
+// breaks a class by itself, it simply does not count. The per-frame floor
+// matches family 502's own draw floor (60): a small-scene 3D title drawing 60
+// heavy geometry passes per frame is real 3D work, not a menu.
+constexpr uint64_t kWindowMinDraws        = 1920;
 constexpr double   kWindowMinDrawsPerFrame = 60.0;
 
 // Consecutive agreeing windows needed to lock a class, and to re-lock a
@@ -86,19 +88,25 @@ struct WindowStats {
         uint64_t max_pixels          = 0;
 };
 
-// The per-class gates. Both families describe how the engine's work is
+// The per-class gates. All families describe how the engine's work is
 // SHAPED, never what the content is: a family matches any content whose
-// measured mix falls inside its ranges, and the two ranges are disjoint by
-// construction (the transparency bands do not overlap), so a window can
-// never match both.
+// measured mix falls inside its ranges. Families are checked most-specific
+// first; each pair of ranges is disjoint by construction (the 500/501 alpha
+// bands do not overlap and 502 excludes 501's exact conjunction), so a
+// window can never match two families at once.
 WorkloadClass ClassifyWindow(const WindowStats& s) {
         if (s.sparse) {
                 return WorkloadClass::None;
         }
-        // Family 500 - high-throughput 3D: large draws (tens of thousands of
-        // indices each), deferred-style multi-target passes, geometry/compute
-        // pipelines in active use, transparency present but not dominant.
-        const bool family500 = s.alpha_ratio >= 0.02 && s.alpha_ratio <= 0.45 &&
+        // Family 500 - high-throughput deferred 3D: large draws (tens of
+        // thousands of indices each), deferred-style multi-target passes,
+        // geometry/compute pipelines in active use, transparency present but
+        // not dominant. v0.0.10pro phase 4: the transparency band is
+        // [0, 0.55) - the old [0.02, 0.45] had two dead zones (a fully
+        // opaque scene below 0.02, and the 0.45..0.55 gap between the two
+        // families) that a plain forward renderer could land in and classify
+        // as nothing at all.
+        const bool family500 = s.alpha_ratio < 0.55 &&
                                s.avg_index_per_draw >= 4000.0 &&
                                (s.mesh_ratio >= 0.01 || s.dispatches_per_frame >= 8.0) &&
                                s.mrt_ratio >= 0.04 && s.draws_per_frame >= 200.0;
@@ -112,6 +120,21 @@ WorkloadClass ClassifyWindow(const WindowStats& s) {
                                s.mesh_ratio <= 0.02 && s.draws_per_frame >= 250.0;
         if (family501) {
                 return WorkloadClass::Turbo501;
+        }
+        // Family 502 (v0.0.10pro phase 4, Game502Turbo) - forward-rendered 3D:
+        // real geometry volume in each draw, without the deferred signature
+        // (multi-target passes, mesh/compute pipelines) the 500 gates demand.
+        // Everything geometry-heavy that the two families above do not claim
+        // lands here: fully opaque forward scenes, single-target action
+        // renderers, transparency in the old 0.45..0.55 dead zone. The draw
+        // floor is deliberately low (60/frame): a forward 3D title can batch
+        // its whole scene into a few dozen large draws and still be completely
+        // GPU-bound. Sprite-scale work (menus, text, 2D layers - draws of a
+        // handful of indices) stays far below the 700-index geometry bar.
+        const bool family502 = (s.alpha_ratio < 0.55 || s.avg_index_per_draw > 3000.0) &&
+                               s.avg_index_per_draw >= 700.0 && s.draws_per_frame >= 60.0;
+        if (family502) {
+                return WorkloadClass::Turbo502;
         }
         return WorkloadClass::None;
 }
@@ -321,6 +344,16 @@ bool Profile501Enabled() {
                 default: break;
         }
         return g_class.load(std::memory_order_acquire) == static_cast<uint32_t>(WorkloadClass::Turbo501);
+}
+
+bool Profile502Enabled() {
+        static DebugFlags::CachedValue force("debug.capy.profile502", -1);
+        switch (force.Get()) {
+                case 1: return true;
+                case 0: return false;
+                default: break;
+        }
+        return g_class.load(std::memory_order_acquire) == static_cast<uint32_t>(WorkloadClass::Turbo502);
 }
 
 bool HighResolutionPolicyActive() {

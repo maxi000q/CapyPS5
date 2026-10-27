@@ -31,7 +31,11 @@
 // (multi-megapixel class targets observed at runtime) also selects mode 4 on
 // every non-Mali vendor: the colour load a clear replaces is
 // resolution-linear - tens of MiB per cleared pass at the biggest consumer
-// extents - so the hybrid matters most exactly there.
+// extents - so the hybrid matters most exactly there. On Mali the policy does
+// NOT move the clear mode (mode 0 is already the cheapest strategy there at
+// any resolution); since v0.0.10pro phase 4 it acts through the engine-policy
+// tier instead (common/enginePolicy.h): the throughput knob set on every
+// vendor, Mali included.
 namespace Common::RenderPass {
 
 inline constexpr int64_t kModeHardwareClears = 0;

@@ -19,7 +19,7 @@
 // behavioural. The engine watches its own command stream - how many draws and
 // dispatches each guest frame contains, how large the draws are, what fraction
 // of them blend, sample mesh paths or write multiple colour targets, and how
-// big the colour targets are - and matches the measured mix against two broad
+// big the colour targets are - and matches the measured mix against three broad
 // workload families:
 //
 //   class 500  high-throughput 3D - large draws, deferred-style multi-target
@@ -33,6 +33,20 @@
 //              bottleneck). Needs: the big cores for its own threads - compile
 //              workers step down to the efficiency cluster - plus very deep
 //              submit batching and the widest read-ahead windows.
+//   class 502  forward-rendered 3D (v0.0.10pro phase 4, the Game502Turbo
+//              family) - real geometry volume (draws in the thousands of
+//              indices) with a single colour target, little or no mesh/compute
+//              use and anything from fully opaque to moderately transparent
+//              passes. The rounds 1-5 gates demanded deferred-shaped work
+//              (multi-target AND mesh-or-compute AND 4000+ indices), so every
+//              forward-rendered 3D title - action games rendering one target
+//              with plain vertex/pixel shaders - fell through the classifier
+//              and kept the General preset for the whole run: on-device that
+//              read as "the turbo did nothing". The family catches exactly
+//              that shape: geometry-heavy windows the other two families do
+//              not claim. Needs the throughput preset (deep submits, big read
+//              caches, the doubled compile pool growth - a forward 3D title
+//              streams materials through hundreds of unique pipelines too).
 //
 // Nothing about the running content's identity is read, stored, hashed or
 // compared anywhere: no file or directory names, no package identifiers, no
@@ -55,6 +69,7 @@ enum class WorkloadClass : uint32_t {
 	None     = 0,
 	Turbo500 = 500, // high-throughput 3D family
 	Turbo501 = 501, // layered alpha compositing family
+	Turbo502 = 502, // forward-rendered 3D family
 };
 
 // ------------------------------------------------------------------ producers
@@ -85,6 +100,9 @@ void OnFrameEnd();
 
 /** Same for workload class 501, via `debug.capy.profile501`. */
 [[nodiscard]] bool Profile501Enabled();
+
+/** Same for workload class 502, via `debug.capy.profile502`. */
+[[nodiscard]] bool Profile502Enabled();
 
 /**
  * The resolution-keyed policy: active once multi-megapixel class targets have
