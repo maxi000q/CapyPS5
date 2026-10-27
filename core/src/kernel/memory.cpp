@@ -269,8 +269,19 @@ struct GuestReadCache {
 	// v0.0.9proQ4 round 3: 16384 slots (128 KiB of tags per thread). Profile 500
 	// uses the whole table; every other profile keeps its live-slot count.
 	static constexpr uint32_t MaxSlots = 16384;
+	// v0.0.9proQ4 round 3: 2-way set associative. The old direct map lost a
+	// cached page whenever two hot pages shared a slot index - at the 512-slot
+	// default that is a conflict eviction per competing page pair, and the
+	// descriptor walker's hot set is far larger than the 2 MiB those slots
+	// cover. Two ways per set halve the conflict misses at the same footprint.
+	// Tags stay self-identifying (page + 1), so a slots-count change mid-run
+	// can only lose hits, never fabricate one.
+	static constexpr uint32_t Ways    = 2;
+	static constexpr uint32_t MaxSets = MaxSlots / Ways;
 	uint64_t                  generation = 0;
 	std::array<uint64_t, MaxSlots> pages {};
+	// One round-robin victim bit per set (bit set = evict way 1 next).
+	std::array<uint8_t, (MaxSets + 7) / 8> victim {};
 };
 thread_local GuestReadCache t_guest_read_cache;
 
@@ -296,6 +307,57 @@ static uint64_t GuestReadCacheSlots() {
 	return (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
 	           ? 4096
 	           : 512;
+}
+
+// v0.0.9proQ4 round 3: set-associative lookup helpers. live_slots is always
+// a power of two >= 64 (GuestReadCacheSlots), so live_sets = live_slots / Ways
+// and set = (page % live_sets) * Ways.
+
+// Returns the slot holding this page's tag, or nullptr when the page is not
+// currently cached.
+inline uint64_t* CacheFindSlot(GuestReadCache& cache, uint64_t page, uint64_t live_slots) {
+	const uint64_t live_sets = live_slots / GuestReadCache::Ways;
+	const uint64_t base      = (page % live_sets) * GuestReadCache::Ways;
+	for (uint64_t way = 0; way < GuestReadCache::Ways; way++) {
+		if (cache.pages[base + way] == page + 1) {
+			return &cache.pages[base + way];
+		}
+	}
+	return nullptr;
+}
+
+// Inserts the page: an empty way wins, otherwise the round-robin victim of
+// the set is replaced (a page already present is a no-op).
+inline void CacheRememberPage(GuestReadCache& cache, uint64_t page, uint64_t live_slots) {
+	const uint64_t live_sets = live_slots / GuestReadCache::Ways;
+	const uint64_t base      = (page % live_sets) * GuestReadCache::Ways;
+	for (uint64_t way = 0; way < GuestReadCache::Ways; way++) {
+		if (cache.pages[base + way] == page + 1) {
+			return;
+		}
+	}
+	for (uint64_t way = 0; way < GuestReadCache::Ways; way++) {
+		if (cache.pages[base + way] == 0) {
+			cache.pages[base + way] = page + 1;
+			return;
+		}
+	}
+	const uint64_t set = page % live_sets;
+	const uint8_t  bit = static_cast<uint8_t>(1u << (set & 7u));
+	const uint64_t way = (cache.victim[set >> 3] & bit) != 0 ? 1 : 0;
+	cache.victim[set >> 3] ^= bit;
+	cache.pages[base + way] = page + 1;
+}
+
+// Drops the page's tag from every way of its set (no-op when absent).
+inline void CacheForgetPage(GuestReadCache& cache, uint64_t page, uint64_t live_slots) {
+	const uint64_t live_sets = live_slots / GuestReadCache::Ways;
+	const uint64_t base      = (page % live_sets) * GuestReadCache::Ways;
+	for (uint64_t way = 0; way < GuestReadCache::Ways; way++) {
+		if (cache.pages[base + way] == page + 1) {
+			cache.pages[base + way] = 0;
+		}
+	}
 }
 } // namespace
 
@@ -355,7 +417,7 @@ bool RecoverGuardedGuestRead(uint64_t fault_addr) noexcept {
 	const auto first_page = guard.addr / CachePage;
 	const auto last_page  = (guard.addr + guard.size - 1) / CachePage;
 	for (auto page = first_page; page <= last_page; page++) {
-		cache.pages[page % GuestReadCacheSlots()] = 0;
+		CacheForgetPage(cache, page, GuestReadCacheSlots());
 	}
 	siglongjmp(guard.jump, 1);
 }
@@ -1283,11 +1345,12 @@ bool ReadGuestMemory(uint64_t vaddr, void* data, uint64_t size) {
 	if (use_cache) {
 		if (cache.generation != generation) {
 			cache.pages.fill(0);
+			cache.victim.fill(0);
 			cache.generation = generation;
 		}
 		bool hit = true;
 		for (auto page = first_page; page <= last_page && hit; page++) {
-			hit = cache.pages[page % live_slots] == page + 1;
+			hit = CacheFindSlot(cache, page, live_slots) != nullptr;
 		}
 		if (hit) {
 			if (!GuardedGuestCopy(data, reinterpret_cast<const void*>(vaddr), size)) {
@@ -1314,7 +1377,7 @@ bool ReadGuestMemory(uint64_t vaddr, void* data, uint64_t size) {
 		if (use_cache && g_guest_address_space != nullptr &&
 		    g_guest_address_space->BackingContains(first_page * CachePage, (last_page - first_page + 1) * CachePage)) {
 			for (auto page = first_page; page <= last_page; page++) {
-				cache.pages[page % live_slots] = page + 1;
+				CacheRememberPage(cache, page, live_slots);
 			}
 		}
 		return true;
