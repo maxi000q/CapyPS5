@@ -45,6 +45,10 @@
     <string name="category_about">About</string>
 
     <!-- Core options -->
+    <string name="option_graphics_backend">Graphics API</string>
+    <string name="option_graphics_backend_desc">Vulkan renders and presents directly (fastest). OpenGL ES shows the final frame through EGL, a compatibility path for devices with a broken Vulkan present path; falls back to Vulkan when unsupported. Applies from the next game start.</string>
+    <string name="backend_vulkan">Vulkan</string>
+    <string name="backend_opengl">OpenGL ES</string>
     <string name="option_resolution">Internal resolution</string>
     <string name="option_resolution_desc">Per axis: a 4K game at 50 % renders at 1080p (a quarter of the work). Lower resolution relieves the GPU; some games do not support it</string>
     <string name="resolution_native">Native</string>

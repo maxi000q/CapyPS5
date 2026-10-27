@@ -186,6 +186,7 @@ fun SettingsScreen(
                 val scales = CoreOption.ResolutionScale.choices.map { it.first }
                 val ueScale = settings.ueResolution()
                 listOf(
+                    coreItem(CoreOption.GraphicsBackend),
                     coreItem(CoreOption.ResolutionScale),
                     SettingItem(
                         context.getString(R.string.ue_resolution),

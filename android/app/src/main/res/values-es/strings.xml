@@ -43,6 +43,10 @@
     <string name="category_about">Acerca de</string>
 
     <!-- Opciones del núcleo -->
+    <string name="option_graphics_backend">API de gráficos</string>
+    <string name="option_graphics_backend_desc">Vulkan renderiza y presenta directamente (lo más rápido). OpenGL ES muestra el fotograma final mediante EGL, una ruta de compatibilidad para dispositivos con la presentación Vulkan rota; vuelve a Vulkan si no está soportada. Se aplica desde el próximo inicio del juego.</string>
+    <string name="backend_vulkan">Vulkan</string>
+    <string name="backend_opengl">OpenGL ES</string>
     <string name="option_resolution">Resolución interna</string>
     <string name="option_resolution_desc">Por eje: un juego 4K al 50 % se dibuja a 1080p (un cuarto del trabajo). Menos resolución alivia la GPU; algunos juegos no la admiten</string>
     <string name="resolution_native">Nativa</string>

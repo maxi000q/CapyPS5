@@ -50,6 +50,22 @@ enum class CoreOption(
     val choices: List<Pair<Long, Int>>,
     val default: Long,
 ) {
+    /**
+     * v0.0.9proQ3: presentation backend. Vulkan renders and presents directly (the default
+     * and fastest path); OpenGL ES hands the final frame to the screen through EGL - a
+     * compatibility path for devices whose Vulkan present path is broken. The core falls
+     * back to Vulkan automatically when the device lacks AHardwareBuffer import.
+     */
+    GraphicsBackend(
+        R.string.option_graphics_backend,
+        R.string.option_graphics_backend_desc,
+        "debug.capy.gl_backend",
+        listOf(
+            0L to R.string.backend_vulkan,
+            1L to R.string.backend_opengl,
+        ),
+        0L,
+    ),
     ResolutionScale(
         R.string.option_resolution,
         R.string.option_resolution_desc,

@@ -31,6 +31,7 @@ struct GraphicContext {
 	vk::Device                         device                                = nullptr;
 	VmaAllocator                       allocator                             = nullptr;
 	bool                               memory_budget_ext_enabled             = false;
+	bool                               ahb_import_supported                   = false; // v0.0.9proQ3: AHardwareBuffer import for the OpenGL present backend
 	bool                               compute_subgroup_size_control_enabled = false;
 	bool                               sample_rate_shading_enabled           = false;
 	bool                               sampler_anisotropy_enabled            = false;

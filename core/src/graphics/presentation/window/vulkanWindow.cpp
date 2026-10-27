@@ -1354,6 +1354,23 @@ void WindowContext::CreateVulkan() {
 			device_extensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
 			graphic_ctx.memory_budget_ext_enabled = true;
 		}
+		// v0.0.9proQ3: the OpenGL compatibility backend presents through an
+		// AHardwareBuffer ring (VK_ANDROID_external_memory_android_hardware_buffer);
+		// it is requested by the frontend setting "Graphics API: OpenGL".
+		static Common::DebugFlags::CachedValue gl_backend("debug.capy.gl_backend", 0);
+		if (gl_backend.Get() != 0) {
+			const bool ahb_ext =
+				HasExtension(available_extensions, "VK_ANDROID_external_memory_android_hardware_buffer");
+			if (ahb_ext) {
+				device_extensions.push_back("VK_ANDROID_external_memory_android_hardware_buffer");
+				graphic_ctx.ahb_import_supported = true;
+				Log::WriteToConsoleAndLog(
+					"GPU: OpenGL compatibility backend enabled (AHardwareBuffer presentation)\n");
+			} else {
+				Log::WriteToConsoleAndLog(
+					"GPU: OpenGL backend requested but AHardwareBuffer import is unsupported; using Vulkan\n");
+			}
+		}
 		for (const auto* extension: {VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
 		                             VK_KHR_MAINTENANCE_8_EXTENSION_NAME,
 		                             VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME,

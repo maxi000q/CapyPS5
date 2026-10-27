@@ -21,6 +21,14 @@
 #include "graphics/presentation/systemOverlay.h"
 #include "graphics/presentation/videoOut.h"
 #include "graphics/presentation/window/windowInternal.h"
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+// v0.0.9proQ3: OpenGL compatibility backend (see eglCompat.h).
+#include "graphics/presentation/window/eglCompat.h"
+#include <android/hardware_buffer.h>
+#include <android/sync.h>
+#include <unistd.h>
+#include <vulkan/vulkan_android.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -272,6 +280,14 @@ void Presenter::Frame::Clear(CommandBuffer& command_buffer, const vk::ClearColor
 	command.clearColorImage(image.image, vk::ImageLayout::eTransferDstOptimal, &color, 1, &range);
 }
 
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+// v0.0.9proQ3: after this many GL-backend recoveries in one session the backend
+// gives up and the plain Vulkan swapchain takes over (a driver that cannot keep
+// the EGL surface alive would otherwise rebuild it every frame).
+static constexpr uint32_t kGlBackendMaxRecoveries = 5;
+static uint32_t s_gl_backend_recoveries           = 0;
+#endif
+
 class Swapchain final {
 public:
 	enum class Status : uint8_t { Success, Recreate, SurfaceLost };
@@ -284,7 +300,15 @@ public:
 	void                 Recreate(bool surface_lost = false);
 	[[nodiscard]] bool   NeedsResize() const;
 	/** Present SRGB frames to an SRGB swapchain, so the final blit does not convert them. */
-	void SetWantSrgb(bool want) noexcept { m_want_srgb = want; }
+	void SetWantSrgb(bool want) noexcept {
+		if (!m_gl_mode) {
+			m_want_srgb = want;
+		}
+	}
+	/** v0.0.9proQ3: present through OpenGL ES (AHardwareBuffer ring) instead of a Vulkan swapchain. */
+	[[nodiscard]] bool GlBackend() const noexcept { return m_gl_mode; }
+	/** Ready to present: a Vulkan swapchain handle or the GL backend's buffer ring. */
+	[[nodiscard]] bool IsReady() const noexcept { return m_gl_mode || m_handle != nullptr; }
 	[[nodiscard]] Status AcquireNextImage();
 	[[nodiscard]] bool   PrepareSystemOverlay();
 	void     RecordPresentCommands(CommandBuffer& command, Presenter::Frame* source,
@@ -300,7 +324,8 @@ public:
 
 private:
 	void Destroy();
-	void DrawOverlay(vk::CommandBuffer command, const Presenter::Layer& layer);
+	void DrawOverlay(vk::CommandBuffer command, const Presenter::Layer& layer,
+	                 bool clear_attachment = false);
 
 	WindowContext&   m_window;
 	vk::SwapchainKHR m_handle = nullptr;
@@ -321,6 +346,20 @@ private:
 	vk::Sampler                    m_overlay_sampler     = nullptr;
 	uint32_t                       m_image_index         = static_cast<uint32_t>(-1);
 	uint32_t                       m_frame_index         = 0;
+	// v0.0.9proQ3: OpenGL compatibility backend ("Graphics API: OpenGL").
+	bool m_gl_mode = false;
+	CommandScheduler* m_last_submit_scheduler = nullptr;
+	uint64_t          m_last_submit_tick      = 0;
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+	[[nodiscard]] bool TryCreateGlBackend();
+	void DestroyGlBackend();
+	void RecordGlPresentCommands(CommandBuffer& command, Presenter::Frame* source,
+	                             const Presenter::Layer& overlay, bool draw_system_overlay);
+	std::unique_ptr<GlCompatRenderer> m_gl;
+	std::vector<AHardwareBuffer*>     m_ahb;
+	std::vector<vk::DeviceMemory>     m_ahb_memory;
+	std::vector<int>                  m_release_fd;
+#endif
 };
 
 struct Presenter::Impl {
@@ -338,7 +377,7 @@ struct Presenter::Impl {
 		LOGF("Recovering Vulkan swapchain%s\n",
 		     status == Swapchain::Status::SurfaceLost ? " and surface" : "");
 		swapchain.Recreate(status == Swapchain::Status::SurfaceLost);
-		if (swapchain.Handle() != nullptr && swapchain.Format() != vk::Format::eUndefined) {
+		if (swapchain.IsReady() && swapchain.Format() != vk::Format::eUndefined) {
 			if (!frames.IsInitialized()) {
 				frames.Initialize(swapchain.ImageCount(), swapchain.Format());
 			} else {
@@ -397,6 +436,19 @@ void Swapchain::Create() {
 		LOGF("Swapchain::Create: window extent is 0, deferring\n");
 		return;
 	}
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+	// v0.0.9proQ3: the OpenGL compatibility backend replaces the Vulkan swapchain:
+	// the final frame goes to an AHardwareBuffer ring that EGL/OpenGL ES presents.
+	// Any failure inside falls back to the plain swapchain below.
+	static Common::DebugFlags::CachedValue gl_backend("debug.capy.gl_backend", 0);
+	if (gl_backend.Get() != 0 && s_gl_backend_recoveries < kGlBackendMaxRecoveries &&
+	    graphics.ahb_import_supported) {
+		m_extent = m_window_extent;
+		if (TryCreateGlBackend()) {
+			return;
+		}
+	}
+#endif
 	m_window.RefreshSurfaceCapabilities();
 	const auto& surface = m_window.surface_capabilities;
 	if (surface.formats.empty()) {
@@ -545,6 +597,285 @@ Swapchain::~Swapchain() {
 	Destroy();
 }
 
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+
+void Swapchain::DestroyGlBackend() {
+	auto& graphics = m_window.graphic_ctx;
+	for (const auto fd: m_release_fd) {
+		if (fd >= 0) {
+			sync_wait(fd, 100);
+			close(fd);
+		}
+	}
+	m_release_fd.clear();
+	if (m_gl != nullptr) {
+		m_gl->Destroy();
+		m_gl.reset();
+	}
+	for (const auto view: m_image_views) {
+		if (view != nullptr) {
+			graphics.device.destroyImageView(view, nullptr);
+		}
+	}
+	m_image_views.clear();
+	for (const auto image: m_images) {
+		if (image != nullptr) {
+			VULKAN_HPP_DEFAULT_DISPATCHER.vkDestroyImage(static_cast<VkDevice>(graphics.device),
+			                                          static_cast<VkImage>(image), nullptr);
+		}
+	}
+	m_images.clear();
+	for (const auto memory: m_ahb_memory) {
+		if (memory != nullptr) {
+			VULKAN_HPP_DEFAULT_DISPATCHER.vkFreeMemory(static_cast<VkDevice>(graphics.device),
+			                                     static_cast<VkDeviceMemory>(memory), nullptr);
+		}
+	}
+	m_ahb_memory.clear();
+	for (const auto buffer: m_ahb) {
+		if (buffer != nullptr) {
+			AHardwareBuffer_release(buffer);
+		}
+	}
+	m_ahb.clear();
+	m_gl_mode = false;
+}
+
+bool Swapchain::TryCreateGlBackend() {
+	auto& graphics = m_window.graphic_ctx;
+	EXIT_IF(graphics.device == nullptr);
+	constexpr uint32_t kRingSize = 3;
+
+	// The frame is drawn into the ring image with the present blit pipeline, so the
+	// buffer needs sampled-image (EGL) and color-output (Vulkan) usage only.
+	AHardwareBuffer_Desc description {};
+	description.width  = m_extent.width;
+	description.height = m_extent.height;
+	description.layers = 1;
+	description.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+	description.usage  = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
+	                     AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT;
+
+	const auto get_ahb_properties =
+	    reinterpret_cast<PFN_vkGetAndroidHardwareBufferPropertiesANDROID>(
+	        VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceProcAddr(
+	            static_cast<VkDevice>(graphics.device), "vkGetAndroidHardwareBufferPropertiesANDROID"));
+	if (get_ahb_properties == nullptr) {
+		LOGF("GL backend: vkGetAndroidHardwareBufferPropertiesANDROID is missing\n");
+		return false;
+	}
+
+	m_gl_mode = true; // DestroyGlBackend() unwinds partial state on failure
+	m_ahb.assign(kRingSize, nullptr);
+	m_ahb_memory.assign(kRingSize, nullptr);
+	m_release_fd.assign(kRingSize, -1);
+
+	const auto fail = [&] {
+		DestroyGlBackend();
+		return false;
+	};
+
+	for (uint32_t i = 0; i < kRingSize; i++) {
+		AHardwareBuffer* buffer = nullptr;
+		if (AHardwareBuffer_allocate(&description, &buffer) != 0 || buffer == nullptr) {
+			LOGF("GL backend: AHardwareBuffer_allocate failed (%ux%u)\n", m_extent.width,
+			     m_extent.height);
+			return fail();
+		}
+		m_ahb[i] = buffer;
+
+		VkAndroidHardwareBufferFormatPropertiesANDROID format_properties {};
+		format_properties.sType =
+			VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID;
+		VkAndroidHardwareBufferPropertiesANDROID properties {};
+		properties.sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID;
+		properties.pNext = &format_properties;
+		if (get_ahb_properties(static_cast<VkDevice>(graphics.device), buffer, &properties) !=
+		    VK_SUCCESS) {
+			LOGF("GL backend: buffer properties query failed\n");
+			return fail();
+		}
+		if (format_properties.format != VK_FORMAT_R8G8B8A8_UNORM ||
+		    (format_properties.formatFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) == 0) {
+			LOGF("GL backend: the buffer cannot be a color attachment\n");
+			return fail();
+		}
+
+		VkExternalMemoryImageInfo external {};
+		external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_INFO;
+		external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
+		VkImageCreateInfo image_info {};
+		image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+		image_info.pNext = &external;
+		image_info.imageType = VK_IMAGE_TYPE_2D;
+		image_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+		image_info.extent = {m_extent.width, m_extent.height, 1};
+		image_info.mipLevels = 1;
+		image_info.arrayLayers = 1;
+		image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+		image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+		image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+		image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		VkImage image = VK_NULL_HANDLE;
+		if (VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateImage(static_cast<VkDevice>(graphics.device),
+		                                              &image_info, nullptr, &image) != VK_SUCCESS ||
+		    image == VK_NULL_HANDLE) {
+			LOGF("GL backend: vkCreateImage failed for the AHardwareBuffer\n");
+			return fail();
+		}
+		m_images.push_back(image);
+
+		uint32_t memory_type = std::numeric_limits<uint32_t>::max();
+		for (uint32_t type = 0; type < graphics.physical_device_memory_properties.memoryTypeCount;
+		     type++) {
+			if ((properties.memoryTypeBits & (1u << type)) != 0) {
+				memory_type = type;
+				break;
+			}
+		}
+		if (memory_type == std::numeric_limits<uint32_t>::max()) {
+			LOGF("GL backend: no compatible memory type\n");
+			return fail();
+		}
+		VkImportAndroidHardwareBufferInfoANDROID import {};
+		import.sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID;
+		import.buffer = buffer;
+		VkMemoryAllocateInfo allocate {};
+		allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocate.pNext = &import;
+		allocate.allocationSize = properties.allocationSize;
+		allocate.memoryTypeIndex = memory_type;
+		VkDeviceMemory memory = VK_NULL_HANDLE;
+		if (VULKAN_HPP_DEFAULT_DISPATCHER.vkAllocateMemory(static_cast<VkDevice>(graphics.device),
+		                                             &allocate, nullptr, &memory) != VK_SUCCESS ||
+		    memory == VK_NULL_HANDLE) {
+			LOGF("GL backend: vkAllocateMemory failed\n");
+			return fail();
+		}
+		m_ahb_memory[i] = memory;
+		if (VULKAN_HPP_DEFAULT_DISPATCHER.vkBindImageMemory(static_cast<VkDevice>(graphics.device),
+		                                                 image, memory, 0) != VK_SUCCESS) {
+			LOGF("GL backend: vkBindImageMemory failed\n");
+			return fail();
+		}
+
+		vk::ImageViewCreateInfo view {};
+		view.image = m_images.back();
+		view.viewType = vk::ImageViewType::e2D;
+		view.format = vk::Format::eR8G8B8A8Unorm;
+		view.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+		vk::ImageView handle = nullptr;
+		if (graphics.device.createImageView(&view, nullptr, &handle) != vk::Result::eSuccess ||
+		    handle == nullptr) {
+			LOGF("GL backend: vkCreateImageView failed\n");
+			return fail();
+		}
+		m_image_views.push_back(handle);
+	}
+
+	m_gl = std::make_unique<GlCompatRenderer>();
+	if (!m_gl->Initialize(m_extent.width, m_extent.height)) {
+		return fail();
+	}
+
+	vk::SemaphoreCreateInfo semaphore_info {};
+	semaphore_info.sType = vk::StructureType::eSemaphoreCreateInfo;
+	m_image_acquired.resize(m_images.size());
+	m_render_complete.resize(m_images.size());
+	for (size_t i = 0; i < m_images.size(); i++) {
+		RequireVulkanSuccess(
+			graphics.device.createSemaphore(&semaphore_info, nullptr, &m_image_acquired[i]),
+			"create GL-backend image-acquired semaphore");
+		RequireVulkanSuccess(
+			graphics.device.createSemaphore(&semaphore_info, nullptr, &m_render_complete[i]),
+			"create GL-backend render-complete semaphore");
+	}
+	m_format = vk::Format::eR8G8B8A8Unorm;
+	m_image_index = static_cast<uint32_t>(-1);
+	m_frame_index = 0;
+	LOGF("GL backend: %u AHardwareBuffer ring images (%ux%u), presenting through OpenGL ES\n",
+	     static_cast<uint32_t>(m_images.size()), m_extent.width, m_extent.height);
+	return true;
+}
+
+void Swapchain::RecordGlPresentCommands(CommandBuffer& command, Presenter::Frame* source,
+						      const Presenter::Layer& overlay, bool draw_system_overlay) {
+	EXIT_IF(m_image_index >= m_images.size());
+	auto       vk_command   = command.Handle();
+	const bool draw_overlay = overlay.frame != nullptr;
+
+	if (source != nullptr) {
+		source->Transit(vk_command, vk::ImageLayout::eShaderReadOnlyOptimal,
+		                vk::AccessFlagBits2::eShaderRead);
+	}
+	if (draw_overlay) {
+		overlay.frame->Transit(vk_command, vk::ImageLayout::eShaderReadOnlyOptimal,
+		                       vk::AccessFlagBits2::eShaderRead);
+	}
+
+	// The ring image becomes a color attachment; whatever EGL read from it is
+	// discarded - the frame triangle (or the black clear below) covers the buffer.
+	vk::ImageMemoryBarrier2 to_attachment {};
+	to_attachment.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+	to_attachment.srcAccessMask = vk::AccessFlagBits2::eMemoryRead;
+	to_attachment.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+	to_attachment.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+	to_attachment.oldLayout = vk::ImageLayout::eUndefined;
+	to_attachment.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+	to_attachment.image = m_images[m_image_index];
+	to_attachment.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+	vk::DependencyInfo to_attachment_dependency {};
+	to_attachment_dependency.imageMemoryBarrierCount = 1;
+	to_attachment_dependency.pImageMemoryBarriers = &to_attachment;
+	vk_command.pipelineBarrier2(to_attachment_dependency);
+
+	if (source == nullptr) {
+		// No main layer this flip: clear the ring image to black first.
+		vk::RenderingAttachmentInfo clear_attachment {};
+		clear_attachment.imageView = m_image_views[m_image_index];
+		clear_attachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		clear_attachment.loadOp = vk::AttachmentLoadOp::eClear;
+		clear_attachment.storeOp = vk::AttachmentStoreOp::eStore;
+		clear_attachment.clearValue.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+		vk::RenderingInfo clear_rendering {};
+		clear_rendering.renderArea.extent = m_extent;
+		clear_rendering.layerCount = 1;
+		clear_rendering.colorAttachmentCount = 1;
+		clear_rendering.pColorAttachments = &clear_attachment;
+		vk_command.beginRendering(&clear_rendering);
+		vk_command.endRendering();
+	} else {
+		// The prepared frame fills the buffer: same blit pipeline the video-out
+		// overlay uses, drawn opaque (the source is a full-frame texture).
+		const Presenter::Layer base {source, 0, true};
+		DrawOverlay(vk_command, base, true);
+	}
+	if (draw_overlay) {
+		DrawOverlay(vk_command, overlay);
+	}
+
+	vk::ImageMemoryBarrier2 to_general {};
+	to_general.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+	to_general.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+	to_general.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+	to_general.dstAccessMask = vk::AccessFlagBits2::eMemoryRead;
+	to_general.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
+	to_general.newLayout = vk::ImageLayout::eGeneral;
+	to_general.image = m_images[m_image_index];
+	to_general.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+	vk::DependencyInfo to_general_dependency {};
+	to_general_dependency.imageMemoryBarrierCount = 1;
+	to_general_dependency.pImageMemoryBarriers = &to_general;
+	vk_command.pipelineBarrier2(to_general_dependency);
+
+	if (draw_system_overlay && m_system_overlay != nullptr) {
+		m_system_overlay->Record(vk_command, m_image_views[m_image_index]);
+	}
+}
+
+#endif // Android
+
 void Swapchain::Destroy() {
 	if (m_handle == nullptr && m_image_acquired.empty() && m_render_complete.empty() &&
 	    m_image_views.empty()) {
@@ -556,6 +887,11 @@ void Swapchain::Destroy() {
 		Common::LockGuard queue_lock(graphics.queue_mutex);
 		RequireVulkanSuccess(graphics.queue.waitIdle(), "wait for swapchain queue");
 	}
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+	if (m_gl_mode) {
+		DestroyGlBackend();
+	}
+#endif
 	if (m_system_overlay != nullptr) {
 		m_system_overlay->ReleaseVulkan();
 	}
@@ -588,6 +924,7 @@ void Swapchain::Destroy() {
 	}
 
 	m_handle        = nullptr;
+	m_gl_mode       = false;
 	m_format        = vk::Format::eUndefined;
 	m_extent        = {};
 	m_window_extent = {};
@@ -618,6 +955,11 @@ void Swapchain::Recreate(bool surface_lost) {
 }
 
 bool Swapchain::NeedsResize() const {
+	if (m_gl_mode) {
+		Common::LockGuard lock(m_window.mutex);
+		return m_extent.width != m_window.graphic_ctx.screen_width ||
+		       m_extent.height != m_window.graphic_ctx.screen_height;
+	}
 	const bool srgb = m_format == vk::Format::eB8G8R8A8Srgb || m_format == vk::Format::eR8G8B8A8Srgb;
 	if (srgb != m_want_srgb && !m_srgb_unavailable) {
 		return true;
@@ -628,6 +970,26 @@ bool Swapchain::NeedsResize() const {
 }
 
 Swapchain::Status Swapchain::AcquireNextImage() {
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+	if (m_gl_mode) {
+		if (m_images.empty() || m_frame_index >= m_images.size() ||
+		    m_release_fd.size() != m_images.size()) {
+			return Status::SurfaceLost;
+		}
+		m_image_index = m_frame_index;
+		// The previous OpenGL read of this ring slot must be finished before
+		// the Vulkan pass overwrites the buffer.
+		auto& fd = m_release_fd[m_image_index];
+		if (fd >= 0) {
+			if (sync_wait(fd, 1000) != 0) {
+				LOGF("GL present: release fence wait timed out\n");
+			}
+			close(fd);
+			fd = -1;
+		}
+		return Status::Success;
+	}
+#endif
 	if (m_handle == nullptr || m_images.empty() || m_frame_index >= m_image_acquired.size()) {
 		return Status::SurfaceLost;
 	}
@@ -664,7 +1026,8 @@ bool Swapchain::PrepareSystemOverlay() {
 	return m_system_overlay->PrepareFrame(m_extent, m_format, ImageCount());
 }
 
-void Swapchain::DrawOverlay(vk::CommandBuffer command, const Presenter::Layer& layer) {
+void Swapchain::DrawOverlay(vk::CommandBuffer command, const Presenter::Layer& layer,
+	                           bool clear_attachment) {
 	auto device = m_window.graphic_ctx.device;
 	if (m_overlay_pipeline == nullptr) {
 		vk::SamplerCreateInfo sampler {};
@@ -773,7 +1136,8 @@ void Swapchain::DrawOverlay(vk::CommandBuffer command, const Presenter::Layer& l
 	vk::RenderingAttachmentInfo attachment {};
 	attachment.imageView   = m_image_views[m_image_index];
 	attachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-	attachment.loadOp      = vk::AttachmentLoadOp::eLoad;
+	attachment.loadOp = clear_attachment ? vk::AttachmentLoadOp::eClear
+	                                   : vk::AttachmentLoadOp::eLoad;
 	attachment.storeOp     = vk::AttachmentStoreOp::eStore;
 	vk::RenderingInfo rendering {};
 	rendering.renderArea.extent    = m_extent;
@@ -794,6 +1158,16 @@ void Swapchain::DrawOverlay(vk::CommandBuffer command, const Presenter::Layer& l
 void Swapchain::RecordPresentCommands(CommandBuffer& command, Presenter::Frame* source,
                                       const Presenter::Layer& overlay, bool draw_system_overlay) {
 	EXIT_IF(m_image_index >= m_images.size());
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+	if (m_gl_mode) {
+		RecordGlPresentCommands(command, source, overlay, draw_system_overlay);
+		return;
+	}
+#endif
+	// The GL backend hands the buffer to EGL from GENERAL; a Vulkan swapchain
+	// presentation needs PRESENT_SRC (m_gl_mode is constant false off Android).
+	const auto present_layout =
+	    m_gl_mode ? vk::ImageLayout::eGeneral : vk::ImageLayout::ePresentSrcKHR;
 	auto       vk_command      = command.Handle();
 	const bool draw_overlay    = overlay.frame != nullptr;
 	const bool draw_attachment = draw_overlay || draw_system_overlay;
@@ -873,7 +1247,7 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, Presenter::Frame* 
 	                                                 : vk::AccessFlagBits::eMemoryRead;
 	to_present.oldLayout           = vk::ImageLayout::eTransferDstOptimal;
 	to_present.newLayout           = draw_attachment ? vk::ImageLayout::eColorAttachmentOptimal
-	                                                 : vk::ImageLayout::ePresentSrcKHR;
+	                                                 : present_layout;
 	to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	to_present.image               = m_images[m_image_index];
@@ -905,7 +1279,7 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, Presenter::Frame* 
 		to_present.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
 		to_present.dstAccessMask = vk::AccessFlagBits::eMemoryRead;
 		to_present.oldLayout     = vk::ImageLayout::eColorAttachmentOptimal;
-		to_present.newLayout     = vk::ImageLayout::ePresentSrcKHR;
+		to_present.newLayout     = present_layout;
 		vk_command.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
 		                           vk::PipelineStageFlagBits::eAllCommands,
 		                           vk::DependencyFlagBits::eByRegion, 0, nullptr, 0, nullptr, 1,
@@ -918,12 +1292,51 @@ uint64_t Swapchain::Submit(CommandScheduler& scheduler) {
 		return 0;
 	}
 	SubmitInfo submit;
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+	if (m_gl_mode) {
+		// The GL backend needs no external semaphores: Present() host-waits this
+		// tick before handing the buffer to OpenGL.
+		m_last_submit_scheduler = &scheduler;
+		m_last_submit_tick      = scheduler.Submit();
+		return m_last_submit_tick;
+	}
+#endif
 	submit.AddWait(m_image_acquired[m_frame_index], 1, vk::PipelineStageFlagBits::eTransfer);
 	submit.AddSignal(m_render_complete[m_image_index]);
 	return scheduler.Submit(submit);
 }
 
 Swapchain::Status Swapchain::Present() {
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+	if (m_gl_mode) {
+		if (m_images.empty() || m_image_index >= m_images.size() || m_gl == nullptr ||
+		    m_release_fd.size() != m_images.size()) {
+			return Status::SurfaceLost;
+		}
+		// Host-wait the Vulkan pass, then let OpenGL ES present the buffer.
+		if (m_last_submit_scheduler != nullptr) {
+			m_last_submit_scheduler->Wait(m_last_submit_tick);
+			m_last_submit_scheduler = nullptr;
+		}
+		const auto release = m_gl->Blit(m_ahb[m_image_index], -1);
+		if (release < 0) {
+			s_gl_backend_recoveries++;
+			LOGF("GL present failed (%u); recovering\n", s_gl_backend_recoveries);
+			if (s_gl_backend_recoveries >= kGlBackendMaxRecoveries) {
+				Log::WriteToConsoleAndLog(
+					"GL backend: too many failures; switching to the Vulkan swapchain\n");
+			}
+			return Status::Recreate;
+		}
+		if (m_release_fd[m_image_index] >= 0) {
+			close(m_release_fd[m_image_index]);
+		}
+		m_release_fd[m_image_index] = release;
+		m_frame_index = (m_frame_index + 1u) % static_cast<uint32_t>(m_images.size());
+		Common::Telemetry::g_host_presents.fetch_add(1, std::memory_order_relaxed);
+		return Status::Success;
+	}
+#endif
 	if (m_handle == nullptr || m_images.empty() || m_image_index >= m_render_complete.size()) {
 		return Status::SurfaceLost;
 	}
@@ -975,7 +1388,19 @@ Presenter::Frame& Presenter::PrepareFrame(CommandBuffer& buffer, const ImageInfo
 	// between different formats (SRGB into UNORM, or a backing format other than the declared
 	// one) through a temporary allocation it made and freed every frame, which held Animal
 	// Well at 30 FPS and Monster Boy at 20. The swapchain follows the frame (see Present()).
-	const auto frame_format = image.backing.format;
+	const auto guest_format = image.backing.format;
+	// v0.0.9proQ3: the GL backend presents through an RGBA8 UNORM AHardwareBuffer;
+	// keeping the prepared frame in the UNORM variant of the guest format carries
+	// the sRGB-encoded bytes to the screen untouched (Android displays them as
+	// sRGB), exactly like the UNORM-swapchain fallback of the Vulkan path.
+	auto frame_format = guest_format;
+	if (m_impl->swapchain.GlBackend()) {
+		if (frame_format == vk::Format::eB8G8R8A8Srgb) {
+			frame_format = vk::Format::eB8G8R8A8Unorm;
+		} else if (frame_format == vk::Format::eR8G8B8A8Srgb) {
+			frame_format = vk::Format::eR8G8B8A8Unorm;
+		}
+	}
 	Common::DebugFlags::NoteOnce("CapyPS5-Present", 0x50464d54u, "frame format %d (declared %d)",
 	                             static_cast<int>(frame_format), static_cast<int>(info.pixel_format));
 	auto* frame = m_impl->frames.Acquire({info.extent.width, info.extent.height}, frame_format);
@@ -1072,13 +1497,13 @@ void Presenter::Impl::Present() {
 		swapchain.SetWantSrgb(format == vk::Format::eB8G8R8A8Srgb || format == vk::Format::eR8G8B8A8Srgb);
 	}
 	// Some window systems keep presenting an old swapchain after a resize.
-	if (swapchain.Handle() != nullptr && swapchain.NeedsResize()) {
+	if (swapchain.IsReady() && swapchain.NeedsResize()) {
 		RecoverSwapchain(Swapchain::Status::Recreate);
 	}
 	for (uint32_t attempt = 0; attempt < 2; attempt++) {
-		if (swapchain.Handle() == nullptr) {
+		if (!swapchain.IsReady()) {
 			RecoverSwapchain(Swapchain::Status::SurfaceLost);
-			if (swapchain.Handle() == nullptr) {
+			if (!swapchain.IsReady()) {
 				std::this_thread::sleep_for(std::chrono::milliseconds(16));
 				return;
 			}
