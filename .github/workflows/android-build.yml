@@ -205,8 +205,14 @@ jobs:
           VERSION="$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)"
           TAG="${GITHUB_REF_NAME}"
           cat > /tmp/release_notes.md <<'NOTES'
-          **Console Five Pro v0.0.9proQ3** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
+          **Console Five Pro v0.0.9proQ4** — an independent rebranded build of CapyPS5 v0.0.3, the first PlayStation 5 emulator for Android (built on KytyPS5 and the FEX x86-64 JIT).
 
+          ## v0.0.9proQ4 — the freeze fix, the after-freeze crash, frame flow in heavy 3D (same graphics)
+          - **Fixed: the multi-second freezes.** A draw whose pipeline was still compiling used to block the renderer with an *unbounded* wait on the compile queue. A storm of first-visit pipelines (a new area, material streaming, one-shot LUT passes) could then park the whole renderer behind the workers for tens of seconds - the field logs show 14-28 s of frozen video and starved audio right before the session died. No draw waits more than `debug.capy.pipeline_wait_ms` (default 4 ms, 0 = never wait) now: past the bound the draw is skipped, the compile lands in the background, and the next occurrence draws for real. Every pipeline miss is queued to the async workers - the renderer never compiles inline during play.
+          - **Faster: heavy 3D titles at 1-3 FPS.** That crawl was the signature of the same serialization - 2-6 blocking ~150 ms compiles per frame. With the bound in place, frames flow while the pipelines warm up; the floor becomes the real GPU/CPU work instead of the compile queue. Verified by simulation (real threads, the shipped wait pattern): a storm that froze 2.8 s under the old policy now costs at most 4.07 ms per frame and 73 ms in total. On-device numbers must be confirmed on real hardware - no FPS figure is promised here.
+          - **Fixed: the crash right after a freeze.** The game’s render worker, starved by the freeze, timed out, tore its objects down and wrote through the nulled pointer to 0x1 - both field crash logs died exactly there, and the writes (plain STR, encodings 0xf90002bf / 0xf90012df) are covered by the recovery decoder. A write into the null guard region (below 64 KiB: it can never hold game data, nothing can ever read it back) is now skipped like a wild store; the per-instruction budget keeps a genuine tight null-write loop fatal with the honest crash report (debug.capy.wild_store_recovery).
+          - **Fixed: the library duplicate-key crash** (the game grid died on “Key … was already used”). The grid deduplicates by executable path inside the keyed containers themselves, so the interface can no longer crash on a duplicated entry no matter what produced the list.
+          - Honest testing note: the mechanisms above were verified by simulation (a test that parses the shipped source and decodes the exact crash instructions, a threaded test of the shipped wait pattern, an analytical model labelled as a model). On-device frame rates must be measured on real hardware by users - nothing in these notes is a promised FPS number.
           ## v0.0.9proQ3 — Graphics API option, shader optimizer, crash fix, the Mali regression and the frame-drop round (same graphics)
 
           - **New: Graphics API setting (Vulkan / OpenGL ES) — the compatibility backend.** Settings → Graphics (also per game). Vulkan remains the default: it renders and presents directly, the fastest path. The new OpenGL ES mode is for devices whose Vulkan present path is broken while offscreen Vulkan and EGL work: the final frame is drawn into a 3-image AHardwareBuffer ring (`VK_ANDROID_external_memory_android_hardware_buffer`) and a fully runtime-loaded EGL/GLES renderer (no build-time EGL dependency) presents it to the same SurfaceView — same pixels. Frames stay in the UNORM variant of the guest format so sRGB-encoded bytes reach the screen untouched. The core falls back to the Vulkan swapchain automatically when the device lacks AHardwareBuffer import, EGL fails at runtime, or after five present failures; the Vulkan path is untouched while the setting stays on Vulkan (`debug.capy.gl_backend`).
@@ -264,7 +270,7 @@ jobs:
           - Upstream **CapyPS5 v0.0.3** by Ghael-V; this project is an independent rebranded build of it.
           - KytyPS5 and the original Kyty by InoriRus, and the FEX project.
 
-          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.9proQ3)
+          License: **GPL-2.0-only** — full source: https://github.com/maxi000q/ConsoleFivePro (tag: v0.0.9proQ4)
           NOTES
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets."

@@ -15,8 +15,8 @@ android {
         applicationId = "com.consolefivepro"
         minSdk = 31
         targetSdk = 34
-        versionCode = 15
-        versionName = "0.0.9proQ3"
+        versionCode = 16
+        versionName = "0.0.9proQ4"
 
         ndk {
             abiFilters.add("arm64-v8a")
