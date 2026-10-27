@@ -42,6 +42,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <time.h>
 #include <cstring>
 #include <dlfcn.h>
 #include <mutex>
@@ -1308,6 +1309,72 @@ bool HandleFexUnalignedAccess(void* native_context) {
 	return false;
 }
 
+// Console Five Pro (v0.0.9proQ3): per-instruction fault budgets for the guest
+// recovery paths below. The original process-wide cap (64 recoveries) was born
+// from the first crash logs, but a title whose worker polls a dead object once
+// per frame survives every individual fault and still burned through it in
+// about a minute - the 65th fault then killed a session the game was coping
+// with. The budget is now per faulting instruction and time-based: the same
+// host instruction faulting in quick succession (a genuine tight loop - faults
+// microseconds apart) is cut off after kMaxFaultBurst repeats and the honest
+// crash report returns, while faults spaced more than a millisecond apart
+// (once per frame or rarer) reset their counter and are recovered for the
+// lifetime of the session. A process-wide valve (kTotalRecoveryBudget) exists
+// only so a pathological fault storm still terminates. Signal-handler rules:
+// no allocation, no locks; the array is static storage, clock_gettime is
+// async-signal-safe, and the naturally-aligned per-field accesses are
+// single-copy atomic on arm64 - a lost update between two racing threads can
+// only miscount a burst by one step, which the threshold tolerates. Slots are
+// claimed empty-first, then stalest; the same host pc is always the same one
+// instruction, so the three recovery paths cannot cross-contaminate a slot.
+namespace {
+struct GuestFaultSite {
+	uintptr_t pc;
+	uint64_t  last_ns;
+	uint32_t  burst;
+};
+
+constexpr uint32_t kMaxFaultBurst       = 256;         // sub-millisecond repeats at one instruction
+constexpr uint64_t kFaultFastGapNs      = 1000000ull;  // 1 ms: shorter than any frame interval
+constexpr uint32_t kTotalRecoveryBudget = 1u << 20;    // per recovery path, a storm valve
+
+GuestFaultSite g_guest_fault_sites[16];
+
+bool GuestFaultSiteAllowsRecovery(uintptr_t pc) {
+	struct timespec ts {};
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	const uint64_t now =
+		static_cast<uint64_t>(ts.tv_sec) * 1000000000ull + static_cast<uint64_t>(ts.tv_nsec);
+
+	GuestFaultSite* slot   = nullptr;
+	GuestFaultSite* oldest = &g_guest_fault_sites[0];
+	for (auto& site: g_guest_fault_sites) {
+		if (site.pc == pc) {
+			slot = &site;
+			break;
+		}
+		if (site.last_ns < oldest->last_ns) {
+			oldest = &site;
+		}
+	}
+	if (slot == nullptr) {
+		// Claim a slot: an empty one (last_ns == 0) or the stalest.
+		slot          = oldest;
+		slot->pc      = pc;
+		slot->burst   = 0;
+		slot->last_ns = 0;
+	}
+	const uint64_t gap = now - slot->last_ns; // huge on a slot's first fault
+	slot->last_ns      = now;
+	if (gap > kFaultFastGapNs) {
+		slot->burst = 0; // real time passed since this instruction last faulted
+	} else {
+		++slot->burst;
+	}
+	return slot->burst < kMaxFaultBurst;
+}
+} // namespace
+
 // Console Five Pro (v0.0.9proQ1): guest null-pointer READ recovery. A data read below
 // 64 KiB from translated guest code used to end the whole session with "the game
 // itself crashed" - even when it was a one-off hiccup the game would have survived
@@ -1318,8 +1385,10 @@ bool HandleFexUnalignedAccess(void* native_context) {
 // Only exactly-matched plain loads are recovered - unsigned-offset, unscaled (LDUR)
 // and register-offset single loads plus GPR LDP (signed offset); no writeback forms,
 // no atomics, no exclusives, no literals. Anything else falls through to the normal
-// crash report. Writes are never faked. A budget stops a real null-deref loop from
-// becoming a silent hang. `setprop debug.capy.null_read_recovery 0` restores the
+// crash report. Writes are never faked. A per-instruction budget (see
+// GuestFaultSiteAllowsRecovery below) stops a real null-deref loop from becoming
+// a silent hang while spread-out faults are recovered for the whole session.
+// `setprop debug.capy.null_read_recovery 0` restores the
 // old behaviour.
 bool RecoverGuestNullRead(void* native_context, uint64_t fault_address) {
 #if defined(__aarch64__)
@@ -1327,9 +1396,8 @@ bool RecoverGuestNullRead(void* native_context, uint64_t fault_address) {
 	if (enabled.Get() == 0) {
 		return false;
 	}
-	static constexpr uint32_t kBudget = 64;
 	static std::atomic<uint32_t> recovered {0};
-	if (recovered.load(std::memory_order_relaxed) >= kBudget) {
+	if (recovered.load(std::memory_order_relaxed) >= kTotalRecoveryBudget) {
 		return false;
 	}
 
@@ -1452,12 +1520,18 @@ bool RecoverGuestNullRead(void* native_context, uint64_t fault_address) {
 			gprs[rt2] = 0;
 		}
 	}
+	// Per-instruction budget: a tight loop at this exact instruction is cut
+	// off, faults spaced like frames are recovered forever (see
+	// GuestFaultSiteAllowsRecovery).
+	if (!GuestFaultSiteAllowsRecovery(pc)) {
+		return false;
+	}
 	context->uc_mcontext.pc = static_cast<uint64_t>(pc + 4);
 	const auto count = recovered.fetch_add(1, std::memory_order_relaxed) + 1;
-	if (count <= 4 || count == kBudget) {
-		ALOGW("CpuBackend: recovered guest null read #%u/%u (pc=0x%llx vaddr=0x%llx) - "
+	if (count <= 4 || (count & 0xFFu) == 0) {
+		ALOGW("CpuBackend: recovered guest null read #%u (pc=0x%llx vaddr=0x%llx) - "
 		      "returning zero and continuing",
-		      count, kBudget, static_cast<unsigned long long>(pc),
+		      count, static_cast<unsigned long long>(pc),
 		      static_cast<unsigned long long>(fault_address));
 	}
 	return true;
@@ -1480,8 +1554,9 @@ bool RecoverGuestNullRead(void* native_context, uint64_t fault_address) {
 // atomics, no exclusives): the destination receives zero, exactly what a zeroed
 // uncommitted page would return, and the PC advances. Reads below 64 KiB keep the
 // dedicated null-page path and its honest crash report; pages the GPU tracker or a
-// guarded copy owns are recovered earlier in the fault chain. A budget stops a
-// genuine wild-read loop from becoming a silent hang.
+// guarded copy owns are recovered earlier in the fault chain. A per-instruction
+// budget stops a genuine wild-read loop from becoming a silent hang while
+// spread-out faults are recovered for the whole session.
 // `setprop debug.capy.wild_read_recovery 0` restores the old behaviour.
 bool RecoverGuestWildRead(void* native_context, uint64_t fault_address) {
 #if defined(__aarch64__)
@@ -1493,9 +1568,8 @@ bool RecoverGuestWildRead(void* native_context, uint64_t fault_address) {
 	if (fault_address < 0x10000) {
 	        return false;
 	}
-	static constexpr uint32_t kBudget = 64;
 	static std::atomic<uint32_t> recovered {0};
-	if (recovered.load(std::memory_order_relaxed) >= kBudget) {
+	if (recovered.load(std::memory_order_relaxed) >= kTotalRecoveryBudget) {
 	        return false;
 	}
 
@@ -1613,12 +1687,18 @@ bool RecoverGuestWildRead(void* native_context, uint64_t fault_address) {
 	                gprs[rt2] = 0;
 	        }
 	}
+	// Per-instruction budget: a tight loop at this exact instruction is cut
+	// off, faults spaced like frames are recovered forever (see
+	// GuestFaultSiteAllowsRecovery).
+	if (!GuestFaultSiteAllowsRecovery(pc)) {
+	        return false;
+	}
 	context->uc_mcontext.pc = static_cast<uint64_t>(pc + 4);
 	const auto count = recovered.fetch_add(1, std::memory_order_relaxed) + 1;
-	if (count <= 8 || count == kBudget) {
-	        ALOGW("CpuBackend: recovered guest wild read #%u/%u (pc=0x%llx vaddr=0x%llx) - "
+	if (count <= 8 || (count & 0xFFu) == 0) {
+	        ALOGW("CpuBackend: recovered guest wild read #%u (pc=0x%llx vaddr=0x%llx) - "
 	              "uncommitted guest hole, returning zero and continuing",
-	              count, kBudget, static_cast<unsigned long long>(pc),
+	              count, static_cast<unsigned long long>(pc),
 	              static_cast<unsigned long long>(fault_address));
 	}
 	return true;
@@ -1639,8 +1719,9 @@ bool RecoverGuestWildRead(void* native_context, uint64_t fault_address) {
 // (unsigned/unscaled immediate), STP (signed offset, no writeback) and register-offset
 // STR, GPR and SIMD - no post/pre-index writeback, no atomics, no exclusives. Store
 // destinations are sources, so no register state is touched; only the PC advances.
-// True null dereferences (below 64 KiB) keep the honest crash report; a budget stops
-// a genuine wild-store loop from becoming a silent hang.
+// True null dereferences (below 64 KiB) keep the honest crash report; a
+// per-instruction budget stops a genuine wild-store loop from becoming a silent
+// hang while spread-out faults are skipped for the whole session.
 // `setprop debug.capy.wild_store_recovery 0` restores the old behaviour.
 bool RecoverGuestWildStore(void* native_context, uint64_t fault_address) {
 #if defined(__aarch64__)
@@ -1653,9 +1734,8 @@ bool RecoverGuestWildStore(void* native_context, uint64_t fault_address) {
 	if (fault_address < 0x10000) {
 		return false;
 	}
-	static constexpr uint32_t kBudget = 64;
 	static std::atomic<uint32_t> recovered {0};
-	if (recovered.load(std::memory_order_relaxed) >= kBudget) {
+	if (recovered.load(std::memory_order_relaxed) >= kTotalRecoveryBudget) {
 		return false;
 	}
 
@@ -1730,12 +1810,18 @@ bool RecoverGuestWildStore(void* native_context, uint64_t fault_address) {
 	if (!Libs::LibKernel::Memory::IsRangeOutsideGuestMemory(fault_address, bytes)) {
 		return false;
 	}
+	// Per-instruction budget: a tight loop at this exact instruction is cut
+	// off, faults spaced like frames are skipped forever (see
+	// GuestFaultSiteAllowsRecovery).
+	if (!GuestFaultSiteAllowsRecovery(pc)) {
+		return false;
+	}
 	context->uc_mcontext.pc = static_cast<uint64_t>(pc + 4);
 	const auto count = recovered.fetch_add(1, std::memory_order_relaxed) + 1;
-	if (count <= 4 || count == kBudget) {
-		ALOGW("CpuBackend: skipped guest wild store #%u/%u (pc=0x%llx vaddr=0x%llx) - "
+	if (count <= 4 || (count & 0xFFu) == 0) {
+		ALOGW("CpuBackend: skipped guest wild store #%u (pc=0x%llx vaddr=0x%llx) - "
 		      "target aliases no guest memory, continuing",
-		      count, kBudget, static_cast<unsigned long long>(pc),
+		      count, static_cast<unsigned long long>(pc),
 		      static_cast<unsigned long long>(fault_address));
 	}
 	return true;
