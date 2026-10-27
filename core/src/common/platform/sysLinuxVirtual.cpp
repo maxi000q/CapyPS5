@@ -621,7 +621,16 @@ bool Protect(uint64_t address, uint64_t size, Mode mode) {
 	// soft page faults while the game touches its memory and far fewer TLB misses for
 	// every guest dereference the FEX translation makes. A no-op on kernels with THP
 	// disabled; never changes guest-visible contents. `debug.capy.thp 0` reverts.
+	// v0.0.9proQ3: huge pages are a win on desktop, but on Android a 2 MiB
+	// huge-page fault under memory pressure can stall for milliseconds in
+	// synchronous direct compaction - exactly the "many frame drops" a heavy
+	// title produces on an 8 GB phone (the guest heap alone takes several GB).
+	// Android defaults to 4 KiB pages again; `setprop debug.capy.thp 1` re-enables.
+#if defined(__ANDROID__)
+	static Common::DebugFlags::CachedValue thp("debug.capy.thp", 0);
+#else
 	static Common::DebugFlags::CachedValue thp("debug.capy.thp", 1);
+#endif
 	constexpr uint64_t HugePageBytes = 2ull * 1024 * 1024;
 	if (mode != Mode::NoAccess && bytes >= HugePageBytes && thp.Get() != 0) {
 		(void)::madvise(reinterpret_cast<void*>(page_start << 12u), bytes, MADV_HUGEPAGE);

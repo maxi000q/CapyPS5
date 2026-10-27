@@ -417,9 +417,10 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 		// pages in long sequential sweeps, and a wider window halves the fault+download count.
 		static Common::DebugFlags::CachedValue read_ahead_kb(
 		    "debug.capy.read_ahead_kb",
-		    (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
-		        ? 512
-		        : 256);
+		    // v0.0.9proQ3: Mali keeps the 256 KB window - it is bandwidth-bound and a
+		    // wider download copies more bytes per fault; Adreno has the headroom for
+		    // the 512 KB window the Q2 round gave it.
+		    Common::GpuProfile::AdrenoProfileEnabled() ? 512 : 256);
 		const uint64_t read_ahead   = static_cast<uint64_t>(std::max<int64_t>(read_ahead_kb.Get(), 0)) * 1024u;
 		const uint64_t buffer_end   = buffer.CpuAddress() + buffer.Size();
 		const uint64_t download_low = std::max(Common::AlignDown(vaddr, TRACKER_PAGE_SIZE), buffer.CpuAddress());
