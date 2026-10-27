@@ -1240,8 +1240,25 @@ PipelineCache::Pipeline* PipelineCache::GetGraphicsPipeline(
 				// draw exactly like the async path - the compile lands and the next occurrence
 				// renders for real. `setprop debug.capy.pipeline_wait_ms N` tunes the bound
 				// (0 = never wait, a large N restores the old blocking behaviour).
-				static Common::DebugFlags::CachedValue wait_ms("debug.capy.pipeline_wait_ms", 4);
-				const int64_t ms = std::max<int64_t>(wait_ms.Get(), 0);
+				//
+				// v0.0.10pro phase 4: the default is tier-aware. General content keeps the
+				// 4 ms bound. Under ANY locked turbo class (500/501/502) or the resolution
+				// policy the bound drops to 1 ms: those are exactly the titles whose
+				// warm-up storms matter (hundreds of unique pipelines), and every 4 ms
+				// park here was 4 ms the frame did not advance - the guest flip thread
+				// starved and the compile queue drained no faster for it (the workers,
+				// not the waiter, do the compiling). At 1 ms the draw skips sooner, the
+				// frame reaches the flip, and the next occurrence of the same draw
+				// finds the pipeline ready.
+				static Common::DebugFlags::CachedValue wait_ms("debug.capy.pipeline_wait_ms", -1);
+				const int64_t tier_default =
+				    Common::EnginePolicy::CurrentTier() ==
+				            Common::EnginePolicy::WorkloadTier::General
+				        ? 4
+				        : 1;
+				const int64_t requested = wait_ms.Get();
+				const int64_t ms =
+				    std::max<int64_t>(requested >= 0 ? requested : tier_default, 0);
 				bool ready = false;
 				if (ms == 0) {
 					ready = job->done.load(std::memory_order_acquire);
@@ -1401,8 +1418,17 @@ void PipelineCache::AsyncWorker() {
 			// v0.0.9proQ4 round 5: the growth size and the cap come from the
 			// vendor-aware table too - Mali under the throughput tier grows by
 			// two (cap 8), everyone else by one. Still one shot per run.
+			//
+			// v0.0.10pro phase 4: the gate is now the resolved tier, not
+			// profile500 alone. Rounds 4-5 only ever grew the pool under class
+			// 500 - a 501 or (new) 502 title that locked its class after the
+			// constructor ran kept the General-sized pool for the whole run,
+			// exactly the games whose warm-up needs the workers most. The
+			// resolution-policy floor (a 4K target set with no class locked
+			// yet) grows the pool too, for the same reason.
 			if (!m_turbo_worker_applied && m_async_queue.size() >= m_async_workers.size() &&
-			    Common::ContentProfile::Profile500Enabled()) {
+			    Common::EnginePolicy::CurrentTier() !=
+			        Common::EnginePolicy::WorkloadTier::General) {
 				const auto& growth_tuning = Common::EnginePolicy::TuningFor(
 				    Common::GpuProfile::MaliProfileEnabled(),
 				    Common::GpuProfile::AdrenoProfileEnabled(),

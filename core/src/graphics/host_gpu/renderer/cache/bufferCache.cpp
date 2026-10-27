@@ -67,7 +67,13 @@ uint64_t StreamBufferSize() {
 		    (Common::GpuProfile::MaliProfileEnabled() || Common::GpuProfile::AdrenoProfileEnabled())
 		        ? 128
 		        : 96;
-		if (Common::ContentProfile::Profile500Enabled()) {
+		// v0.0.10pro phase 4: the forward-3D family (502) streams the same
+		// volume of geometry/material uploads as the deferred family - a
+		// 3D action title pushing its scene through the upload ring gets
+		// the same 160 MiB lift, so heavy streaming frames stop waiting on
+		// ring reuse.
+		if (Common::ContentProfile::Profile500Enabled() ||
+		    Common::ContentProfile::Profile502Enabled()) {
 			value = 160;
 		}
 	}
