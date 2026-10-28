@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -60,12 +61,43 @@ const val CLUSTER_RIGHT = 1
 const val CLUSTER_TOP = 2
 
 /**
+ * Cluster box sizes (dp) shared by the pad and the controls editor: the editor clamps the
+ * user's layout into its isolated pad area with the same numbers the pad draws with, so
+ * what the editor shows is exactly what the game gets.
+ */
+object ClusterSizes {
+    fun width(index: Int, scale: Float, touchpad: Boolean): Dp = when (index) {
+        CLUSTER_TOP -> (if (touchpad) 432.dp else 200.dp) * scale
+        else -> 254.dp * scale
+    }
+
+    fun height(index: Int, scale: Float): Dp = when (index) {
+        CLUSTER_TOP -> 100.dp * scale
+        else -> 170.dp * scale
+    }
+}
+
+/**
+ * Centre clamp for one axis: keeps the whole cluster box inside [lo, hi]; a degenerate
+ * range (the area is smaller than the cluster) centres it instead of inverting the clamp.
+ */
+internal fun clampCentreAxis(valuePx: Float, lo: Float, hi: Float, sizePx: Float): Float {
+    val half = sizePx / 2f
+    return if (lo + half <= hi - half) valuePx.coerceIn(lo + half, hi - half) else (lo + hi) / 2f
+}
+
+/**
  * On-screen DualSense: shoulders, d-pad, both sticks, face buttons, Create/Options and touchpad.
  *
  * v0.0.10pro phase 3: the three clusters (left pad side, right pad side, top bar) follow the
  * user's [ControlsLayout] - positions and sizes are set in the controls editor and saved. With
  * [editMode] the pad is the editor's live preview: no input reaches the game, clusters can be
  * dragged and selected instead.
+ *
+ * v0.0.10pro: [editBounds] (px, this pad's coordinate space) confines the clusters to the
+ * editor's isolated pad box - the editing tools sit outside it, so nothing ever overlaps the
+ * clusters again. Positions stay full-screen fractions (what the saved layout stores), so the
+ * in-game overlay shows the same layout at the same relative spot on any screen size.
  */
 @Composable
 fun VirtualGamepad(
@@ -77,8 +109,9 @@ fun VirtualGamepad(
     editMode: Boolean = false,
     selectedCluster: Int = -1,
     onClusterSelect: ((Int) -> Unit)? = null,
-    onClusterMove: ((Int, Float, Float) -> Unit)? = null,
+    onClusterMoved: ((Int, Float, Float) -> Unit)? = null,
     onMenuClick: () -> Unit = {},
+    editBounds: Rect? = null,
 ) {
     var buttons by remember { mutableIntStateOf(0) }
     val axes = remember { FloatArray(6) } // lx, ly, rx, ry, l2, r2
@@ -99,24 +132,48 @@ fun VirtualGamepad(
         val screenW = constraints.maxWidth.toFloat()
         val screenH = constraints.maxHeight.toFloat()
 
-        // Centres the (w x h) cluster box on its anchor; large clusters stay on screen.
+        // The current values the gesture handlers must see even while a drag keeps the old
+        // pointerInput block alive (rememberUpdatedState bridges recomposition into it).
+        val currentLayout by rememberUpdatedState(layout)
+        val currentBounds by rememberUpdatedState(editBounds)
+        val currentW by rememberUpdatedState(screenW)
+        val currentH by rememberUpdatedState(screenH)
+
+        // A cluster centre as screen fractions, clamped so the whole cluster box stays inside
+        // editBounds (the editor's isolated pad area) - or the screen when there are none.
+        fun clampCenter(
+            index: Int, x: Float, y: Float,
+            lay: ControlsLayout, bounds: Rect?, w: Float, h: Float,
+        ): Pair<Float, Float> {
+            val c = lay.cluster(index)
+            val wpx = with(density) { ClusterSizes.width(index, c.scale, showTouchpad).toPx() }
+            val hpx = with(density) { ClusterSizes.height(index, c.scale).toPx() }
+            val cx = clampCentreAxis(x * w, bounds?.left ?: 0f, bounds?.right ?: w, wpx) / w
+            val cy = clampCentreAxis(y * h, bounds?.top ?: 0f, bounds?.bottom ?: h, hpx) / h
+            return cx to cy
+        }
+
+        // Centres the (w x h) cluster box on its anchor; large clusters stay inside the
+        // allowed area.
         fun place(index: Int, w: Dp, h: Dp): Modifier {
             val pos = layout.cluster(index)
+            val (cx, cy) = clampCenter(index, pos.x, pos.y, layout, editBounds, screenW, screenH)
             val wpx = with(density) { w.toPx() }
             val hpx = with(density) { h.toPx() }
             return Modifier
                 .size(w, h)
                 .offset {
                     IntOffset(
-                        (screenW * pos.x - wpx / 2f).roundToInt()
+                        (screenW * cx - wpx / 2f).roundToInt()
                             .coerceIn(0, (screenW - wpx).roundToInt().coerceAtLeast(0)),
-                        (screenH * pos.y - hpx / 2f).roundToInt()
+                        (screenH * cy - hpx / 2f).roundToInt()
                             .coerceIn(0, (screenH - hpx).roundToInt().coerceAtLeast(0)),
                     )
                 }
         }
 
-        // In the editor: tap selects a cluster, drag moves it (deltas in screen fractions).
+        // In the editor: tap selects a cluster, drag moves it. The drag reports the CLAMPED
+        // new centre (screen fractions) - what the editor saves is exactly what the pad shows.
         fun editGestures(index: Int): Modifier = if (!editMode) {
             Modifier
         } else {
@@ -125,8 +182,26 @@ fun VirtualGamepad(
                     detectTapGestures { onClusterSelect?.invoke(index) }
                 }
                 .pointerInput(index) {
-                    detectDragGestures { change, drag ->
-                        onClusterMove?.invoke(index, drag.x / screenW, drag.y / screenH)
+                    var dragX = 0f
+                    var dragY = 0f
+                    var baseX = 0f
+                    var baseY = 0f
+                    detectDragGestures(
+                        onDragStart = {
+                            val cluster = currentLayout.cluster(index)
+                            baseX = cluster.x
+                            baseY = cluster.y
+                            dragX = 0f
+                            dragY = 0f
+                        },
+                    ) { change, drag ->
+                        dragX += drag.x / currentW
+                        dragY += drag.y / currentH
+                        val (cx, cy) = clampCenter(
+                            index, baseX + dragX, baseY + dragY,
+                            currentLayout, currentBounds, currentW, currentH,
+                        )
+                        onClusterMoved?.invoke(index, cx, cy)
                         change.consume()
                     }
                 }
@@ -148,7 +223,7 @@ fun VirtualGamepad(
 
         // Left: L2/L1, d-pad and left stick.
         val ls = layout.left.scale
-        Box(clusterBox(CLUSTER_LEFT, 254.dp * ls, 170.dp * ls)) {
+        Box(clusterBox(CLUSTER_LEFT, ClusterSizes.width(CLUSTER_LEFT, ls, showTouchpad), ClusterSizes.height(CLUSTER_LEFT, ls))) {
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp * ls)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp * ls)) {
                     GamepadButton("L2", 56.dp * ls, 36.dp * ls, scale = ls, enabled = !editMode) {
@@ -172,7 +247,7 @@ fun VirtualGamepad(
 
         // Right: R1/R2, right stick and face buttons.
         val rs = layout.right.scale
-        Box(clusterBox(CLUSTER_RIGHT, 254.dp * rs, 170.dp * rs)) {
+        Box(clusterBox(CLUSTER_RIGHT, ClusterSizes.width(CLUSTER_RIGHT, rs, showTouchpad), ClusterSizes.height(CLUSTER_RIGHT, rs))) {
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp * rs)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp * rs)) {
                     GamepadButton("R1", 56.dp * rs, 36.dp * rs, scale = rs, enabled = !editMode) {
@@ -196,8 +271,7 @@ fun VirtualGamepad(
 
         // Top centre: Create, touchpad, Options and the emulator menu.
         val ts = layout.top.scale
-        val topWidth = (if (showTouchpad) 432.dp else 200.dp) * ts
-        Box(clusterBox(CLUSTER_TOP, topWidth, 100.dp * ts)) {
+        Box(clusterBox(CLUSTER_TOP, ClusterSizes.width(CLUSTER_TOP, ts, showTouchpad), ClusterSizes.height(CLUSTER_TOP, ts))) {
             Row(
                 Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp * ts),
