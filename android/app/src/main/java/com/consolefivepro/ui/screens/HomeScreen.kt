@@ -62,6 +62,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -133,7 +134,10 @@ fun HomeScreen(
             if (index > 0) selected = index
         }
     }
-    var showSettings by remember { mutableStateOf(false) }
+    // Saveable so the settings survive the activity recreation a language switch
+    // performs (Localization.setLanguage recreates for the RTL mirror): the user
+    // picks a language and comes back to the settings screen, not the main menu.
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     var optionsFor by remember { mutableStateOf<GameItem?>(null) }
     var trophiesFor by remember { mutableStateOf<GameItem?>(null) }
     val current = games.getOrNull(selected.coerceIn(0, (games.size - 1).coerceAtLeast(0)))

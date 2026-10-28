@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -435,9 +436,12 @@ fun SettingsScreen(
         )
     }
 
-    var category by remember { mutableIntStateOf(0) }
-    var inContent by remember { mutableStateOf(false) }
-    var row by remember { mutableIntStateOf(0) }
+    // Saveable so a language switch (activity recreation, see Localization.setLanguage)
+    // reopens the settings where they were - the System category with the language row,
+    // not the launcher home.
+    var category by rememberSaveable { mutableIntStateOf(0) }
+    var inContent by rememberSaveable { mutableStateOf(false) }
+    var row by rememberSaveable { mutableIntStateOf(0) }
     val items = categories[category].items()
     if (row >= items.size) row = (items.size - 1).coerceAtLeast(0)
 
