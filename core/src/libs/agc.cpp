@@ -3978,8 +3978,15 @@ int KYTY_SYSV_ABI AgcQueueEndOfPipeActionPatchAddress(uint32_t*             cmd,
 		cmd[2] = static_cast<uint32_t>(vaddr & 0xffffffffu);
 		cmd[3] = (cmd[3] & 0xffff0000u) | static_cast<uint32_t>((vaddr >> 32u) & 0xffffu);
 	} else {
-		EXIT("unsupported queueEndOfPipeAction packet for address patch: 0x%08" PRIx32 "\n",
-		     cmd[0]);
+		// A buffer without an end-of-pipe packet is rejected like the wait-packet patchers
+		// do: report the invalid packet once and keep the emulator running.
+		Common::DebugFlags::NoteOnce(
+		    "CapyPS5-Agc", 0x4550000000000000ull | (reinterpret_cast<uint64_t>(cmd) & 0xffffffffffffull),
+		    "QueueEndOfPipeActionPatchAddress: no EOP packet at cmd=0x%llx (dw %08x %08x %08x %08x, "
+		    "before %08x %08x) address=0x%llx",
+		    static_cast<unsigned long long>(reinterpret_cast<uint64_t>(cmd)), cmd[0], cmd[1], cmd[2],
+		    cmd[3], cmd[-2], cmd[-1], static_cast<unsigned long long>(vaddr));
+		return GRAPHICS5_ERROR_INVALID_PACKET;
 	}
 
 	return OK;
