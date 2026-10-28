@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <iterator>
 #include <map>
 
 namespace Libs::Graphics {
@@ -22,22 +21,14 @@ public:
 		if (it != m_ranges.begin() && std::prev(it)->second >= address) {
 			it = std::prev(it);
 		}
-		// Grow the overlapped node in place instead of erasing the whole run and
-		// re-inserting: only the neighbours that the widened range actually reaches are
-		// released, and a re-add of the same range is a plain early return.
-		if (it == m_ranges.end() || it->first > address) {
-			it = m_ranges.emplace_hint(it, address, end);
-		} else {
-			if (it->second >= end) {
-				return;
-			}
-			it->second = end;
+		uint64_t begin = address;
+		uint64_t last  = end;
+		while (it != m_ranges.end() && it->first <= last) {
+			begin = std::min(begin, it->first);
+			last  = std::max(last, it->second);
+			it    = m_ranges.erase(it);
 		}
-		auto next = std::next(it);
-		while (next != m_ranges.end() && next->first <= it->second) {
-			it->second = std::max(it->second, next->second);
-			next       = m_ranges.erase(next);
-		}
+		m_ranges.emplace(begin, last);
 	}
 
 	void Subtract(uint64_t address, uint64_t size) {
