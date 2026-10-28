@@ -12,6 +12,7 @@
 #include "graphics/host_gpu/renderer/render.h"
 
 #include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <queue>
 #include <stop_token>
@@ -60,6 +61,14 @@ public:
 	void                      DeferOperation(Common::UniqueFunction<void>&& operation);
 	void                      DeferPriorityOperation(Common::UniqueFunction<void>&& operation);
 	[[nodiscard]] bool        HasPendingPriorityOperations();
+	// Notified after every guest-memory completion (a label write that landed when the
+	// host GPU finished). A guest queue parked on that label wants to retry at once
+	// instead of waiting out the blocked-queue timeout, so the owner of the guest
+	// queues registers a wake-up here. The hook runs on the priority thread while it
+	// holds the operation mutex: it must not re-enter this scheduler, and the setter
+	// blocks until any in-flight invocation has returned (call it before the owner's
+	// own teardown locks, not after).
+	void                      SetCompletionHook(std::function<void()> hook);
 	[[nodiscard]] static bool InDeferredOperation() noexcept;
 
 	[[nodiscard]] bool Active() const noexcept { return m_command.m_registers != nullptr; }
@@ -126,6 +135,7 @@ private:
 	bool                         m_priority_active      = false;
 	uint64_t                     m_priority_active_tick = 0;
 	OperationState               m_operation_state      = OperationState::Open;
+	std::function<void()>        m_completion_hook;
 	// Console Five Pro (v0.0.10pro phase 1): batched queue submissions. Consecutive
 	// bare flushes are collected and submitted as one vkQueueSubmit; a priority deferral
 	// (flip completion) sets m_force_submit so the very next submission is real, keeping

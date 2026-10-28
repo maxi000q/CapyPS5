@@ -418,6 +418,11 @@ void CommandScheduler::QueueOperation(Common::UniqueFunction<void>&& operation, 
 	operation();
 }
 
+void CommandScheduler::SetCompletionHook(std::function<void()> hook) {
+	std::lock_guard lock(m_operation_mutex);
+	m_completion_hook = std::move(hook);
+}
+
 bool CommandScheduler::HasPendingPriorityOperations() {
 	std::lock_guard lock(m_operation_mutex);
 	return !m_priority_operations.empty() || m_priority_active;
@@ -450,6 +455,12 @@ void CommandScheduler::PriorityOperationsThread(std::stop_token stop) {
 			std::lock_guard lock(m_operation_mutex);
 			m_priority_active      = false;
 			m_priority_active_tick = 0;
+			// The operation just completed guest memory (labels, EOP results); holding the
+			// mutex here keeps SetCompletionHook serialized against this invocation, so the
+			// hook can never run against a half-dead owner.
+			if (m_completion_hook) {
+				m_completion_hook();
+			}
 		}
 		m_operation_available.notify_all();
 	}

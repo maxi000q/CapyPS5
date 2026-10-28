@@ -109,7 +109,10 @@ private:
 
 	void              Enqueue(Submission submission);
 	void              ProcessCommands();
-	bool              Process(Submission& submission);
+	// Returns whether the submission finished its packet stream. `ran_packets` reports
+	// whether this slice executed at least one guest command before blocking - the signal
+	// that another queue's wait may have been released in the process.
+	bool              Process(Submission& submission, bool& ran_packets);
 	static void       ThreadRun(void* data);
 	CommandProcessor& GetProcessor(uint32_t queue_id);
 

@@ -147,6 +147,11 @@ GuestGpu::GuestGpu(RenderContext& renderer): m_renderer(renderer) {
 	m_gfx_cp = std::make_unique<CommandProcessor>(renderer, 0);
 	m_gfx_cp->Reset();
 	m_thread = std::jthread(ThreadRun, this);
+	// Cross-queue dependency: async compute and graphics fence each other with labels
+	// several times per frame, and the write lands when the HOST GPU finishes - the
+	// deferred-completion thread sees it, not this thread. Without a wake-up here every
+	// hand-off idled out the blocked-queue timeout before the waiting queue retried.
+	m_renderer.GetCommandScheduler().SetCompletionHook([this] { Wake(); });
 }
 
 GuestGpu::~GuestGpu() {
@@ -158,6 +163,10 @@ void GuestGpu::Shutdown() {
 	if (m_shutdown_complete) {
 		return;
 	}
+	// Detach the completion hook before anything it captures starts dying. First thing on
+	// purpose: the setter waits out any in-flight hook call, and later steps of this
+	// function hold locks the hook itself needs (the queue mutex inside Wake).
+	m_renderer.GetCommandScheduler().SetCompletionHook({});
 	{
 		Common::LockGuard lock(m_queue_mutex);
 		m_accepting = false;
@@ -827,12 +836,26 @@ void GuestGpu::ThreadRun(void* data) {
 		}
 
 		EXIT_IF(!has_submission);
-		const bool complete = gpu->Process(submission);
+		bool       ran_packets = false;
+		const bool complete    = gpu->Process(submission, ran_packets);
 
 		Common::LockGuard lock(gpu->m_queue_mutex);
 		if (!complete) {
-			submission.blocked = true;
-			gpu->m_queues[submission.queue_id].push_front(std::move(submission));
+			// The slice blocked, but it may have executed packets first - and those packets
+			// can be exactly what another queue is parked on (the label hand-offs above).
+			// Let every queue's head retry now instead of after the blocked-queue timeout;
+			// queues still truly stuck re-block on their next slice, which costs one
+			// cheap dequeue/enqueue instead of a full timeout of frame time.
+			if (ran_packets) {
+				for (auto& queue: gpu->m_queues) {
+					if (!queue.empty()) {
+						queue.front().blocked = false;
+					}
+				}
+			}
+			const auto queue_id = submission.queue_id;
+			submission.blocked  = true;
+			gpu->m_queues[queue_id].push_front(std::move(submission));
 			gpu->m_submission_count++;
 		} else {
 			for (auto& queue: gpu->m_queues) {
@@ -848,7 +871,7 @@ void GuestGpu::ThreadRun(void* data) {
 	}
 }
 
-bool GuestGpu::Process(Submission& submission) {
+bool GuestGpu::Process(Submission& submission, bool& ran_packets) {
 	const bool first_slice = !submission.started;
 	auto&      cp          = GetProcessor(submission.queue_id);
 
@@ -868,7 +891,6 @@ bool GuestGpu::Process(Submission& submission) {
 
 	switch (submission.type) {
 		case SubmissionType::Graphics: {
-			bool progressed = false;
 			submission.constant_complete |= submission.constant_commands.empty();
 			for (;;) {
 				bool round_progress = false;
@@ -887,7 +909,7 @@ bool GuestGpu::Process(Submission& submission) {
 					    Pm4ProcessResult::Complete;
 					round_progress |= submission.command_execution.MadeProgress();
 				}
-				progressed |= round_progress;
+				ran_packets |= round_progress;
 				complete = submission.command_complete && submission.constant_complete;
 				if (complete || !round_progress) {
 					break;
@@ -904,7 +926,7 @@ bool GuestGpu::Process(Submission& submission) {
 				Common::LockGuard lock(m_queue_mutex);
 				more_queued = m_submission_count != 0;
 			}
-			if (progressed || !complete) {
+			if (ran_packets || !complete) {
 				if (complete) {
 					m_renderer.RunGarbageCollector();
 				}
@@ -937,7 +959,8 @@ bool GuestGpu::Process(Submission& submission) {
 			g_sync_stream = "compute";
 			complete = cp.Process(submission.command_execution, submission.commands) ==
 			           Pm4ProcessResult::Complete;
-			if (submission.command_execution.MadeProgress() || !complete) {
+			ran_packets = submission.command_execution.MadeProgress();
+			if (ran_packets || !complete) {
 				if (complete) {
 					m_renderer.RunGarbageCollector();
 				}
