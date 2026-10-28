@@ -668,6 +668,10 @@ TextureBinding RenderExecutor::ResolveTexture(const ShaderRecompiler::IR::ImageR
 	    tile == Prospero::TileMode::kLinear ? 256u : desc.info.tiling.block.block_size;
 	EXIT_NOT_IMPLEMENTED(desc.info.data.size == 0 || alignment == 0 ||
 	                     (address & (static_cast<uint64_t>(alignment) - 1u)) != 0);
+	// Image heaps keep the descriptors of unmapped textures, which PS5 never samples.
+	if (resource.heap && !m_context.IsMapped(address, desc.info.data.size)) {
+		return {.layout = vk::ImageLayout::eGeneral};
+	}
 	if (storage) {
 		ValidateStorageTexture(resource, descriptor, desc.info.data.size);
 	}
@@ -685,6 +689,7 @@ TextureBinding RenderExecutor::ResolveTexture(const ShaderRecompiler::IR::ImageR
 	                                 view_levels, desc.info.resources.layers);
 	desc.view_info.base_level = view_base;
 	desc.type = storage ? TextureCache::BindingType::Storage : TextureCache::BindingType::Texture;
+	desc.heap = resource.heap;
 
 	if (Common::DebugFlags::VideoProbeEnabled() && width == 1920 && height == 1080 &&
 	    format == Prospero::BufferFormat::k8_8_8_8UNorm) {
@@ -1020,13 +1025,18 @@ void RenderExecutor::RebindImages(PreparedBindings& prepared) {
 
 void RenderExecutor::PrepareGraphicsBindings(std::span<PreparedBindings* const> stages,
                                              std::span<RenderColorInfo> colors) {
-	bool uses_dma = false;
+	bool uses_dma        = false;
+	bool uses_image_heap = false;
 	FindBuffers(stages);
 	for (auto* stage: stages) {
 		uses_dma |= stage->runtime->program->info.uses_dma;
+		uses_image_heap |= stage->runtime->program->info.uses_image_heap;
 	}
 	if (uses_dma) {
 		m_context.PrepareBda();
+	}
+	if (uses_image_heap) {
+		m_context.GetImageHeap().Rebind(*this);
 	}
 	for (auto* stage: stages) {
 		RebindImages(*stage);
@@ -1265,6 +1275,7 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 		}
 		for (uint32_t i = 0; i < program.info.images.size(); ++i) {
 			const auto& resource = program.info.images[i];
+			if (resource.heap) continue;
 			const auto& texture = descriptors.images[i];
 			EXIT_IF(resource.mip_count != (texture.mip_views.empty() ? 1u : texture.mip_views.size()));
 			const auto kind = *ShaderRecompiler::IR::DescriptorBindingForImage(resource);
@@ -1289,6 +1300,9 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 		                        push_data.dwords.data());
 	}
 
+	if (pipeline.uses_image_heap) {
+		m_context.GetImageHeap().Commit(buffer, pipeline_bind_point, pipeline.pipeline_layout);
+	}
 	if (!m_descriptor_writes.empty()) {
 		EXIT_IF(pipeline.descriptor_set_layout == nullptr);
 		if (pipeline.uses_push_descriptors) {

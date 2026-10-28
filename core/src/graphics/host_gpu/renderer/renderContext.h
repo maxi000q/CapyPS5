@@ -17,6 +17,7 @@
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 #include "graphics/host_gpu/renderer/occlusionQueries.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptorHeap.h"
+#include "graphics/host_gpu/renderer/pipeline/imageHeap.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 #include "kernel/eventQueue.h"
 
@@ -54,6 +55,7 @@ public:
 	PipelineCache&      GetPipelineCache() { return m_pipeline_cache; }
 	DescriptorHeap&     GetDescriptorHeap() { return m_descriptor_heap; }
 	SamplerCache&       GetSamplerCache() { return m_sampler_cache; }
+	ImageHeap&          GetImageHeap() { return m_image_heap; }
 	BufferCache&        GetBufferCache() { return m_buffer_cache; }
 	OcclusionQueries&   GetOcclusionQueries() { return m_occlusion_queries; }
 	TextureCache&       GetTextureCache() { return m_texture_cache; }
@@ -86,9 +88,10 @@ private:
 	RenderExecutor            m_render_executor;
 	CommandScheduler          m_command_scheduler;
 	DescriptorHeap            m_descriptor_heap;
+	PageManager               m_page_manager;
+	ImageHeap                 m_image_heap;
 	PipelineCache             m_pipeline_cache;
 	SamplerCache              m_sampler_cache;
-	PageManager               m_page_manager;
 	BufferCache               m_buffer_cache;
 	TextureCache              m_texture_cache;
 	OcclusionQueries          m_occlusion_queries;

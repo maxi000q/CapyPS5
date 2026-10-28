@@ -662,6 +662,7 @@ void CollectShaderInfo(Program& program, ShaderStageInputInfo input_info) {
 	};
 	info.uses_flattened_srt |= std::ranges::any_of(info.buffers, uses_mapping) ||
 	                           std::ranges::any_of(info.images, uses_mapping);
+	info.uses_image_heap = std::ranges::any_of(info.images, &ImageResource::heap);
 	switch (program.stage) {
 		case ShaderType::Vertex:
 		case ShaderType::Local: CollectVertexInputs(input_info.vertex, info, inputs.components); break;

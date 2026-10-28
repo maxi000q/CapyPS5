@@ -588,20 +588,23 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 			const auto native_stage = NativeShaderStage(stage.logical_stage);
 			AddLayoutBindings(descriptor_bindings, *stage.stage.program, native_stage);
 			graphics_stages |= native_stage;
+			pipeline.uses_image_heap |= stage.stage.program->info.uses_image_heap;
 		}
 	}
 	if (ps_active) {
 		EXIT_IF(!ps_input_info->stage);
 		AddLayoutBindings(descriptor_bindings, *ps_input_info->stage.program,
 		                  vk::ShaderStageFlagBits::eFragment);
+		pipeline.uses_image_heap |= ps_input_info->stage.program->info.uses_image_heap;
 	}
 	CreateDescriptorLayout(graphics, pipeline, descriptor_bindings);
 	const vk::PushConstantRange push_constants {graphics_stages, 0,
 	                                            ShaderRecompiler::IR::NativePushConstantSize};
+	const std::array set_layouts {pipeline.descriptor_set_layout, graphics.image_heap_layout};
 
 	vk::PipelineLayoutCreateInfo pipeline_layout_info {};
-	pipeline_layout_info.setLayoutCount         = 1;
-	pipeline_layout_info.pSetLayouts            = &pipeline.descriptor_set_layout;
+	pipeline_layout_info.setLayoutCount         = pipeline.uses_image_heap ? 2u : 1u;
+	pipeline_layout_info.pSetLayouts            = set_layouts.data();
 	pipeline_layout_info.pushConstantRangeCount = 1;
 	pipeline_layout_info.pPushConstantRanges    = &push_constants;
 
@@ -742,13 +745,15 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 
 	std::vector<vk::DescriptorSetLayoutBinding> descriptor_bindings;
 	AddLayoutBindings(descriptor_bindings, *stage.program, vk::ShaderStageFlagBits::eCompute);
+	pipeline.uses_image_heap = stage.program->info.uses_image_heap;
 	CreateDescriptorLayout(graphics, pipeline, descriptor_bindings);
 	const vk::PushConstantRange push_constants {vk::ShaderStageFlagBits::eCompute, 0,
 	                                            ShaderRecompiler::IR::NativePushConstantSize};
+	const std::array set_layouts {pipeline.descriptor_set_layout, graphics.image_heap_layout};
 
 	vk::PipelineLayoutCreateInfo pipeline_layout_info {};
-	pipeline_layout_info.setLayoutCount         = 1;
-	pipeline_layout_info.pSetLayouts            = &pipeline.descriptor_set_layout;
+	pipeline_layout_info.setLayoutCount         = pipeline.uses_image_heap ? 2u : 1u;
+	pipeline_layout_info.pSetLayouts            = set_layouts.data();
 	pipeline_layout_info.pushConstantRangeCount = 1;
 	pipeline_layout_info.pPushConstantRanges    = &push_constants;
 

@@ -32,6 +32,10 @@ struct RenderColorInfo;
 struct RenderDepthInfo;
 class CommandBuffer;
 
+namespace ShaderRecompiler::IR {
+class ImageHeapSource;
+} // namespace ShaderRecompiler::IR
+
 namespace HW {
 class Context;
 class Shader;
@@ -116,7 +120,8 @@ struct ShaderProgram {
 // The owning renderer serializes access, including saves while the GPU is running.
 class PipelineCache {
 public:
-	explicit PipelineCache(GraphicContext& graphics);
+	PipelineCache(GraphicContext& graphics,
+	              ShaderRecompiler::IR::ImageHeapSource* image_heap);
 	~PipelineCache();
 	KYTY_CLASS_NO_COPY(PipelineCache);
 	void Save();
@@ -128,6 +133,7 @@ public:
 		vk::Pipeline            pipeline              = nullptr;
 		vk::DescriptorSetLayout descriptor_set_layout = nullptr;
 		bool                    uses_push_descriptors = false;
+		bool                    uses_image_heap       = false;
 	};
 
 	struct GraphicsPrograms {
@@ -209,6 +215,7 @@ private:
 	};
 
 	GraphicContext&               m_graphics;
+	ShaderRecompiler::IR::ImageHeapSource* m_image_heap = nullptr;
 	std::unique_ptr<ProgramCache> m_program_cache;
 	vk::PipelineCache             m_driver_cache = nullptr;
 	std::filesystem::path         m_driver_cache_path;

@@ -440,6 +440,7 @@ struct PipelineCache::ProgramCache {
 		    .shader_base                = params.Base(),
 		    .read_memory                = ReadShaderLiveMemory,
 		    .read_specialization_memory = ReadShaderGuestMemory,
+		    .image_heap                 = image_heap,
 		};
 		if constexpr (std::is_same_v<InputInfo, ShaderComputeInputInfo>) {
 			runtime.workgroup_counts = input_info.workgroup_counts;
@@ -570,7 +571,9 @@ struct PipelineCache::ProgramCache {
 		return permutation.handle;
 	}
 
-	explicit ProgramCache(vk::Device device): device(device) {
+	explicit ProgramCache(vk::Device device,
+	                     ShaderRecompiler::IR::ImageHeapSource* image_heap)
+	    : device(device), image_heap(image_heap) {
 		lookup_key.static_state.reserve(MaxStaticKeyWords);
 	}
 	~ProgramCache() {
@@ -585,11 +588,14 @@ struct PipelineCache::ProgramCache {
 	std::unordered_map<ProgramKey, SourceEntry, ProgramKeyHash> programs;
 	ProgramKey                                                  lookup_key;
 	vk::Device                                                  device;
+	ShaderRecompiler::IR::ImageHeapSource* image_heap = nullptr;
 	uint64_t                                                    next_shader_id = 0;
 };
 
-PipelineCache::PipelineCache(GraphicContext& graphics)
-    : m_graphics(graphics), m_program_cache(std::make_unique<ProgramCache>(graphics.device)) {
+PipelineCache::PipelineCache(GraphicContext& graphics,
+                               ShaderRecompiler::IR::ImageHeapSource* image_heap)
+    : m_graphics(graphics), m_image_heap(image_heap),
+      m_program_cache(std::make_unique<ProgramCache>(graphics.device, image_heap)) {
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 	InitializeDriverCache();
 	// Background PSO compilation workers. Two on smaller SoCs, two more on 8+-core devices

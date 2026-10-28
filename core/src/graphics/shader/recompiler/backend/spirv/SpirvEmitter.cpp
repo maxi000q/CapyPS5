@@ -164,6 +164,7 @@ void ValidateNativeProgram(const IR::Program& program, bool lds_storage) {
 		if (!kind.has_value()) {
 			Fail(program, "native shader plan has an invalid image class");
 		}
+		if (image.heap) continue;
 		if (image.mip_count == 0u ||
 		    (image.mip_mode != IR::ImageMipMode::Dynamic && image.mip_count != 1u)) {
 			Fail(program, "native shader plan has an invalid image mip descriptor count");

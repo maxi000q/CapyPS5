@@ -59,6 +59,12 @@ public:
 	~Image();
 	KYTY_CLASS_NO_COPY(Image);
 
+	static inline std::atomic<uint64_t> heap_epoch {0};
+	static inline std::atomic<uint64_t> serials {0};
+
+	// Unique per image, unlike ImageId: freed slots are reused.
+	const uint64_t serial = serials.fetch_add(1u, std::memory_order_relaxed) + 1u;
+
 	[[nodiscard]] vk::ImageView FindView(const ImageViewInfo& view_info);
 	using Barriers = std::vector<vk::ImageMemoryBarrier2>;
 	[[nodiscard]] Barriers GetBarriers(vk::ImageLayout                      destination_layout,
@@ -77,13 +83,23 @@ public:
 	void CopyImageWithBuffer(Image& source, Buffer& buffer, TileManager& tiler);
 	void CopyMip(Image& source, uint32_t mip, uint32_t layer);
 
+	// Resident image heaps sample an image without rediscovering it until one changes its
+	// contents, tracking, identity or layout.
+	void HeapChanged() const noexcept {
+		if (heap_refs.load(std::memory_order_relaxed) != 0u) {
+			heap_epoch.fetch_add(1u, std::memory_order_relaxed);
+		}
+	}
+
 	void InvalidateCpuWrite(uint64_t vaddr, uint64_t size) {
 		if (ImageRangeOverlaps(info.data.address, info.data.size, vaddr, size)) {
 			m_cpu_dirty        = true;
 			m_maybe_cpu_dirty  = false;
 			m_maybe_hash_valid = false;
+			HeapChanged();
 		} else if (ImagePageRangesOverlap(info.data.address, info.data.size, vaddr, size)) {
 			m_maybe_cpu_dirty = true;
+			HeapChanged();
 		}
 	}
 
@@ -93,6 +109,7 @@ public:
 	void               MarkMaybeCpuDirty() {
 		if (!m_cpu_dirty) {
 			m_maybe_cpu_dirty = true;
+			HeapChanged();
 		}
 	}
 	[[nodiscard]] bool NeedsMaybeCpuHash() const {
@@ -129,7 +146,10 @@ public:
 	void               ClearGpuModified() noexcept { m_gpu_modified = false; }
 
 	[[nodiscard]] bool IsBufferModified() const noexcept { return m_buffer_modified; }
-	void               MarkBufferModified() noexcept { m_buffer_modified = true; }
+	void               MarkBufferModified() noexcept {
+		m_buffer_modified = true;
+		HeapChanged();
+	}
 	void               ClearBufferModified() noexcept { m_buffer_modified = false; }
 
 	[[nodiscard]] bool Overlaps(uint64_t address, uint64_t size,
@@ -143,6 +163,10 @@ public:
 	[[nodiscard]] bool IsTracked() const noexcept { return track_addr != 0 && track_addr_end != 0; }
 	[[nodiscard]] uint64_t AccountedSize() const noexcept {
 		return backing.image == nullptr ? 0 : Common::AlignUp(info.data.size, 1024);
+	}
+	[[nodiscard]] vk::ImageLayout ReadLayout() const noexcept {
+		return info.IsDepth() ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
+		                      : vk::ImageLayout::eShaderReadOnlyOptimal;
 	}
 	[[nodiscard]] uint64_t HashGuestEdges() const;
 
@@ -171,6 +195,8 @@ public:
 	ImageSubresourceRange stencil_subresources;
 	uint64_t         tick_accessed_last = 0;
 	size_t           lru_id             = 0;
+	// Slots of resident image heaps that select this image.
+	mutable std::atomic<uint32_t> heap_refs {0};
 
 private:
 	friend struct ImageTestAccess;

@@ -349,6 +349,7 @@ void TextureCache::MarkAsMaybeDirty(ImageId id, Image& image) {
 	if (image.NeedsMaybeCpuHash()) {
 		image.SetMaybeCpuHash(image.HashGuestEdges());
 	}
+	image.HeapChanged();
 	UntrackImage(id);
 }
 
@@ -434,6 +435,7 @@ void TextureCache::UntrackImageHead(ImageId id) {
 	const auto address = Common::AlignDown(begin + TRACKER_PAGE_SIZE, TRACKER_PAGE_SIZE);
 	const auto size    = address - begin;
 	image.track_addr   = address;
+	image.HeapChanged();
 	if (image.track_addr == image.track_addr_end) {
 		MarkAsMaybeDirty(id, image);
 	}
@@ -451,6 +453,7 @@ void TextureCache::UntrackImageTail(ImageId id) {
 	const auto address   = Common::AlignDown(end, TRACKER_PAGE_SIZE);
 	const auto size      = end - address;
 	image.track_addr_end = address;
+	image.HeapChanged();
 	if (image.track_addr == image.track_addr_end) {
 		MarkAsMaybeDirty(id, image);
 	}
@@ -807,7 +810,8 @@ TextureCache::OverlapResult TextureCache::ResolveOverlap(const ImageInfo& reques
 	auto&      cached       = *owner;
 	const auto current_tick = m_scheduler.CurrentTick();
 	const bool safe_to_delete =
-	    current_tick - std::min(current_tick, cached.tick_accessed_last) > NumFramesBeforeRemoval;
+	    current_tick - std::min(current_tick, cached.tick_accessed_last) > NumFramesBeforeRemoval &&
+	    cached.heap_refs.load(std::memory_order_relaxed) == 0u;
 
 	const uint32_t requested_block = requested.bytes_per_block * requested.samples;
 	const uint32_t cached_block    = cached.info.bytes_per_block * cached.info.samples;
@@ -1346,6 +1350,20 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format) {
 					view_mip   = overlap.mip;
 					view_layer = overlap.layer;
 				}
+			}
+			// PS5: image heaps hold a descriptor per dynamic-resolution extent of a render
+			// target, and only one extent at an address holds data, so heap lookups create no
+			// second one.
+			if (!result && desc.heap &&
+			    std::any_of(candidates.begin(), candidates.end(), [&](ImageId id) {
+				    const auto* image = m_slot_images.try_get(id);
+				    return image != nullptr && image->registered &&
+				           image->heap_refs.load(std::memory_order_relaxed) != 0u &&
+				           image->info.data.address == desc.info.data.address &&
+				           image->info.type == desc.info.type &&
+				           image->info.extent != desc.info.extent;
+			    })) {
+				return {};
 			}
 		}
 
@@ -2143,6 +2161,11 @@ void TextureCache::RunGarbageCollector() {
 			--deletions;
 			auto owner = m_slot_images.try_get(id);
 			if (owner == nullptr || !owner->registered || owner->depth_id) {
+				continue;
+			}
+			if (owner->heap_refs.load(std::memory_order_relaxed) != 0u) {
+				// Resident heaps sample it without touching it.
+				TouchImage(*owner);
 				continue;
 			}
 			if (owner->IsGpuModified()) {

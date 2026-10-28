@@ -4,6 +4,8 @@
 
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInternal.h"
 
+#include "graphics/shader/recompiler/backend/spirv/spirvEmitterInstructions.h"
+
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
 
 uint32_t EmitShaderDataDwordLoad(EmitterState& state, uint32_t dword_index) {
@@ -33,6 +35,35 @@ uint32_t EmitBinaryU32(EmitterState& state, spv::Op opcode, uint32_t lhs, uint32
 	const auto ret = state.builder.AllocateId();
 	state.builder.AddFunction(opcode, TypeU32(state), ret, lhs, rhs);
 	return ret;
+}
+
+static uint32_t LoadFlattenedSrt(EmitterState& state, uint32_t index) {
+	const auto pointer = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpAccessChain, TypeStorageBufferElementPointer(state), pointer,
+	                          state.flattened_srt_variable, ConstantU32(state, 0), index);
+	const auto value = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpLoad, TypeU32(state), value, pointer);
+	return value;
+}
+
+uint32_t EmitImageHeapEntry(EmitterState& state, uint32_t key, uint32_t mapping_offset) {
+	const auto Mapping = [&](uint32_t word) {
+		return LoadFlattenedSrt(state, ConstantU32(state, mapping_offset + word));
+	};
+	// Keys past the table select its trailing null slot.
+	const auto index = EmitUMin32(state, Binary(state, spv::OpShiftRightLogical, TypeU32(state), key,
+	                                            ConstantU32(state, 2u)),
+	                              Mapping(0u));
+	const auto offset = Unary(state, spv::OpUConvert, TypeU64(state),
+	                          Binary(state, spv::OpShiftLeftLogical, TypeU32(state), index,
+	                                 ConstantU32(state, 2u)));
+	const auto pointer = Unary(state, spv::OpConvertUToPtr, TypePhysicalU32Pointer(state),
+	                           Binary(state, spv::OpIAdd, TypeU64(state),
+	                                  PackU64(state, Mapping(1u), Mapping(2u)), offset));
+	const auto entry = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpLoad, TypeU32(state), entry, pointer,
+	                          spv::MemoryAccessAlignedMask, 4u);
+	return entry;
 }
 
 uint32_t EmitIndirectResourceIndex(EmitterState& state, uint32_t key, uint32_t mapping_offset,

@@ -1121,6 +1121,7 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
                                             uint32_t            render_target_slice_offset,
 	                                        DrawRenderState& state) {
 	Common::DebugFlags::FrameTraceDrawTick();
+	m_context.GetImageHeap().BeginDraw();
 	// Merged ES+GS (geometry shader) draws: mesh shaders, or compute emulation without them.
 	const bool gs_emulated = (buffer.GetRegisters().GetShaderStages() & 0x20u) != 0 &&
 	                     !m_context.GetGraphics().mesh_shader_enabled;

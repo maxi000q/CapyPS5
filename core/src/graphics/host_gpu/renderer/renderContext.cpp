@@ -46,7 +46,8 @@ RenderContext::RenderContext(GraphicContext& graphics)
     : m_graphics(graphics), m_render_executor(*this),
       m_command_scheduler(*this, graphics, true /* v0.0.10pro: batched submits */),
       m_descriptor_heap(graphics, m_command_scheduler.GetMasterSemaphore()),
-      m_pipeline_cache(graphics), m_sampler_cache(graphics),
+      m_image_heap(*this, m_page_manager),
+      m_pipeline_cache(graphics, &m_image_heap), m_sampler_cache(graphics),
       m_buffer_cache(graphics, m_command_scheduler, m_page_manager, m_texture_cache),
       m_texture_cache(graphics, m_command_scheduler, m_page_manager, m_buffer_cache),
       m_occlusion_queries(graphics, m_command_scheduler) {
@@ -254,6 +255,7 @@ bool RenderContext::HandleFaultDeferred(PageFaultAccess access, uint64_t fault_v
 			m_buffer_cache.InvalidateMemory(fault_vaddr, fault_size);
 		}
 		m_texture_cache.InvalidateMemory(fault_vaddr, fault_size);
+		m_image_heap.InvalidateMemory(fault_vaddr, fault_size);
 	} else {
 		// Upstream behaviour: ReadMemory also clears stale GPU-dirty protection when there is
 		// nothing to download, so the faulting access can be retried.
@@ -268,6 +270,7 @@ bool RenderContext::InvalidateMemory(uint64_t vaddr, uint64_t size) {
 	}
 	m_buffer_cache.InvalidateMemory(vaddr, size);
 	m_texture_cache.InvalidateMemory(vaddr, size);
+	m_image_heap.InvalidateMemory(vaddr, size);
 	return true;
 }
 
@@ -332,6 +335,7 @@ void RenderContext::UnmapMemory(uint64_t vaddr, uint64_t size, bool discard) {
 		}
 		m_buffer_cache.InvalidateMemory(vaddr, size);
 		m_texture_cache.UnmapMemory(vaddr, size);
+		m_image_heap.UnmapMemory(vaddr, size);
 		std::lock_guard lock(m_mapped_ranges_mutex);
 		m_mapped_ranges.Subtract(vaddr, size);
 	};
@@ -398,6 +402,7 @@ void RenderContext::RunGarbageCollector() {
 		m_texture_cache.RunGarbageCollector();
 		m_buffer_cache.RunGarbageCollector();
 	}
+	m_image_heap.RunGarbageCollector();
 }
 
 void RenderContext::AddInterruptEq(LibKernel::EventQueue::KernelEqueue eq, int event_id) {

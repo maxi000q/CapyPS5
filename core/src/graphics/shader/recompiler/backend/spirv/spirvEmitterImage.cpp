@@ -679,6 +679,21 @@ uint32_t EmitImageAccess(ValueEmitContext& ctx, const IR::Inst& inst, uint32_t r
 	    image.indirect_resources.size() < 2u) {
 		ctx.Fail(inst, "has no indirect image runtime mapping");
 	}
+	if (image.heap) {
+		const auto entry = EmitImageHeapEntry(state, key, image.indirect_mapping_offset);
+		const auto kinds = static_cast<uint32_t>(image.indirect_resources.size()) - 1u;
+		// One kind leaves every slot word a bare element.
+		if (kinds == 1u) return emit(image.indirect_resources[1], entry);
+		const auto element = Binary(state, spv::OpBitwiseAnd, TypeU32(state), entry,
+		                            ConstantU32(state, (1u << IR::ImageHeapKindShift) - 1u));
+		const auto EmitKind = [&](uint32_t kind) {
+			return emit(image.indirect_resources[kind + 1u], element);
+		};
+		return EmitIndexSwitch(state,
+		                       Binary(state, spv::OpShiftRightLogical, TypeU32(state), entry,
+		                              ConstantU32(state, IR::ImageHeapKindShift)),
+		                       kinds, result_type, EmitKind);
+	}
 	const auto selected = EmitIndirectResourceIndex(
 	    state, key, image.indirect_mapping_offset, image.indirect_search_iterations, 0u);
 	struct ImageRun {

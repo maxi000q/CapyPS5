@@ -345,6 +345,13 @@ Image::Barriers Image::GetBarriers(vk::ImageLayout                      destinat
 		barriers.push_back(barrier);
 	}
 
+	// Resident heaps sample their images in the read state; only leaving it invalidates them.
+	if (std::ranges::any_of(barriers, [&](const vk::ImageMemoryBarrier2& barrier) {
+		    return barrier.oldLayout == ReadLayout() &&
+		           barrier.srcAccessMask == vk::AccessFlagBits2::eShaderRead;
+	})) {
+		HeapChanged();
+	}
 	state = {destination_stage, destination_access, destination_layout};
 	return barriers;
 }
