@@ -50,6 +50,15 @@ struct PreparedBindings {
 	vk::DescriptorBufferInfo              shader_data_buffer;
 	vk::DescriptorBufferInfo              shared_memory;
 	std::vector<uint32_t>                 shader_data;
+	// CFP MAX (v0.0.10pro): the descriptor-diff fast path. When the same
+	// program (same pointer and shader hash) resolves again with
+	// byte-identical image descriptors and every image it produced is still
+	// live and not flagged for rebind, the previous TextureBinding set is
+	// exact and the whole ResolveTexture pass is skipped for the stage (see
+	// RenderExecutor::PrepareBindings).
+	const ShaderRecompiler::IR::CompiledShaderInfo* cfp_last_program      = nullptr;
+	uint64_t                                         cfp_last_hash        = 0;
+	std::vector<ShaderRecompiler::IR::DescriptorValue> cfp_last_image_values;
 };
 
 [[nodiscard]] vk::DescriptorType

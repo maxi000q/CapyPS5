@@ -221,43 +221,33 @@ float TextureCache::ResolutionScale() {
 	return scale;
 }
 
-float TextureCache::CfpMaxScale() {
-	// Console Five Pro (v0.0.10pro): CFP MAX runs the working set at 40% of
-	// the guest resolution while keeping the picture visually native. The deep
-	// resample rides the scaled-image path (Image::UploadScaled/BlitLevels):
-	// guest data lands in a full-size transfer image, folds through an
-	// exact-half image (a true 2x box average) and then a mild step down to the
-	// 40% backing - an effective ~6-tap area prefilter, alias-free at the 2.5x
-	// minification (see Image::UploadScaled). The display side reconstructs the
-	// picture in the present path (gpu_video_out_cfp.frag: Catmull-Rom resample
-	// + range-clamped acutance restoration), so what the player sees reads at
-	// native quality while texture memory, upload bandwidth and sampling
-	// bandwidth all drop to about a sixth. Read once like res_scale; the
+bool TextureCache::CfpMaxEnabled() {
+	// Console Five Pro (v0.0.10pro): CFP MAX is a pure CPU fast path now.
+	// Round 1 shipped it as a 40% working-resolution mode (textures folded
+	// through an exact-half prefilter, large targets rendered at 40%, the
+	// present path rebuilt the picture with Catmull-Rom + clamped acutance).
+	// The measurement on a heavy Unreal title killed that design: the frame
+	// rate did not move at all - the GPU thread is CPU-bound, so cutting the
+	// host raster workload bought nothing - while text and materials were
+	// visibly reconstructed. The mode keeps its switch but changes meaning:
+	// nothing is downscaled any more (ChooseScale ignores it), and it
+	// selects the CPU-side fast paths that actually cut frame time - the
+	// descriptor-diff binding reuse (RenderExecutor::PrepareBindings) and
+	// the large-buffer once-per-pass fresh-copy reuse
+	// (BufferCache::ObtainBuffer). The present-path reconstruction kernel
+	// stays for debug.capy.res_scale. Read once like res_scale; the
 	// frontend applies the toggle before the game starts.
-	static const float scale = [] {
+	static const bool enabled = [] {
 		Common::DebugFlags::CachedValue value("debug.capy.cfp_max", 0);
-		return value.Get() != 0 ? 0.4f : 1.0f;
+		return value.Get() != 0;
 	}();
-	return scale;
+	return enabled;
 }
 
 float TextureCache::ChooseScale(const ImageDesc& desc) {
-	const float scale     = ResolutionScale();
-	const float cfp_scale = CfpMaxScale();
-	const auto& info      = desc.info;
-	// CFP MAX, texture pass: big sampled color textures downscale to 40% at
-	// upload. Storage images keep their exact texel grid (compute addresses
-	// texels directly), block-compressed textures cannot be blit-resampled, and
-	// small images (UI, lookup tables, font atlases) are usually magnified on
-	// screen, where a 40% cut WOULD be visible. Render-target-class bindings
-	// and depth go through the render-path branch below.
-	if (cfp_scale != 1.0f && desc.type == BindingType::Texture && !desc.heap &&
-	    info.type == Prospero::ImageType::kColor2D && info.samples == 1 &&
-	    !info.IsBlock() && !info.IsDepth() && info.extent.width >= 512 &&
-	    info.extent.height >= 512) {
-		return cfp_scale;
-	}
-	if (scale == 1.0f && cfp_scale == 1.0f) {
+	const float scale = ResolutionScale();
+	const auto& info  = desc.info;
+	if (scale == 1.0f) {
 		return 1.0f;
 	}
 	// Display buffers are scaled too: Greak flips one of its two buffers before drawing into it,
@@ -269,11 +259,6 @@ float TextureCache::ChooseScale(const ImageDesc& desc) {
 	    info.resources.levels != 1 || info.IsBlock() || info.extent.width < 1280 ||
 	    info.extent.height < 720) {
 		return 1.0f;
-	}
-	// CFP MAX, render-path pass: large color targets render at (at most) 40%;
-	// an even lower explicit resolution setting keeps winning.
-	if (cfp_scale != 1.0f) {
-		return std::min(scale, cfp_scale);
 	}
 	return scale;
 }

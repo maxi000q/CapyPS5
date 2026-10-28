@@ -856,7 +856,24 @@ std::pair<Buffer*, uint64_t> BufferCache::ObtainBuffer(uint64_t vaddr, uint64_t 
 	// good (data changes between draws of a pass), so it is off by default.
 	// `setprop debug.capy.pass_fresh_reuse 1` reuses the copy while the ring has not wrapped.
 	static Common::DebugFlags::CachedValue pass_fresh_reuse("debug.capy.pass_fresh_reuse", 0);
-	if (in_pass_fresh && fresh_copy && pass_fresh_reuse.Get() != 0) {
+	// CFP MAX (v0.0.10pro): without this, a pass re-copies a CPU-modified
+	// buffer on every draw that binds it. The big scene-wide buffers (view
+	// constants, skinning palettes) are written once per frame, not between
+	// the draws of a pass, so under CFP MAX ranges from this size up reuse
+	// the pass's copy exactly like pass_fresh_reuse does - on a heavy title
+	// that turns a full multi-megabyte memcpy per draw into one per pass.
+	// The Asterix XXL2 caveat stands (a buffer genuinely rewritten between
+	// draws of a pass would serve stale data until the next pass), which is
+	// why the threshold only covers scene-sized buffers and the mode is
+	// opt-in. `debug.capy.cfp_pass_reuse_min <bytes>` tunes the threshold
+	// (0 disables the CFP part entirely).
+	static Common::DebugFlags::CachedValue cfp_pass_reuse_min("debug.capy.cfp_pass_reuse_min",
+	                                                       1024 * 1024);
+	const bool cfp_pass_reuse =
+	    pass_fresh_reuse.Get() != 0 ||
+	    (TextureCache::CfpMaxEnabled() &&
+	     size >= static_cast<uint64_t>(cfp_pass_reuse_min.Get()));
+	if (in_pass_fresh && fresh_copy && cfp_pass_reuse) {
 		if (m_pass_fresh_serial != CommandBuffer::PassSerial() ||
 		    m_pass_fresh_wraps != m_stream_buffer.Wraps()) {
 			m_pass_fresh.clear();

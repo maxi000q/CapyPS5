@@ -128,10 +128,18 @@ private:
 public:
 	// Scale of every downscaled image (debug.capy.res_scale), 1 when scaling is off.
 	[[nodiscard]] static float ResolutionScale();
-	// CFP MAX (debug.capy.cfp_max): 0.4 when the deep high-quality mode is on
-	// (40% working resolution, alias-free prefilter + present-path
-	// reconstruction), 1 otherwise (see ChooseScale).
-	[[nodiscard]] static float CfpMaxScale();
+	// CFP MAX (debug.capy.cfp_max): whether the performance mode is on.
+	// v0.0.10pro: the mode no longer downscales anything - render targets
+	// and textures stay at native resolution. Measured on a heavy title, a
+	// 40% working resolution left the frame rate untouched (the GPU thread
+	// is CPU-bound: the frame cost is the PM4 translation itself, not the
+	// host raster workload) while the picture was visibly reconstructed, so
+	// the quality loss bought nothing. The switch now selects the CPU-side
+	// fast paths instead: the descriptor-diff binding reuse in the draw
+	// pipeline (RenderExecutor::PrepareBindings) and the large-buffer
+	// once-per-pass fresh-copy reuse (BufferCache::ObtainBuffer). Read
+	// once; the frontend applies the toggle before the game starts.
+	[[nodiscard]] static bool CfpMaxEnabled();
 
 private:
 	[[nodiscard]] ImageId     GetNullImage(const ImageDesc& desc);

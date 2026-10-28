@@ -823,18 +823,66 @@ void RenderExecutor::PrepareBindings(const ShaderStageRuntime& runtime,
 	prepared.images.resize(program.info.images.size());
 	prepared.samplers.clear();
 	prepared.shader_data.clear();
-	for (uint32_t i = 0; i < program.info.images.size(); i++) {
-		auto binding = ResolveTexture(program.info.images[i], snapshot.images[i]);
-		Common::DebugFlags::FrameTrace("    image[%u] class=%u vkfmt=%d dim=%u mips=%u conv=%u", i,
-		                               static_cast<uint32_t>(program.info.images[i].numeric_class),
-		                               static_cast<int>(binding.desc.view_info.format),
-		                               static_cast<uint32_t>(program.info.images[i].dimension),
-		                               program.info.images[i].mip_count,
-		                               static_cast<uint32_t>(program.info.images[i].conversion_format));
-		BindImage(binding.image_id, binding.desc.type == TextureCache::BindingType::Storage);
-		binding.mip_views.swap(prepared.images[i].mip_views);
-		binding.mip_views.clear();
-		prepared.images[i] = std::move(binding);
+	// CFP MAX (v0.0.10pro), descriptor-diff fast path: successive draws
+	// usually bind the same program with byte-identical image descriptors
+	// (the same material iterating its meshes, the same scene textures
+	// bound by every draw of a pass). When nothing changed - same program
+	// (pointer and shader hash), same raw descriptor dwords, every
+	// previously resolved image still live and not flagged for rebind -
+	// the previous TextureBinding set is exact and ResolveTexture is
+	// skipped for the whole stage: no descriptor decode, no format-table
+	// walk, no texture-cache page probe, no revalidation. ResetBindings
+	// cleared the per-draw binding flags at the end of the previous draw,
+	// so BindImage still runs to re-mark this draw's usage. Gated by
+	// debug.capy.cfp_max; any mismatch simply falls through to the full
+	// resolve and re-primes the cache.
+	const bool cfp_diff_eligible =
+	    TextureCache::CfpMaxEnabled() &&
+	    prepared.cfp_last_program == runtime.program &&
+	    prepared.cfp_last_hash == program.shader_hash &&
+	    prepared.cfp_last_image_values.size() == program.info.images.size();
+	bool cfp_reuse_bindings = cfp_diff_eligible;
+	if (cfp_diff_eligible) {
+		auto& texture_cache = m_context.GetTextureCache();
+		for (uint32_t i = 0; i < program.info.images.size(); i++) {
+			if (!(snapshot.images[i] == prepared.cfp_last_image_values[i])) {
+				cfp_reuse_bindings = false;
+				break;
+			}
+			const auto* image = texture_cache.m_slot_images.try_get(prepared.images[i].image_id);
+			if (image == nullptr || (!image->registered && !image->info.data.Empty()) ||
+			    image->binding.needs_rebind) {
+				cfp_reuse_bindings = false;
+				break;
+			}
+		}
+	}
+	if (cfp_reuse_bindings) {
+		for (auto& binding: prepared.images) {
+			BindImage(binding.image_id,
+			           binding.desc.type == TextureCache::BindingType::Storage);
+		}
+	} else {
+		for (uint32_t i = 0; i < program.info.images.size(); i++) {
+			auto binding = ResolveTexture(program.info.images[i], snapshot.images[i]);
+			Common::DebugFlags::FrameTrace("    image[%u] class=%u vkfmt=%d dim=%u mips=%u conv=%u", i,
+			                               static_cast<uint32_t>(program.info.images[i].numeric_class),
+			                               static_cast<int>(binding.desc.view_info.format),
+			                               static_cast<uint32_t>(program.info.images[i].dimension),
+			                               program.info.images[i].mip_count,
+			                               static_cast<uint32_t>(program.info.images[i].conversion_format));
+			BindImage(binding.image_id, binding.desc.type == TextureCache::BindingType::Storage);
+			binding.mip_views.swap(prepared.images[i].mip_views);
+			binding.mip_views.clear();
+			prepared.images[i] = std::move(binding);
+		}
+		prepared.cfp_last_program        = runtime.program;
+		prepared.cfp_last_hash           = program.shader_hash;
+		prepared.cfp_last_image_values.clear();
+		prepared.cfp_last_image_values.reserve(program.info.images.size());
+		for (uint32_t i = 0; i < program.info.images.size(); i++) {
+			prepared.cfp_last_image_values.push_back(snapshot.images[i]);
+		}
 	}
 	prepared.samplers.reserve(program.info.samplers.size());
 	for (uint32_t i = 0; i < program.info.samplers.size(); i++) {
