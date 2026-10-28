@@ -995,6 +995,8 @@ void Translator::EmitMemory(const Decoder::Instruction& inst) {
 		case Decoder::Opcode::S_BUFFER_LOAD_DWORDX4:
 		case Decoder::Opcode::S_BUFFER_LOAD_DWORDX8:
 		case Decoder::Opcode::S_BUFFER_LOAD_DWORDX16: return S_LOAD(inst, false);
+		// Translated scalar loads have no cache of their own to invalidate.
+		case Decoder::Opcode::S_DCACHE_INV: return;
 		case Decoder::Opcode::S_MEMREALTIME: {
 			if (g_host_features.device_clock_period_ps != 0u) {
 				return WriteU32Pair(inst.dst,
@@ -1068,6 +1070,8 @@ void Translator::EmitMemory(const Decoder::Instruction& inst) {
 			return BUFFER_ATOMIC(inst, IR::ValueOpcode::BufferAtomicSMin32);
 		case Decoder::Opcode::BUFFER_ATOMIC_UMIN:
 			return BUFFER_ATOMIC(inst, IR::ValueOpcode::BufferAtomicUMin32);
+		case Decoder::Opcode::BUFFER_ATOMIC_UMIN_X2:
+			return BUFFER_ATOMIC(inst, IR::ValueOpcode::BufferAtomicUMin64);
 		case Decoder::Opcode::BUFFER_ATOMIC_SMAX:
 			return BUFFER_ATOMIC(inst, IR::ValueOpcode::BufferAtomicSMax32);
 		case Decoder::Opcode::BUFFER_ATOMIC_UMAX:
@@ -1196,14 +1200,7 @@ void Translator::EmitMemory(const Decoder::Instruction& inst) {
 		case Decoder::Opcode::IMAGE_STORE:
 		case Decoder::Opcode::IMAGE_STORE_MIP: return IMAGE_STORE(inst);
 		case Decoder::Opcode::IMAGE_SAMPLE: return IMAGE_SAMPLE(inst);
-		case Decoder::Opcode::IMAGE_GATHER4_L:
-		case Decoder::Opcode::IMAGE_GATHER4_LZ:
-		case Decoder::Opcode::IMAGE_GATHER4_C:
-		case Decoder::Opcode::IMAGE_GATHER4_C_LZ:
-		case Decoder::Opcode::IMAGE_GATHER4_LZ_O:
-		case Decoder::Opcode::IMAGE_GATHER4_C_O:
-		case Decoder::Opcode::IMAGE_GATHER4_C_LZ_O:
-		case Decoder::Opcode::IMAGE_GATHER4H: return IMAGE_GATHER(inst);
+		case Decoder::Opcode::IMAGE_GATHER4: return IMAGE_GATHER(inst);
 
 		case Decoder::Opcode::DS_MIN_F32:
 			return DS_ATOMIC(inst, IR::ValueOpcode::SharedAtomicFMin32, false);

@@ -132,10 +132,9 @@ std::string ImageSampleFlagsToString(uint32_t flags) {
 }
 
 std::string FormatMimg(const Instruction& inst) {
-	const char* sample_name =
-	    inst.opcode == Opcode::IMAGE_SAMPLE ? MimgSampleOpcodeName(inst.opcode_id) : nullptr;
+	const char*            sampled_name = MimgSampledOpcodeName(inst.opcode_id);
 	const std::string_view name =
-	    sample_name != nullptr ? sample_name : magic_enum::enum_name(inst.opcode);
+	    sampled_name != nullptr ? sampled_name : magic_enum::enum_name(inst.opcode);
 	std::string text =
 	    fmt::format("0x{:08x}: {} {}, {}, {}, {} ; dmask=0x{:x} image_dim={}", inst.pc, name,
 	                OperandToString(inst.dst).c_str(), OperandToString(inst.src0).c_str(),
@@ -147,21 +146,10 @@ std::string FormatMimg(const Instruction& inst) {
 	if (inst.image_r128) {
 		text += " r128=1";
 	}
-	switch (inst.opcode) {
-		case Opcode::IMAGE_SAMPLE:
-		case Opcode::IMAGE_GATHER4_L:
-		case Opcode::IMAGE_GATHER4_LZ:
-		case Opcode::IMAGE_GATHER4_C:
-		case Opcode::IMAGE_GATHER4_C_LZ:
-		case Opcode::IMAGE_GATHER4_LZ_O:
-		case Opcode::IMAGE_GATHER4_C_O:
-		case Opcode::IMAGE_GATHER4_C_LZ_O:
-		case Opcode::IMAGE_GATHER4H:
+	if (sampled_name != nullptr) {
 			text += fmt::format(" sample_flags={} addr_components={}",
 			                    ImageSampleFlagsToString(inst.image_sample_flags).c_str(),
 			                    inst.image_address_components);
-			break;
-		default: break;
 	}
 	if (inst.image_nsa_dwords != 0) {
 		text += fmt::format(" nsa_dwords={} nsa_addr=", inst.image_nsa_dwords);
@@ -609,6 +597,8 @@ std::string InstructionToString(const Instruction& inst) {
 			                                               OperandToString(inst.src0).c_str()));
 		case Opcode::S_BARRIER:
 			return WithUnsupportedReason(inst, fmt::format("0x{:08x}: s_barrier", inst.pc));
+		case Opcode::S_DCACHE_INV:
+			return fmt::format("0x{:08x}: {}", inst.pc, magic_enum::enum_name(inst.opcode));
 		case Opcode::V_NOP:
 			return WithUnsupportedReason(inst, fmt::format("0x{:08x}: v_nop", inst.pc));
 		case Opcode::S_ENDPGM:
@@ -652,14 +642,7 @@ std::string InstructionToString(const Instruction& inst) {
 		case Opcode::IMAGE_LOAD_MIP:
 		case Opcode::IMAGE_GET_RESINFO:
 		case Opcode::IMAGE_GET_LOD:
-		case Opcode::IMAGE_GATHER4_L:
-		case Opcode::IMAGE_GATHER4_LZ:
-		case Opcode::IMAGE_GATHER4_C:
-		case Opcode::IMAGE_GATHER4_C_LZ:
-		case Opcode::IMAGE_GATHER4_LZ_O:
-		case Opcode::IMAGE_GATHER4_C_O:
-		case Opcode::IMAGE_GATHER4_C_LZ_O:
-		case Opcode::IMAGE_GATHER4H: return WithUnsupportedReason(inst, FormatMimg(inst));
+		case Opcode::IMAGE_GATHER4: return WithUnsupportedReason(inst, FormatMimg(inst));
 		case Opcode::S_LOAD_DWORD:
 		case Opcode::S_LOAD_DWORDX2:
 		case Opcode::S_LOAD_DWORDX4:
@@ -715,6 +698,7 @@ std::string InstructionToString(const Instruction& inst) {
 		case Opcode::BUFFER_ATOMIC_SUB:
 		case Opcode::BUFFER_ATOMIC_SMIN:
 		case Opcode::BUFFER_ATOMIC_UMIN:
+		case Opcode::BUFFER_ATOMIC_UMIN_X2:
 		case Opcode::BUFFER_ATOMIC_SMAX:
 		case Opcode::BUFFER_ATOMIC_UMAX:
 		case Opcode::BUFFER_ATOMIC_AND:
