@@ -300,12 +300,14 @@ enum class CoreOption(
         1L,
     ),
     /**
-     * Console Five Pro (v0.0.10pro): CFP MAX. Runs the working set at 40% - big game
-     * textures fold down through an exact-half box prefilter and large render targets
-     * render at 40% - and the present path rebuilds the picture with a Catmull-Rom
-     * resample plus range-clamped adaptive sharpening (no ringing, no halos, no added
-     * latency), so the picture reads at native quality while texture memory and bandwidth
-     * drop to about a sixth. Off by default; applies from the next game start.
+     * Console Five Pro (v0.0.10pro): CFP MAX. Full-quality performance mode - nothing
+     * is downscaled (a 40% working resolution bought zero frames on the heavy
+     * measured title: the GPU thread is CPU-bound) so the picture stays native.
+     * The speed comes from the CPU side: draws that rebind the same shaders and
+     * descriptors skip the texture rediscovery (RenderExecutor::PrepareBindings
+     * descriptor-diff reuse) and large scene buffers are copied once per render
+     * pass instead of once per draw (BufferCache::ObtainBuffer pass reuse).
+     * Off by default; applies from the next game start.
      */
     CfpMax(
         R.string.option_cfp_max,

@@ -123,7 +123,7 @@
   "option_frame_generation": "Frame generation",
   "option_frame_generation_desc": "Fills idle display ticks with a generated in-between frame, so the presented image runs at the display rate. Real frames are untouched and still appear the moment they finish, so input response stays the same. On by default where the GPU has headroom (off on Mali and older Adreno chips); turn it on or off at will. Applies from the next game start.",
   "option_cfp_max": "CFP MAX",
-  "option_cfp_max_desc": "Deep working-resolution mode: the game runs at 40% of its working resolution - big textures fold down through an exact-half box prefilter and large render targets render at 40% - and the presentation path rebuilds the picture with a Catmull-Rom resample plus contrast-adaptive sharpening that is clamped so it cannot ring or halo. The image looks like the original while texture memory and bandwidth drop to about a sixth - a very large frame-rate gain on every device. Off by default; applies from the next game start.",
+  "option_cfp_max_desc": "Full-quality performance mode: nothing is downscaled - textures and render targets keep their exact native resolution and the picture is presented untouched. The speed comes from the CPU side of the emulation: draws that rebind the same shaders and textures skip the whole texture rediscovery pass, and large scene buffers are copied once per render pass instead of once per draw - the actual hot path of heavy titles. The image stays identical to the original while the frame rate gains a large margin. Off by default; applies from the next game start.",
   "refresh_60": "60 Hz",
   "refresh_90": "90 Hz",
   "refresh_120": "120 Hz",
