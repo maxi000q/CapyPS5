@@ -4,6 +4,7 @@
 #include "android/capyps5_jni.h"
 
 #include "common/common.h"
+#include "common/archive.h"
 #include "common/contentProfile.h"
 #include "common/file.h"
 #include "common/debugFlags.h"
@@ -137,12 +138,34 @@ JNIEXPORT jboolean JNICALL Java_com_consolefivepro_NativeBridge_nativeStartGame(
 	ALOGI("nativeStartGame: game=%s, elf=%s", game_str.c_str(), elf_str.c_str());
 
 	Emulator::RunOptions options;
-	options.app0_dir = game_str;
-	options.elf      = elf_str.empty() ? (game_str + "/eboot.bin") : elf_str;
 
-	if (!std::filesystem::exists(options.elf)) {
-		ALOGW("nativeStartGame: Executable does not exist on disk: %s", options.elf.c_str());
-		return JNI_FALSE;
+	// A .zar dump boots straight from the archive: the archive root becomes app0 and
+	// eboot.bin resolves through the archive layer's path routing (same as --game <zar>).
+	const auto elf_path  = Common::PathFromUtf8(Common::FixFilenameSlash(elf_str));
+	const auto game_path = Common::PathFromUtf8(Common::FixFilenameSlash(game_str));
+	std::filesystem::path archive {};
+	if (!elf_str.empty() && Common::IsSupportedArchive(elf_path)) {
+		archive = elf_path;
+	} else if (!game_str.empty() && Common::IsSupportedArchive(game_path)) {
+		archive = game_path;
+	}
+	if (!archive.empty()) {
+		const auto root = Common::MakeArchivePath(archive);
+		if (!Common::File::IsFileExisting(root / "eboot.bin")) {
+			ALOGW("nativeStartGame: Archive does not contain eboot.bin: %s",
+			      Common::PathToString(archive).c_str());
+			return JNI_FALSE;
+		}
+		options.app0_dir = root;
+		options.elf      = "/app0/eboot.bin";
+	} else {
+		options.app0_dir = game_str;
+		options.elf      = elf_str.empty() ? (game_str + "/eboot.bin") : elf_str;
+
+		if (!std::filesystem::exists(options.elf)) {
+			ALOGW("nativeStartGame: Executable does not exist on disk: %s", options.elf.c_str());
+			return JNI_FALSE;
+		}
 	}
 
 	// Mobile defaults

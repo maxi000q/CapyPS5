@@ -185,7 +185,7 @@ class MainActivity : CapyActivity() {
                                         }
                                     } else {
                                         val picked = File(uriString)
-                                        if (picked.isFile && hasGameExecutableMagic(picked)) picked
+                                        if (picked.isFile && (hasGameExecutableMagic(picked) || isZArchiveName(picked.name))) picked
                                         else {
                                             importReject =
                                                 if (picked.isFile && hasPackageMagic(picked)) {
@@ -366,6 +366,10 @@ class MainActivity : CapyActivity() {
         }
     }.getOrDefault(false)
 
+    /** True when [name] is a ZArchive dump; the core streams .zar files directly. */
+    private fun isZArchiveName(name: String): Boolean =
+        name.substringAfterLast('/').substringAfterLast('\\').endsWith(".zar", true)
+
     /** True when [file] starts with a game-executable magic (the core's ELF/SELF idents). */
     private fun hasGameExecutableMagic(file: File): Boolean = runCatching {
         java.io.FileInputStream(file).use { input ->
@@ -430,7 +434,7 @@ class MainActivity : CapyActivity() {
                     if (n < 0) break
                     headLen += n
                 }
-                if (!isGameExecutableMagic(head, headLen)) {
+                if (!isGameExecutableMagic(head, headLen) && !isZArchiveName(name)) {
                     // A real .pkg is the most common wrong pick (multi-GB): say what to
                     // import instead of a generic rejection - the core loads extracted games.
                     importReject = if (isPackageMagic(head, headLen)) {

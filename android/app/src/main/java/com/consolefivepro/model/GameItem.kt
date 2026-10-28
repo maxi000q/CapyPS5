@@ -15,7 +15,11 @@ data class GameItem(
     val version: String? = null,
     /** True for PS4 games (sce_sys/param.sfo), which run through the backward compatibility layer. */
     val isPs4: Boolean = false,
+    /** True for a ZArchive dump (.zar): the core streams it read-only, no extraction needed. */
+    val isArchive: Boolean = false,
 ) {
+    /** True when the item is a compressed single-file dump rather than an extracted folder. */
+    val isZar: Boolean get() = isArchive || elfPath.endsWith(".zar", ignoreCase = true)
     /** Unreal Engine build (UE4/UE5 command-line file or engine folder in app0). */
     val isUnreal: Boolean get() = isUnrealDir(File(directoryPath))
 
@@ -123,12 +127,19 @@ data class GameItem(
             result
         }.getOrNull()
 
-        /** Scans a root folder for game directories and loose executables. */
+        /** Scans a root folder for game directories, loose executables, and .zar dumps. */
         fun scan(root: File): List<GameItem> {
             val entries = root.listFiles() ?: return emptyList()
             return entries.sortedBy { it.name.lowercase() }.mapNotNull { f ->
                 when {
                     f.isDirectory && File(f, "eboot.bin").exists() -> fromGameDir(f)
+                    f.isFile && f.extension.lowercase() == "zar" -> GameItem(
+                        titleId = f.nameWithoutExtension,
+                        titleName = f.nameWithoutExtension,
+                        directoryPath = f.parent ?: root.absolutePath,
+                        elfPath = f.absolutePath,
+                        isArchive = true,
+                    )
                     f.isFile && f.extension.lowercase() in setOf("elf", "self") ->
                         GameItem(f.nameWithoutExtension, f.name, f.parent ?: root.absolutePath, f.absolutePath)
                     else -> null
