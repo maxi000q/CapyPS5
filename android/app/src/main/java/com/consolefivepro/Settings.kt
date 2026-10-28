@@ -299,6 +299,22 @@ enum class CoreOption(
         listOf(1L to R.string.enabled, 0L to R.string.disabled),
         1L,
     ),
+    /**
+     * Console Five Pro (v0.0.10pro): CFP MAX. Halves the resolution the host works at - big
+     * game textures are downscaled to 50% at upload and large render targets render at half
+     * size - through the scaled-image resampling path, which for an exact 2x step is a proper
+     * area-weighted low-pass. Textures shown smaller than native sample the same data a full
+     * copy would have given them, so the picture stays visually at original quality while
+     * texture memory and bandwidth drop to a quarter. Off by default; applies from the next
+     * game start.
+     */
+    CfpMax(
+        R.string.option_cfp_max,
+        R.string.option_cfp_max_desc,
+        "debug.capy.cfp_max",
+        listOf(1L to R.string.enabled, 0L to R.string.disabled),
+        0L,
+    ),
     ;
 
     fun title(context: Context) = context.getString(titleRes)

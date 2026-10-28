@@ -258,6 +258,10 @@ fun SettingsScreen(
                     else -> context.getString(R.string.adreno_profile_auto)
                 }) + " \u00B7 " + GpuInfo.label
                 listOf(
+                    // Console Five Pro (v0.0.10pro): CFP MAX leads the performance list - the
+                    // half-size high-quality mode (textures and large targets at 50% through the
+                    // area-weighted resampling path). Off by default.
+                    coreItem(CoreOption.CfpMax),
                     SettingItem(
                         context.getString(R.string.option_mali_profile),
                         context.getString(R.string.option_mali_profile_desc),

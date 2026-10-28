@@ -221,12 +221,43 @@ float TextureCache::ResolutionScale() {
 	return scale;
 }
 
+float TextureCache::CfpMaxScale() {
+	// Console Five Pro (v0.0.10pro): CFP MAX halves the resolution the host works at
+	// while keeping the picture visually native. The resampling rides the existing
+	// scaled-image path (Image::UploadScaled/BlitLevels): guest data lands in a
+	// full-size transfer image and a linear-filtered blit folds it into the half-size
+	// backing, which for an exact 2x step is a proper area-weighted low-pass (sRGB
+	// formats are filtered in linear light by the driver). Textures minified on screen
+	// then sample the same data a native copy would have given them, so the picture
+	// stays at original quality while texture memory, upload bandwidth and sampling
+	// bandwidth all drop to a quarter. Read once like res_scale; the frontend applies
+	// the toggle before the game starts.
+	static const float scale = [] {
+		Common::DebugFlags::CachedValue value("debug.capy.cfp_max", 0);
+		return value.Get() != 0 ? 0.5f : 1.0f;
+	}();
+	return scale;
+}
+
 float TextureCache::ChooseScale(const ImageDesc& desc) {
-	const float scale = ResolutionScale();
-	if (scale == 1.0f) {
+	const float scale     = ResolutionScale();
+	const float cfp_scale = CfpMaxScale();
+	const auto& info      = desc.info;
+	// CFP MAX, texture half: big sampled color textures downscale to 50% at upload.
+	// Storage images keep their exact texel grid (compute addresses texels
+	// directly), block-compressed textures cannot be blit-resampled, and small
+	// images (UI, lookup tables, font atlases) are usually magnified on screen,
+	// where halving WOULD be visible. Render-target-class bindings and depth go
+	// through the render-path branch below.
+	if (cfp_scale != 1.0f && desc.type == BindingType::Texture && !desc.heap &&
+	    info.type == Prospero::ImageType::kColor2D && info.samples == 1 &&
+	    !info.IsBlock() && !info.IsDepth() && info.extent.width >= 512 &&
+	    info.extent.height >= 512) {
+		return cfp_scale;
+	}
+	if (scale == 1.0f && cfp_scale == 1.0f) {
 		return 1.0f;
 	}
-	const auto& info = desc.info;
 	// Display buffers are scaled too: Greak flips one of its two buffers before drawing into it,
 	// and that buffer, created unscaled, was then drawn with the scaled depth target bound, so
 	// every other frame showed only the top-left quarter of the scene.
@@ -236,6 +267,11 @@ float TextureCache::ChooseScale(const ImageDesc& desc) {
 	    info.resources.levels != 1 || info.IsBlock() || info.extent.width < 1280 ||
 	    info.extent.height < 720) {
 		return 1.0f;
+	}
+	// CFP MAX, render-path half: large color targets render at (at most) half
+	// size; an even lower explicit resolution setting keeps winning.
+	if (cfp_scale != 1.0f) {
+		return std::min(scale, cfp_scale);
 	}
 	return scale;
 }
