@@ -29,6 +29,10 @@ enum class Vendor : uint32_t {
 
 inline std::atomic<uint32_t> g_vendor {static_cast<uint32_t>(Vendor::Unknown)};
 
+// The Adreno model number when the selected device is one ("Adreno (TM) 740" -> 740), else 0.
+// Recorded next to the vendor; the frame generator's default keys off it.
+inline std::atomic<uint32_t> g_adreno_model {0};
+
 inline void SetVendor(uint32_t vendor_id, const char* device_name) {
         Vendor vendor = Vendor::Unknown;
         if (device_name != nullptr) {
@@ -52,6 +56,20 @@ inline void SetVendor(uint32_t vendor_id, const char* device_name) {
                         default: break;
                 }
         }
+        // "Adreno (TM) 740" -> 740: the model generation decides the frame-generator default.
+        uint32_t adreno_model = 0;
+        if (vendor == Vendor::Qualcomm && device_name != nullptr) {
+                for (const char* c = device_name; *c != '\0'; ++c) {
+                        if (*c >= '0' && *c <= '9') {
+                                adreno_model = static_cast<uint32_t>(*c - '0');
+                                for (c++; *c >= '0' && *c <= '9'; ++c) {
+                                        adreno_model = adreno_model * 10 + static_cast<uint32_t>(*c - '0');
+                                }
+                                break;
+                        }
+                }
+        }
+        g_adreno_model.store(adreno_model, std::memory_order_release);
         g_vendor.store(static_cast<uint32_t>(vendor), std::memory_order_release);
 }
 
@@ -90,6 +108,22 @@ inline void SetOpenDriver(const char* driver_name) {
 
 [[nodiscard]] inline bool IsOpenDriver() {
         return g_open_driver.load(std::memory_order_acquire) != 0;
+}
+
+/**
+ * Whether this GPU has headroom for the frame generator's per-tick composite (the
+ * default of `debug.capy.frame_gen`). Mali parts are bandwidth-bound UMA designs and
+ * pre-7xx Adrenos sit too close to saturation: the generator's extra work would eat the
+ * headroom it was meant to spend, so its default is OFF there. The frontend pushes its
+ * own GPU-gated default at every launch, so this fallback mainly governs adb-set values
+ * and non-mobile hosts (where it stays permissive).
+ */
+[[nodiscard]] inline bool FrameGenerationHeadroom() {
+        switch (GetVendor()) {
+                case Vendor::Arm:      return false; // every Mali generation
+                case Vendor::Qualcomm: return g_adreno_model.load(std::memory_order_acquire) >= 700;
+                default:               return true;  // desktop/unknown hosts stay permissive
+        }
 }
 
 /**

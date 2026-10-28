@@ -137,7 +137,7 @@
     <string name="option_refresh_rate_desc">Modo de pantalla y vblank emulado para juegos guiados por el vblank (misma imagen): Auto sigue la frecuencia máxima de la pantalla, así que las de 90/120 Hz dejan de limitar los juegos a 60 FPS; 60 mantiene el comportamiento anterior. Se aplica desde el próximo inicio del juego.</string>
     <string name="refresh_auto">Auto (pantalla)</string>
     <string name="option_frame_generation">Generación de fotogramas</string>
-    <string name="option_frame_generation_desc">Rellena los ticks libres de la pantalla con un fotograma intermedio generado, así la imagen presentada corre a la frecuencia de la pantalla. Los fotogramas reales no cambian y siguen apareciendo al terminar, así que la respuesta de entrada no varía. Activado por defecto; desactívala para la cadencia pura. Se aplica desde el próximo inicio del juego.</string>
+    <string name="option_frame_generation_desc">Rellena los ticks libres de la pantalla con un fotograma intermedio generado, así la imagen presentada corre a la frecuencia de la pantalla. Los fotogramas reales no cambian y siguen apareciendo al terminar, así que la respuesta de entrada no varía. Activada por defecto donde la GPU tiene margen (desactivada en Mali y Adreno antiguos); actívala o desactívala a voluntad. Se aplica desde el próximo inicio del juego.</string>
     <string name="refresh_60">60 Hz</string>
     <string name="refresh_90">90 Hz</string>
     <string name="refresh_120">120 Hz</string>

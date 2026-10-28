@@ -139,7 +139,7 @@
     <string name="option_refresh_rate_desc">Display mode and emulated vblank for games paced by vblank (same graphics): Auto follows the display’s highest rate, so 90/120 Hz screens stop capping games at 60 FPS; 60 keeps the previous behaviour. Applies from the next game start.</string>
     <string name="refresh_auto">Auto (display)</string>
     <string name="option_frame_generation">Frame generation</string>
-    <string name="option_frame_generation_desc">Fills idle display ticks with a generated in-between frame, so the presented image runs at the display rate. Real frames are untouched and still appear the moment they finish, so input response stays the same. On by default; turn it off for the raw cadence. Applies from the next game start.</string>
+    <string name="option_frame_generation_desc">Fills idle display ticks with a generated in-between frame, so the presented image runs at the display rate. Real frames are untouched and still appear the moment they finish, so input response stays the same. On by default where the GPU has headroom (off on Mali and older Adreno chips); turn it on or off at will. Applies from the next game start.</string>
     <string name="refresh_60">60 Hz</string>
     <string name="refresh_90">90 Hz</string>
     <string name="refresh_120">120 Hz</string>

@@ -289,7 +289,8 @@ enum class CoreOption(
      * in-between frame (the newest frame's motion extended between the two real frames),
      * so the presented cadence reaches the display rate without touching the emulation
      * path - real frames still present the moment they finish, input latency is unchanged.
-     * On by default; turn it off for the raw cadence.
+     * Default is GPU-gated (see gpuAwareDefault): on where the GPU has headroom for the
+     * extra per-tick composite, off on bandwidth-bound parts. The toggle always wins.
      */
     FrameGeneration(
         R.string.option_frame_generation,
@@ -405,8 +406,16 @@ class Settings(context: Context) {
      * v0.0.9pro / v0.0.10pro: with either GPU profile active the streaming buffer defaults to
      * 128 MB and the GPU download read-ahead to 512 KB (heavy titles fault GPU-owned pages in
      * long sequential sweeps - a wider window halves the fault+download count).
+     *
+     * The frame generator is gated by the GPU itself, not by a profile: every Mali
+     * generation and every Adreno below the 7xx series lacks the headroom for the extra
+     * per-tick composite, so its DEFAULT is off there (a user choice still wins; the
+     * setting just starts disabled instead of enabled).
      */
     private fun gpuAwareDefault(option: CoreOption): Long {
+        if (option == CoreOption.FrameGeneration && !GpuInfo.frameGenerationCapable) {
+            return 0L
+        }
         if (!maliProfileActive() && !adrenoProfileActive()) return option.default
         return when (option) {
             CoreOption.StreamingBuffer -> 128L

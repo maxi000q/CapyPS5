@@ -28,6 +28,31 @@ object GpuInfo {
     /** Adreno GPUs (Snapdragon) get the v0.0.10pro Adreno performance profile. */
     val isAdreno: Boolean by lazy { renderer.contains("adreno", ignoreCase = true) }
 
+    /** The Adreno model number ("Adreno (TM) 740" -> 740), or null on anything else. */
+    val adrenoModel: Int? by lazy {
+        if (!isAdreno) return@lazy null
+        Regex("Adreno[^0-9]*(\\d{3})", RegexOption.IGNORE_CASE).find(renderer)
+            ?.groupValues?.getOrNull(1)?.toIntOrNull()
+    }
+
+    /**
+     * Whether the GPU has headroom for the frame generator's extra per-tick work. The
+     * generator composites an extra frame into every idle display tick; on a GPU that is
+     * already near saturation that work eats the headroom it was meant to spend. The
+     * cut is deliberate: every Mali generation (bandwidth-bound UMA parts) and every
+     * Adreno below the 7xx series (730 = the first Snapdragons with real headroom over
+     * PS5-class emulation load). Everything unrecognized is treated as NOT capable - a
+     * wrong default that quietly keeps the raw cadence is harmless; one that stutters a
+     * borderline device is not. The user's own toggle always wins over this default.
+     */
+    val frameGenerationCapable: Boolean by lazy {
+        when {
+            isMali -> false
+            isAdreno -> (adrenoModel ?: 0) >= 700
+            else -> false
+        }
+    }
+
     /** Short label for the settings rows; falls back when the probe found nothing. */
     val label: String get() = renderer.ifBlank { "GPU" }
 

@@ -12,6 +12,7 @@
 #include "common/contentProfile.h"
 #include "common/common.h"
 #include "common/emulatorConfig.h"
+#include "common/gpuProfile.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
 #include "common/stringUtils.h"
@@ -448,12 +449,16 @@ static bool VblankFastPathDisabled() {
 
 // v0.0.10pro phase 5: the frame generator's switches. `debug.capy.frame_gen` is the
 // Settings -> Performance "Frame generation" option (the frontend sets it per
-// session) - on by default. `debug.capy.framegen_lambda` caps the motion weight in
-// percent (default 60: at the deepest phase a generated tick extends the newest
-// frame's motion by 60% of the frame-to-frame delta; the steady 30-in-60 idle tick
-// lands at half that, 30%).
+// session). The default is GPU-gated: on only where the device has headroom for the
+// extra per-tick composite (see GpuProfile::FrameGenerationHeadroom - every Mali and
+// pre-7xx Adreno default to OFF; the frontend pushes the same verdict at launch, so
+// this fallback governs adb overrides and bare-core runs). `debug.capy.framegen_lambda`
+// caps the motion weight in percent (default 60: at the deepest phase a generated tick
+// extends the newest frame's motion by 60% of the frame-to-frame delta; the steady
+// 30-in-60 idle tick lands at half that, 30%).
 static bool FrameGenerationEnabled() {
-	static Common::DebugFlags::CachedValue enabled("debug.capy.frame_gen", 1);
+	static Common::DebugFlags::CachedValue enabled(
+	    "debug.capy.frame_gen", Common::GpuProfile::FrameGenerationHeadroom() ? 1 : 0);
 	return enabled.Get() != 0;
 }
 
