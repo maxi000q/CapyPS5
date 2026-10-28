@@ -300,13 +300,12 @@ enum class CoreOption(
         1L,
     ),
     /**
-     * Console Five Pro (v0.0.10pro): CFP MAX. Halves the resolution the host works at - big
-     * game textures are downscaled to 50% at upload and large render targets render at half
-     * size - through the scaled-image resampling path, which for an exact 2x step is a proper
-     * area-weighted low-pass. Textures shown smaller than native sample the same data a full
-     * copy would have given them, so the picture stays visually at original quality while
-     * texture memory and bandwidth drop to a quarter. Off by default; applies from the next
-     * game start.
+     * Console Five Pro (v0.0.10pro): CFP MAX. Runs the working set at 40% - big game
+     * textures fold down through an exact-half box prefilter and large render targets
+     * render at 40% - and the present path rebuilds the picture with a Catmull-Rom
+     * resample plus range-clamped adaptive sharpening (no ringing, no halos, no added
+     * latency), so the picture reads at native quality while texture memory and bandwidth
+     * drop to about a sixth. Off by default; applies from the next game start.
      */
     CfpMax(
         R.string.option_cfp_max,
