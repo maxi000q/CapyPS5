@@ -762,6 +762,18 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	     graphics.storage_buffer_8bit_enabled);
 	device_features.vertexPipelineStoresAndAtomics = supported_features.vertexPipelineStoresAndAtomics;
 	graphics.sample_rate_shading_enabled           = supported_features.sampleRateShading == VK_TRUE;
+	// Occlusion queries reset their pool from the host and count samples exactly where they can.
+	// Off by default; `setprop debug.capy.occlusion_queries 1` turns host z-pass counting on.
+	static Common::DebugFlags::CachedValue occlusion_queries("debug.capy.occlusion_queries", 0);
+	graphics.occlusion_queries_enabled =
+	    occlusion_queries.Get() != 0 && supported_features12.hostQueryReset == VK_TRUE;
+	graphics.occlusion_query_precise_enabled =
+	    graphics.occlusion_queries_enabled && supported_features.occlusionQueryPrecise == VK_TRUE;
+	features12.hostQueryReset             = graphics.occlusion_queries_enabled ? VK_TRUE : VK_FALSE;
+	device_features.occlusionQueryPrecise = graphics.occlusion_query_precise_enabled ? VK_TRUE : VK_FALSE;
+	LOGF("Vulkan occlusion queries: %s, precise: %s\n",
+	     graphics.occlusion_queries_enabled ? "on" : "off",
+	     graphics.occlusion_query_precise_enabled ? "on" : "off");
 	device_features.shaderInt64                    = supported_features.shaderInt64;
 	device_features.shaderFloat64 =
 	    supported_features2.features.shaderFloat64 &&

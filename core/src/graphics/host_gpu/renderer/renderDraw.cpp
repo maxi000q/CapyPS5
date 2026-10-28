@@ -2027,6 +2027,8 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		rect.layerCount  = 1;
 		vk_buffer.clearAttachments(1, &clear, 1, &rect);
 	}
+	auto&         occlusion_queries = m_context.GetOcclusionQueries();
+	const int32_t occlusion_query   = occlusion_queries.Begin(vk_buffer);
 	if (mesh_emulated) {
 		vk_buffer.drawIndexed(mesh_index_count, 1, 0, 0, 0);
 	} else if (mesh_active) {
@@ -2034,6 +2036,7 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	} else {
 		EmitDrawPrimitives(ucfg, vk_buffer, draw, emit, indirect_buffer, indirect_offset);
 	}
+	occlusion_queries.End(vk_buffer, occlusion_query);
 	if (clear_depth_probe && clear_depth_pre.Get() == 0) {
 		probe_clear_depth();
 	}
