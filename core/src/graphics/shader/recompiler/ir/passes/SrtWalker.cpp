@@ -183,6 +183,7 @@ bool IsRuntimeUniformOp(ValueOpcode op) {
 	}
 }
 
+#if defined(__x86_64__) || defined(_M_X64)
 thread_local const Xbyak::CodeGenerator* t_running_walker = nullptr;
 
 // Every guest load is mov eax, [r10] (41 8b 02), so a fault completes it as a zero read.
@@ -190,6 +191,7 @@ void LoadGuest(Xbyak::CodeGenerator& code, const Xbyak::RegExp& address) {
 	code.lea(code.r10, code.ptr[address]);
 	code.mov(code.eax, code.dword[code.r10]);
 }
+#endif
 
 class RuntimeValidator {
 public:
@@ -1259,6 +1261,7 @@ bool ValidateWaveUniformValue(const ResourcePlan& program, Value value) {
 	return RuntimeValidator(program, RuntimeValueType::Any, true).Run(value);
 }
 
+#if defined(__x86_64__) || defined(_M_X64)
 uint32_t SrtWalkerLoadLength(uint64_t rip) {
 	if (t_running_walker == nullptr ||
 	    rip - reinterpret_cast<uint64_t>(t_running_walker->getCode()) >= t_running_walker->getSize())
@@ -1266,5 +1269,10 @@ uint32_t SrtWalkerLoadLength(uint64_t rip) {
 	const auto* code = reinterpret_cast<const uint8_t*>(rip);
 	return code[0] == 0x41u && code[1] == 0x8bu && code[2] == 0x02u ? 3 : 0;
 }
+#else
+uint32_t SrtWalkerLoadLength(uint64_t) {
+	return 0;
+}
+#endif
 
 } // namespace Libs::Graphics::ShaderRecompiler::IR
