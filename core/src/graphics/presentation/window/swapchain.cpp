@@ -71,12 +71,18 @@ struct CfpPresentControl {
 constexpr float kCfpSharpness          = 0.35f;
 constexpr float kFrameGenSharpnessDamp = 0.6f;
 
-// `setprop debug.capy.cfp_sharp 0` restores the plain bilinear presentation
-// (A/B testing, or devices that prefer it). Read once, like every
-// present-path setting.
+// `setprop debug.capy.cfp_sharp 1` opts a device into the reconstruction
+// pass (Catmull-Rom + clamped acutance instead of the plain bilinear blit).
+// Default OFF since the v0.0.10pro hotfix: the pass had never shipped
+// working, and its first contact with a production driver (the custom
+// Turnip v27 build on an Adreno 830) killed the process at the first
+// sub-native present. The hardware blit it replaces is the battle-tested
+// default of every earlier build, so that is what ships; native-size
+// frames never took the pass anyway (it exists for sub-native working
+// sets and res_scale upscales). Read once, like every present-path setting.
 [[nodiscard]] bool CfpSharpEnabled() {
 	static const bool enabled = [] {
-		Common::DebugFlags::CachedValue value("debug.capy.cfp_sharp", 1);
+		Common::DebugFlags::CachedValue value("debug.capy.cfp_sharp", 0);
 		return value.Get() != 0;
 	}();
 	return enabled;
@@ -1602,7 +1608,8 @@ bool Swapchain::PrepareFrameGen() {
 // only - the exact 1:1 copy and minifications (a window smaller than the
 // frame) stay on the hardware blit - and only for the 8-bit RGBA families the
 // kernel is written for; the GL compatibility backend keeps its own
-// composition. `debug.capy.cfp_sharp 0` turns the whole pass off (A/B).
+// composition. `debug.capy.cfp_sharp 1` turns the pass back on (off is the
+// shipping default since the Turnip v27 crash; see CfpSharpEnabled).
 bool Swapchain::CfpPresentActive(const Presenter::Frame& source) const {
 	if (m_gl_mode || !CfpSharpEnabled()) {
 		return false;
@@ -1871,8 +1878,12 @@ void Swapchain::RecordFrameGenCommands(CommandBuffer& command, Presenter::Frame*
 	// CFP MAX 40: the generated frame magnifies with the same kernel the
 	// real frame's pass uses, or the cadence would alternate sharp and soft
 	// ticks; the acutance restoration runs damped on extrapolated input.
-	const auto control =
-	    MakePresentControl(*newest, weight, kCfpSharpness * kFrameGenSharpnessDamp, 0);
+	// The acutance follows the reconstruction switch: with it off (the
+	// shipping default) a generated tick stays plain bilinear, exactly
+	// the look of the pre-reconstruction frame generator.
+	const float framegen_sharpness =
+	    CfpSharpEnabled() ? kCfpSharpness * kFrameGenSharpnessDamp : 0.0f;
+	const auto control = MakePresentControl(*newest, weight, framegen_sharpness, 0);
 	vk_command.pushConstants(m_framegen_layout, vk::ShaderStageFlagBits::eFragment, 0,
 	                         sizeof(control), &control);
 	vk_command.bindPipeline(vk::PipelineBindPoint::eGraphics, m_framegen_pipeline);
@@ -1956,7 +1967,20 @@ uint64_t Swapchain::Submit(CommandScheduler& scheduler) {
 		return m_last_submit_tick;
 	}
 #endif
-	submit.AddWait(m_image_acquired[m_frame_index], 1, vk::PipelineStageFlagBits::eTransfer);
+	// v0.0.10pro hotfix: the acquire wait must cover every first use of the
+	// acquired swapchain image, not only the hardware blit. The blit writes the
+	// image from the transfer stage, but the CFP reconstruction, the frame
+	// generator and both overlays write it from the color-attachment stage - a
+	// transfer-only wait let that work race ahead of the semaphore, breaking
+	// the blit path's own invariant ("the layout transition cannot precede
+	// acquisition"). On the custom Turnip v27 driver the first sub-native
+	// present after that landed died inside vkQueueSubmit reading null+0x40
+	// (build 3251832's startup crash loop: five runs out of five, CFP MAX on
+	// and off alike). The mask below is a superset - the blit keeps its
+	// transfer coverage, every drawing path gains the color-attachment one.
+	submit.AddWait(m_image_acquired[m_frame_index], 1,
+	               vk::PipelineStageFlagBits::eTransfer |
+	                   vk::PipelineStageFlagBits::eColorAttachmentOutput);
 	submit.AddSignal(m_render_complete[m_image_index]);
 	return scheduler.Submit(submit);
 }
