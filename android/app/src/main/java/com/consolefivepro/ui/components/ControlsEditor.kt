@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.consolefivepro.ButtonLayout
 import com.consolefivepro.ControlsLayout
@@ -48,6 +50,12 @@ import com.consolefivepro.ui.theme.Capy
  *
  * The header shows the type of controls the user has chosen (touch mode and button layout) and
  * the button layout can be switched right here; the pad preview follows it immediately.
+ *
+ * The pad is drawn ABOVE the two panels, not beneath them: a cluster the user parked over the
+ * header or the bottom bar stays fully visible and stays grabbable - nothing but the user's own
+ * cluster ever covers a cluster, so every part of the layout is editable at any screen size.
+ * Taps that land on a panel outside a cluster still reach the panel (the pad itself only
+ * consumes touches inside its cluster boxes).
  */
 @Composable
 fun ControlsEditor(
@@ -76,18 +84,20 @@ fun ControlsEditor(
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Color(0xE6000000))) {
-        VirtualGamepad(
-            modifier = Modifier.fillMaxSize(),
-            alpha = 1f,
-            showTouchpad = true,
-            layout = draft,
-            buttonLayout = settings.buttonLayout,
-            editMode = true,
-            selectedCluster = selected,
-            onClusterSelect = { selected = it },
-            onClusterMove = { cluster, dx, dy -> draft = draft.moved(cluster, dx, dy) },
-        )
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xE6000000))) {
+        // Compact phones (landscape, so the height is the tight axis): the two panels together
+        // could eat half the screen and bury the clusters. Everything they draw - text, paddings,
+        // row heights - scales with the available space, so on a big screen the editor looks
+        // exactly as before and on a small one the panels shrink until both they and the pad fit.
+        val uiScale = (minOf(maxWidth, maxHeight).value / 460f).coerceIn(0.7f, 1f)
+        fun Dp.scaled(): Dp = this * uiScale
+
+        val titleStyle = MaterialTheme.typography.titleLarge
+            .copy(fontSize = MaterialTheme.typography.titleLarge.fontSize * uiScale)
+        val bodyStyle = MaterialTheme.typography.bodySmall
+            .copy(fontSize = MaterialTheme.typography.bodySmall.fontSize * uiScale)
+        val labelStyle = MaterialTheme.typography.labelLarge
+            .copy(fontSize = MaterialTheme.typography.labelLarge.fontSize * uiScale)
 
         // Header: which controls the user has chosen, with the button layout switchable here.
         Column(
@@ -95,25 +105,25 @@ fun ControlsEditor(
                 .align(Alignment.TopStart)
                 .fillMaxWidth()
                 .background(Capy.Surface)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+                .padding(horizontal = 16.dp.scaled(), vertical = 10.dp.scaled()),
+            verticalArrangement = Arrangement.spacedBy(4.dp.scaled()),
         ) {
-            Text(stringResource(R.string.custom_controls), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.custom_controls), style = titleStyle)
             Text(
                 stringResource(
                     R.string.controls_editor_type,
                     settings.touchControls.label(context),
                     settings.buttonLayout.label(context),
                 ) + " · " + stringResource(R.string.custom_controls_hint),
-                style = MaterialTheme.typography.bodySmall,
+                style = bodyStyle,
                 color = Capy.TextSecondary,
             )
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(Capy.Background, RoundedCornerShape(8.dp))
-                    .padding(3.dp),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    .background(Capy.Background, RoundedCornerShape(8.dp.scaled()))
+                    .padding(3.dp.scaled()),
+                horizontalArrangement = Arrangement.spacedBy(3.dp.scaled()),
             ) {
                 ButtonLayout.entries.forEach { layout ->
                     val isSelected = layout == settings.buttonLayout
@@ -122,15 +132,15 @@ fun ControlsEditor(
                             .weight(1f)
                             .background(
                                 if (isSelected) Capy.Accent else Color.Transparent,
-                                RoundedCornerShape(6.dp),
+                                RoundedCornerShape(6.dp.scaled()),
                             )
                             .clickable { settings.updateButtonLayout(layout) }
-                            .padding(vertical = 7.dp),
+                            .padding(vertical = 7.dp.scaled()),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             layout.label(context),
-                            style = MaterialTheme.typography.labelLarge,
+                            style = labelStyle,
                             color = if (isSelected) Color.White else Capy.TextSecondary,
                         )
                     }
@@ -144,8 +154,8 @@ fun ControlsEditor(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .background(Capy.Surface)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 16.dp.scaled(), vertical = 12.dp.scaled()),
+            verticalArrangement = Arrangement.spacedBy(8.dp.scaled()),
         ) {
             val clusterLabels = listOf(
                 stringResource(R.string.controls_cluster_left),
@@ -155,9 +165,9 @@ fun ControlsEditor(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(Capy.Background, RoundedCornerShape(8.dp))
-                    .padding(3.dp),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    .background(Capy.Background, RoundedCornerShape(8.dp.scaled()))
+                    .padding(3.dp.scaled()),
+                horizontalArrangement = Arrangement.spacedBy(3.dp.scaled()),
             ) {
                 clusterLabels.forEachIndexed { index, label ->
                     val isSelected = index == selected
@@ -166,23 +176,23 @@ fun ControlsEditor(
                             .weight(1f)
                             .background(
                                 if (isSelected) Capy.Accent else Color.Transparent,
-                                RoundedCornerShape(6.dp),
+                                RoundedCornerShape(6.dp.scaled()),
                             )
                             .clickable { selected = index }
-                            .padding(vertical = 7.dp),
+                            .padding(vertical = 7.dp.scaled()),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             label,
-                            style = MaterialTheme.typography.labelLarge,
+                            style = labelStyle,
                             color = if (isSelected) Color.White else Capy.TextSecondary,
                         )
                     }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.controls_size), style = MaterialTheme.typography.labelLarge)
-                Spacer(Modifier.width(12.dp))
+                Text(stringResource(R.string.controls_size), style = labelStyle)
+                Spacer(Modifier.width(12.dp.scaled()))
                 Slider(
                     value = draft.cluster(selected).scale,
                     onValueChange = { value ->
@@ -192,44 +202,58 @@ fun ControlsEditor(
                     colors = SliderDefaults.colors(thumbColor = Capy.Accent, activeTrackColor = Capy.Accent),
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(12.dp.scaled()))
                 Text(
                     "%.0f%%".format(draft.cluster(selected).scale * 100),
-                    style = MaterialTheme.typography.labelLarge,
+                    style = labelStyle,
                     color = Capy.Accent,
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp.scaled())) {
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .border(1.dp, Capy.TextSecondary, RoundedCornerShape(8.dp))
+                        .border(1.dp, Capy.TextSecondary, RoundedCornerShape(8.dp.scaled()))
                         .clickable { draft = ControlsLayout() }
-                        .padding(vertical = 9.dp),
+                        .padding(vertical = 9.dp.scaled()),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         stringResource(R.string.controls_reset),
-                        style = MaterialTheme.typography.labelLarge,
+                        style = labelStyle,
                         color = Capy.TextSecondary,
                     )
                 }
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .background(Capy.Accent, RoundedCornerShape(8.dp))
+                        .background(Capy.Accent, RoundedCornerShape(8.dp.scaled()))
                         .clickable { save() }
-                        .padding(vertical = 9.dp),
+                        .padding(vertical = 9.dp.scaled()),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         stringResource(R.string.controls_save),
-                        style = MaterialTheme.typography.labelLarge,
+                        style = labelStyle,
                         color = Color.White,
                     )
                 }
             }
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(2.dp.scaled()))
         }
+
+        // The pad LAST, on top of both panels: clusters stay visible and grabbable even when
+        // the user parks them over the header or the bottom bar (see the class comment).
+        VirtualGamepad(
+            modifier = Modifier.fillMaxSize(),
+            alpha = 1f,
+            showTouchpad = true,
+            layout = draft,
+            buttonLayout = settings.buttonLayout,
+            editMode = true,
+            selectedCluster = selected,
+            onClusterSelect = { selected = it },
+            onClusterMove = { cluster, dx, dy -> draft = draft.moved(cluster, dx, dy) },
+        )
     }
 }
