@@ -327,15 +327,16 @@ void Visit(Program& program, ShaderStageInputInfo input_info, InputUsage& inputs
 				info.uses_lds |= kind == ResourceKind::Lds;
 				info.uses_gds |= kind == ResourceKind::Gds;
 			} else if (kind == ResourceKind::Buffer || kind == ResourceKind::ScalarBuffer) {
-				if (memory.resource >= info.buffers.size() || memory.resource >= ShaderInfo::MaxBuffers) {
+				if (memory.resource >= info.buffers.size() ||
+				    memory.resource >= ShaderInfo::MaxBufferRoots) {
 					return Fail("buffer operation has invalid resource metadata");
 				}
-				info.live_buffers |= uint64_t{1} << memory.resource;
+				info.buffers[memory.resource].live = true;
 				for (const auto child: info.buffers[memory.resource].indirect_resources) {
 					if (child >= info.buffers.size()) {
 						return Fail("indirect buffer operation has invalid resource metadata");
 					}
-					info.live_buffers |= uint64_t{1} << child;
+					info.buffers[child].live = true;
 				}
 			}
 		}
@@ -580,6 +581,8 @@ void Visit(Program& program, ShaderStageInputInfo input_info, InputUsage& inputs
 			    inst.Flags<CFG::BranchCondition>() != CFG::BranchCondition::ScalarInstruction;
 			break;
 		case ValueOpcode::Ballot: info.subgroup_ballot = true; break;
+		case ValueOpcode::SubgroupUMinU32:
+		case ValueOpcode::SubgroupUMaxU32: info.subgroup_arithmetic = true; break;
 		case ValueOpcode::DppMoveU32:
 		case ValueOpcode::ReadFirstLane:
 		case ValueOpcode::ReadLane: {
@@ -631,16 +634,16 @@ void CollectShaderInfo(Program& program, ShaderStageInputInfo input_info) {
 	}
 	ValidateOptions(program, input_info);
 	auto& info = program.info;
-	if (info.buffers.size() > ShaderInfo::MaxBuffers) {
+	if (info.buffers.size() > ShaderInfo::MaxBufferRoots) {
 		return Fail("buffer resource limit exceeded");
 	}
 	info.inputs.clear();
 	info.outputs.clear();
 	info.user_data_registers.clear();
-	info.live_buffers = 0;
 	info.has_bitwise_xor = info.uses_lds = info.uses_gds = info.uses_flattened_srt =
 	    info.uses_dispatch_threads = info.uses_swizzle = false;
 	info.bvh = info.subgroup_ballot = info.subgroup_barrier = info.subgroup_shuffle =
+	    info.subgroup_arithmetic =
 	    info.subgroup_local_invocation_id = info.compute_derivatives = info.image_gather_extended =
 	    info.function_lds = info.function_scratch = info.pixel_valid_mask = info.buffer_int64_atomics =
 	    info.buffer_u8 = info.buffer_u16 = info.shared_int64_atomics = info.coherent_buffers = info.float64 = false;

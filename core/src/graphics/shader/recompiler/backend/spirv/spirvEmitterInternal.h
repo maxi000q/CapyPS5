@@ -112,7 +112,7 @@ struct EmitterState {
 	uint32_t                                         lane_count              = 1;
 	uint32_t                                         lane_half               = 0;
 	std::array<BufferDefinition, 4>                  storage_buffers {};
-	std::array<uint32_t, IR::ShaderInfo::MaxBuffers> memory_byte_offsets {};
+	std::array<uint32_t, IR::ShaderInfo::MaxBufferRoots> memory_byte_offsets {};
 	uint32_t                                         bda_pagetable_variable  = 0;
 	uint32_t                                         fault_buffer_variable   = 0;
 	uint32_t                                         bda_pointer_function    = 0;
