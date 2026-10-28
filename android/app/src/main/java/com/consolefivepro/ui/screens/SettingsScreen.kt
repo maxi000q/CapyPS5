@@ -197,7 +197,6 @@ fun SettingsScreen(
                     coreItem(CoreOption.GraphicsBackend),
                     if (showVulkanVersion) coreItem(CoreOption.VulkanVersion) else null,
                     coreItem(CoreOption.ResolutionScale),
-                    coreItem(CoreOption.ShadowScale),
                     SettingItem(
                         context.getString(R.string.ue_resolution),
                         context.getString(R.string.ue_resolution_desc),

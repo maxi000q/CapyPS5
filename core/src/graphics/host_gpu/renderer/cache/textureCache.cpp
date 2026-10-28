@@ -7,7 +7,6 @@
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/debugFlags.h"
-#include "common/enginePolicy.h"
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
@@ -222,46 +221,12 @@ float TextureCache::ResolutionScale() {
 	return scale;
 }
 
-// `debug.capy.shadow_scale N` (per mille): render shadow maps at N/1000 of their guest
-// size, independently of the target resolution. 0 (the default) is AUTO - the engine's
-// locked workload class decides: the throughput families halve the shadow cost, everyone
-// else keeps full resolution. 1000 or more keeps shadows at their guest size.
-float TextureCache::ShadowScale() {
-	static Common::DebugFlags::CachedValue choice("debug.capy.shadow_scale", 0);
-	const int64_t permille = choice.Get();
-	if (permille >= 1000) {
-		return 1.0f;
-	}
-	if (permille > 0) {
-		return static_cast<float>(permille) / 1000.0f;
-	}
-	// AUTO: the tier the runtime classifier locked (the turbo families buy real fill-rate
-	// with half-size shadows; the compositing family barely draws shadows at all).
-	switch (Common::EnginePolicy::CurrentTier()) {
-		case Common::EnginePolicy::WorkloadTier::Throughput500:
-		case Common::EnginePolicy::WorkloadTier::Forward3D502:
-			return 0.5f;
-		default:
-			return 1.0f;
-	}
-}
-
 float TextureCache::ChooseScale(const ImageDesc& desc) {
-	const auto& info = desc.info;
-	// Shadow maps: square, single-sample, single-level 2D depth targets of 1024 texels or
-	// more. Screen depth buffers follow the display aspect ratio and are never square;
-	// atlas targets of this class are shadow cascades. They follow the shadow policy, not
-	// the target resolution, so a resolution change never re-renders them at the wrong size.
-	if (ShadowScale() != 1.0f && desc.type == BindingType::DepthTarget &&
-	    info.type == Prospero::ImageType::kColor2D && info.samples == 1 &&
-	    info.resources.levels == 1 && info.extent.width == info.extent.height &&
-	    info.extent.width >= 1024) {
-		return ShadowScale();
-	}
 	const float scale = ResolutionScale();
 	if (scale == 1.0f) {
 		return 1.0f;
 	}
+	const auto& info = desc.info;
 	// Display buffers are scaled too: Greak flips one of its two buffers before drawing into it,
 	// and that buffer, created unscaled, was then drawn with the scaled depth target bound, so
 	// every other frame showed only the top-left quarter of the scene.

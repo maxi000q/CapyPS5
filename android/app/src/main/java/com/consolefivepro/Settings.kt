@@ -165,25 +165,6 @@ enum class CoreOption(
         ),
         1000L,
     ),
-    /**
-     * v0.0.10pro: shadow maps render at their own scale, independent of the internal
-     * resolution - shadow fill is a large share of the geometry pass on the 3D families
-     * and scales quadratically with the map size. Auto (the default) follows the
-     * engine's own workload profile: the throughput families halve the shadow cost,
-     * everyone else keeps full size.
-     */
-    ShadowScale(
-        R.string.option_shadows,
-        R.string.option_shadows_desc,
-        "debug.capy.shadow_scale",
-        listOf(
-            0L to R.string.shadows_auto,
-            1000L to R.string.shadows_full,
-            500L to R.string.shadows_half,
-            250L to R.string.shadows_quarter,
-        ),
-        0L,
-    ),
     AsyncShaders(
         R.string.option_async_shaders,
         R.string.option_async_shaders_desc,

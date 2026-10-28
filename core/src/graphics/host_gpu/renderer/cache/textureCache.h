@@ -127,16 +127,6 @@ private:
 public:
 	// Scale of every downscaled image (debug.capy.res_scale), 1 when scaling is off.
 	[[nodiscard]] static float ResolutionScale();
-	// Scale of shadow maps (debug.capy.shadow_scale; AUTO follows the engine's workload
-	// tier), 1 when shadows keep their guest size.
-	[[nodiscard]] static float ShadowScale();
-	// Whether a scaled image carries the shadow scale. Stable by construction: ChooseScale
-	// only ever returns the target scale or the shadow scale, so any scale that is neither
-	// 1 nor the target scale must have come from the shadow policy - true even while the
-	// AUTO tier answer changes mid-session.
-	[[nodiscard]] static bool IsShadowScaled(float scale) {
-		return scale != 1.0f && scale != ResolutionScale();
-	}
 
 private:
 	[[nodiscard]] ImageId     GetNullImage(const ImageDesc& desc);

@@ -59,12 +59,6 @@
     <string name="resolution_75">75 % (4K → 1620p)</string>
     <string name="resolution_50">50 % (4K → 1080p)</string>
     <string name="resolution_25">25 % (4K → 540p)</string>
-    <string name="option_shadows">Shadow resolution</string>
-    <string name="option_shadows_desc">Renders shadow maps at their own scale, separately from the internal resolution. Shadows look a bit softer at lower scales; Auto lets the engine profile decide per game. Engines that draw shadows with compute shaders (Unreal Engine 5) are not affected.</string>
-    <string name="shadows_auto">Auto</string>
-    <string name="shadows_full">Full</string>
-    <string name="shadows_half">50%</string>
-    <string name="shadows_quarter">25%</string>
     <string name="ue_resolution">Default resolution for Unreal games</string>
     <string name="ue_resolution_desc">Unreal Engine games render near 4K and are slow on mobile GPUs; used unless the game has its own setting</string>
     <string name="ue_value">Unreal (%1$s)</string>

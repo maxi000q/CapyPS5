@@ -1685,28 +1685,16 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		LogDrawPhase(draw.Name(), "CreatePipeline");
 	}
 	const uint32_t vs_scaled_images = mesh_emulated ? 0u : ScaledImageMask(bindings.vertex[0]);
-	uint32_t       ps_scaled_images = 0u;
+	uint32_t       ps_scaled_images = state.ps_active ? ScaledImageMask(*bindings.pixel) : 0u;
 	{
-		auto& cache = m_context.GetTextureCache();
-		// The render targets decide the pixel stage's scale constant (FragCoord is divided
-		// by it), including whether the depth target being written is itself a downscaled
-		// shadow map.
-		bool       scaled_target = false;
-		bool       shadow_target = false;
-		const auto target_scale  = [&](ImageId id) {
+		auto&      cache        = m_context.GetTextureCache();
+		const auto target_scale = [&](ImageId id) {
 			const auto* image = id ? cache.m_slot_images.try_get(id) : nullptr;
-			if (image != nullptr && image->IsScaled()) {
-				scaled_target = true;
-				shadow_target |= TextureCache::IsShadowScaled(image->scale);
-			}
+			return image != nullptr && image->IsScaled();
 		};
-		target_scale(state.depth_info.image_id);
+		bool scaled_target = target_scale(state.depth_info.image_id);
 		for (uint32_t i = 0; i < state.color_count; i++) {
-			target_scale(state.color_info[i].image_id);
-		}
-		if (state.ps_active) {
-			ps_scaled_images = scaled_target ? ScaledImageMask(*bindings.pixel, shadow_target)
-			                                 : ScaledImageMask(*bindings.pixel);
+			scaled_target |= target_scale(state.color_info[i].image_id);
 		}
 		if (scaled_target) {
 			ps_scaled_images |= ShaderRecompiler::IR::ScaledRenderTargetBit;
@@ -2188,21 +2176,16 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	}
 }
 
-uint32_t RenderExecutor::ScaledImageMask(const PreparedBindings& bindings, std::optional<bool> shadow) {
-	auto&    cache       = m_context.GetTextureCache();
-	uint32_t main_mask   = 0;
-	uint32_t shadow_mask = 0;
+uint32_t RenderExecutor::ScaledImageMask(const PreparedBindings& bindings) {
+	auto&    cache = m_context.GetTextureCache();
+	uint32_t mask  = 0;
 	for (uint32_t i = 0; i < bindings.images.size() && i < ShaderRecompiler::IR::ScaledImageResources; i++) {
 		const auto* image = cache.m_slot_images.try_get(bindings.images[i].image_id);
 		if (image != nullptr && image->IsScaled()) {
-			(TextureCache::IsShadowScaled(image->scale) ? shadow_mask : main_mask) |= 1u << i;
+			mask |= 1u << i;
 		}
 	}
-	// One scale constant per stage: the caller's verdict wins, otherwise the family that
-	// actually has bindings does (a shadow-only stage takes the shadow scale; a stage with
-	// both reads the non-shadow images through normalized coordinates, which need none).
-	const bool use_shadow = shadow.value_or(main_mask == 0 && shadow_mask != 0);
-	return use_shadow ? (shadow_mask | ShaderRecompiler::IR::ShadowScaleBit) : main_mask;
+	return mask;
 }
 
 Buffer& RenderExecutor::MeshOutputBuffer(uint64_t size) {
