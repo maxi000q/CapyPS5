@@ -14,6 +14,7 @@
 #include "gpu_blit_shaders/gpu_blit_fs_triangle_spv.h"
 #include "gpu_blit_shaders/gpu_video_out_overlay_spv.h"
 #include "gpu_blit_shaders/gpu_video_out_framegen_spv.h"
+#include "gpu_blit_shaders/gpu_video_out_cfp_spv.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
@@ -51,6 +52,38 @@ namespace Libs::Graphics {
 int SyncFenceWait(int fence_fd, int timeout_ms) {
 	int timeout = timeout_ms;
 	return ioctl(fence_fd, 0x40043E00u /* SYNC_IOC_WAIT */, &timeout);
+}
+
+// CFP MAX 40 (v0.0.10pro): the present-path control block shared by every CFP
+// shader - the game-frame reconstruction (gpu_video_out_cfp.frag), the frame
+// generator and the guest overlay. The byte layout must match the
+// push_constant blocks those shaders declare (see gpu_video_out_cfp.inc).
+struct CfpPresentControl {
+	float    weight;    // frame generator: motion extension weight
+	float    sharpness; // acutance restoration strength (0 disables)
+	uint32_t src_width; // source extent, for the texel grid
+	uint32_t src_height;
+	uint32_t flags;     // 1: sRGB-encode on store, 2: Catmull-Rom, 4: premultiplied
+};
+
+// The acutance restoration strength of the real-frame pass. The frame
+// generator runs it damped: the extrapolation doubles the sharpening energy.
+constexpr float kCfpSharpness          = 0.35f;
+constexpr float kFrameGenSharpnessDamp = 0.6f;
+
+// `setprop debug.capy.cfp_sharp 0` restores the plain bilinear presentation
+// (A/B testing, or devices that prefer it). Read once, like every
+// present-path setting.
+[[nodiscard]] bool CfpSharpEnabled() {
+	static const bool enabled = [] {
+		Common::DebugFlags::CachedValue value("debug.capy.cfp_sharp", 1);
+		return value.Get() != 0;
+	}();
+	return enabled;
+}
+
+[[nodiscard]] bool CfpIsSrgbFormat(vk::Format format) {
+	return format == vk::Format::eB8G8R8A8Srgb || format == vk::Format::eR8G8B8A8Srgb;
 }
 
 struct Presenter::Frame {
@@ -330,6 +363,8 @@ public:
 	                               Presenter::Frame* previous, float weight,
 	                               const Presenter::Layer& overlay, bool draw_system_overlay);
 	[[nodiscard]] bool PrepareFrameGen();
+	/** v0.0.10pro CFP MAX: prepare the present-reconstruction pipeline (lazy). */
+	[[nodiscard]] bool PrepareCfpUpscale();
 	uint64_t Submit(CommandScheduler& scheduler);
 	[[nodiscard]] Status Present();
 
@@ -345,6 +380,13 @@ private:
 	void DestroyPipelines();
 	void DrawOverlay(vk::CommandBuffer command, const Presenter::Layer& layer,
 	                 bool clear_attachment = false);
+	/** v0.0.10pro CFP MAX: record the magnifying reconstruction pass. */
+	void                 RecordCfpUpscale(vk::CommandBuffer command,
+	                                     Presenter::Frame& source);
+	[[nodiscard]] bool   CfpPresentActive(const Presenter::Frame& source) const;
+	[[nodiscard]] CfpPresentControl MakePresentControl(const Presenter::Frame& source,
+	                                                   float weight, float sharpness,
+	                                                   uint32_t extra_flags) const;
 
 	WindowContext&   m_window;
 	vk::SwapchainKHR m_handle = nullptr;
@@ -369,6 +411,15 @@ private:
 	vk::PipelineLayout             m_framegen_layout      = nullptr;
 	vk::Pipeline                   m_framegen_pipeline    = nullptr;
 	vk::Sampler                    m_framegen_sampler     = nullptr;
+	// CFP MAX 40 (v0.0.10pro): the present-reconstruction pipeline - the scaled
+	// game frame magnified back to the display through the shared CFP kernel
+	// (Catmull-Rom resample + range-clamped acutance restoration, see
+	// gpu_video_out_cfp.frag). Lazy like the overlay/frame-generator
+	// pipelines and format-keyed with them (DestroyPipelines).
+	vk::DescriptorSetLayout        m_cfp_descriptors = nullptr;
+	vk::PipelineLayout             m_cfp_layout      = nullptr;
+	vk::Pipeline                   m_cfp_pipeline    = nullptr;
+	vk::Sampler                    m_cfp_sampler     = nullptr;
 	// Console Five Pro (v0.0.10pro): the presentation pipelines are format-keyed,
 	// not swapchain-keyed - they survive a recreation with an unchanged format
 	// (windowed resizes rebuild the swapchain repeatedly and would otherwise
@@ -1027,7 +1078,15 @@ void Swapchain::DestroyPipelines() {
 	graphics.device.destroyPipelineLayout(m_framegen_layout, nullptr);
 	graphics.device.destroyDescriptorSetLayout(m_framegen_descriptors, nullptr);
 	graphics.device.destroySampler(m_framegen_sampler, nullptr);
+	graphics.device.destroyPipeline(m_cfp_pipeline, nullptr);
+	graphics.device.destroyPipelineLayout(m_cfp_layout, nullptr);
+	graphics.device.destroyDescriptorSetLayout(m_cfp_descriptors, nullptr);
+	graphics.device.destroySampler(m_cfp_sampler, nullptr);
 	m_framegen_pipeline    = nullptr;
+	m_cfp_pipeline         = nullptr;
+	m_cfp_layout           = nullptr;
+	m_cfp_descriptors      = nullptr;
+	m_cfp_sampler          = nullptr;
 	m_framegen_layout      = nullptr;
 	m_framegen_descriptors = nullptr;
 	m_framegen_sampler     = nullptr;
@@ -1145,7 +1204,10 @@ void Swapchain::DrawOverlay(vk::CommandBuffer command, const Presenter::Layer& l
 		RequireVulkanSuccess(
 		    device.createDescriptorSetLayout(&descriptors, nullptr, &m_overlay_descriptors),
 		    "create video-out overlay descriptor layout");
-		const vk::PushConstantRange alpha {vk::ShaderStageFlagBits::eFragment, 0, sizeof(uint32_t)};
+		// CFP MAX 40: the shared present control block (extent + flags +
+		// premultiplied); the layout must match every CFP shader.
+		const vk::PushConstantRange alpha {vk::ShaderStageFlagBits::eFragment, 0,
+		                                   sizeof(CfpPresentControl)};
 		vk::PipelineLayoutCreateInfo layout {};
 		layout.setLayoutCount         = 1;
 		layout.pSetLayouts            = &m_overlay_descriptors;
@@ -1227,9 +1289,12 @@ void Swapchain::DrawOverlay(vk::CommandBuffer command, const Presenter::Layer& l
 	write.descriptorType  = vk::DescriptorType::eCombinedImageSampler;
 	write.pImageInfo      = &image;
 	command.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, m_overlay_layout, 0, 1, &write);
-	const uint32_t premultiplied = layer.premultiplied_alpha;
+	// CFP MAX 40: the overlay magnifies through the same Catmull-Rom kernel
+	// (see gpu_video_out_cfp.inc); premultiplied rides the shared flags.
+	const auto control =
+	    MakePresentControl(*layer.frame, 0.0f, 0.0f, layer.premultiplied_alpha ? 4u : 0u);
 	command.pushConstants(m_overlay_layout, vk::ShaderStageFlagBits::eFragment, 0,
-	                      sizeof(premultiplied), &premultiplied);
+	                      sizeof(control), &control);
 	command.bindPipeline(vk::PipelineBindPoint::eGraphics, m_overlay_pipeline);
 	vk::RenderingAttachmentInfo attachment {};
 	attachment.imageView   = m_image_views[m_image_index];
@@ -1269,96 +1334,146 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, Presenter::Frame* 
 	auto       vk_command      = command.Handle();
 	const bool draw_overlay    = overlay.frame != nullptr;
 	const bool draw_attachment = draw_overlay || draw_system_overlay;
+	// CFP MAX 40 (v0.0.10pro): a magnified frame reconstructs through the CFP
+	// pass - Catmull-Rom resample plus range-clamped acutance restoration
+	// (gpu_video_out_cfp.frag) - instead of the soft bilinear blit. Everything
+	// else (exact copy, minification, exotic formats, pipeline failure) keeps
+	// the hardware blit path below, untouched.
+	const bool cfp_pass =
+	    source != nullptr && CfpPresentActive(*source) && PrepareCfpUpscale();
 	if (source != nullptr) {
-		source->Transit(vk_command, vk::ImageLayout::eTransferSrcOptimal,
-		                vk::AccessFlagBits2::eTransferRead);
+		source->Transit(vk_command,
+		                cfp_pass ? vk::ImageLayout::eShaderReadOnlyOptimal
+		                         : vk::ImageLayout::eTransferSrcOptimal,
+		                cfp_pass ? vk::AccessFlagBits2::eShaderRead
+		                         : vk::AccessFlagBits2::eTransferRead);
 	}
 	if (draw_overlay) {
 		overlay.frame->Transit(vk_command, vk::ImageLayout::eShaderReadOnlyOptimal,
 		                       vk::AccessFlagBits2::eShaderRead);
 	}
 
-	vk::ImageMemoryBarrier to_transfer {};
-	to_transfer.sType                           = vk::StructureType::eImageMemoryBarrier;
-	to_transfer.dstAccessMask                   = vk::AccessFlagBits::eTransferWrite;
-	to_transfer.oldLayout                       = vk::ImageLayout::eUndefined;
-	to_transfer.newLayout                       = vk::ImageLayout::eTransferDstOptimal;
-	to_transfer.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
-	to_transfer.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
-	to_transfer.image                           = m_images[m_image_index];
-	to_transfer.subresourceRange.aspectMask     = vk::ImageAspectFlagBits::eColor;
-	to_transfer.subresourceRange.baseMipLevel   = 0;
-	to_transfer.subresourceRange.levelCount     = 1;
-	to_transfer.subresourceRange.baseArrayLayer = 0;
-	to_transfer.subresourceRange.layerCount     = 1;
-	// Match the acquire wait stage so the layout transition cannot precede acquisition.
-	vk_command.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-	                           vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags {}, 0,
-	                           nullptr, 0, nullptr, 1, &to_transfer);
-
-	if (source != nullptr) {
-		// v0.0.9proQ1: when the frame already matches the swapchain exactly, a 1:1 copy
-		// replaces the scaled blit — no sampler pass on the way out, cheaper on every GPU,
-		// identical pixels (native-resolution output at a 100% scale).
-		const bool exact_copy = source->image.extent.width == m_extent.width &&
-		                      source->image.extent.height == m_extent.height &&
-		                      source->image.format == m_format && source->image.samples == 1;
-		if (exact_copy) {
-			vk::ImageCopy region {};
-			region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
-			region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
-			region.extent         = {m_extent.width, m_extent.height, 1};
-			vk_command.copyImage(source->image.image, vk::ImageLayout::eTransferSrcOptimal,
-			                     m_images[m_image_index], vk::ImageLayout::eTransferDstOptimal, 1,
-			                     &region);
-		} else {
-			vk::ImageBlit region {};
-			region.srcSubresource.aspectMask     = vk::ImageAspectFlagBits::eColor;
-			region.srcSubresource.mipLevel       = 0;
-			region.srcSubresource.baseArrayLayer = 0;
-			region.srcSubresource.layerCount     = 1;
-			region.srcOffsets[1].x               = static_cast<int>(source->image.extent.width);
-			region.srcOffsets[1].y               = static_cast<int>(source->image.extent.height);
-			region.srcOffsets[1].z               = 1;
-			region.dstSubresource.aspectMask     = vk::ImageAspectFlagBits::eColor;
-			region.dstSubresource.mipLevel       = 0;
-			region.dstSubresource.baseArrayLayer = 0;
-			region.dstSubresource.layerCount     = 1;
-			region.dstOffsets[1].x               = static_cast<int>(m_extent.width);
-			region.dstOffsets[1].y               = static_cast<int>(m_extent.height);
-			region.dstOffsets[1].z               = 1;
-				vk_command.blitImage(source->image.image, vk::ImageLayout::eTransferSrcOptimal,
-				                     m_images[m_image_index], vk::ImageLayout::eTransferDstOptimal, 1,
-				                     &region, vk::Filter::eLinear);
-		}
-	} else {
-		const vk::ClearColorValue black {};
-		vk_command.clearColorImage(m_images[m_image_index], vk::ImageLayout::eTransferDstOptimal,
-		                           &black, 1, &to_transfer.subresourceRange);
-	}
-
 	vk::ImageMemoryBarrier to_present {};
 	to_present.sType               = vk::StructureType::eImageMemoryBarrier;
-	to_present.srcAccessMask       = vk::AccessFlagBits::eTransferWrite;
-	to_present.dstAccessMask       = draw_attachment ? vk::AccessFlagBits::eColorAttachmentRead |
-	                                                       vk::AccessFlagBits::eColorAttachmentWrite
-	                                                 : vk::AccessFlagBits::eMemoryRead;
-	to_present.oldLayout           = vk::ImageLayout::eTransferDstOptimal;
-	to_present.newLayout           = draw_attachment ? vk::ImageLayout::eColorAttachmentOptimal
-	                                                 : present_layout;
-	to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	to_present.image               = m_images[m_image_index];
-	to_present.subresourceRange.aspectMask     = vk::ImageAspectFlagBits::eColor;
-	to_present.subresourceRange.baseMipLevel   = 0;
-	to_present.subresourceRange.levelCount     = 1;
-	to_present.subresourceRange.baseArrayLayer = 0;
-	to_present.subresourceRange.layerCount     = 1;
-	vk_command.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-	                           draw_attachment ? vk::PipelineStageFlagBits::eColorAttachmentOutput
-	                                           : vk::PipelineStageFlagBits::eAllCommands,
-	                           vk::DependencyFlagBits::eByRegion, 0, nullptr, 0, nullptr, 1,
-	                           &to_present);
+	if (cfp_pass) {
+		RecordCfpUpscale(vk_command, *source);
+		if (draw_attachment) {
+			// Make the reconstructed base visible to the overlay draws - the
+			// same-layout barrier the frame generator places between passes.
+			vk::ImageMemoryBarrier2 overlay_vis {};
+			overlay_vis.srcStageMask             = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+			overlay_vis.dstStageMask             = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+			overlay_vis.srcAccessMask            = vk::AccessFlagBits2::eColorAttachmentWrite;
+			overlay_vis.dstAccessMask            = vk::AccessFlagBits2::eColorAttachmentRead |
+			                                       vk::AccessFlagBits2::eColorAttachmentWrite;
+			overlay_vis.oldLayout                = vk::ImageLayout::eColorAttachmentOptimal;
+			overlay_vis.newLayout                = vk::ImageLayout::eColorAttachmentOptimal;
+			overlay_vis.srcQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
+			overlay_vis.dstQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
+			overlay_vis.image                    = m_images[m_image_index];
+			overlay_vis.subresourceRange         = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+			vk::DependencyInfo overlay_visibility {};
+			overlay_visibility.imageMemoryBarrierCount = 1;
+			overlay_visibility.pImageMemoryBarriers    = &overlay_vis;
+			vk_command.pipelineBarrier2(overlay_visibility);
+		} else {
+			vk::ImageMemoryBarrier2 to_present_reconstructed {};
+			to_present_reconstructed.srcStageMask       = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+			to_present_reconstructed.dstStageMask       = vk::PipelineStageFlagBits2::eAllCommands;
+			to_present_reconstructed.srcAccessMask      = vk::AccessFlagBits2::eColorAttachmentWrite;
+			to_present_reconstructed.dstAccessMask      = vk::AccessFlagBits2::eMemoryRead;
+			to_present_reconstructed.oldLayout           = vk::ImageLayout::eColorAttachmentOptimal;
+			to_present_reconstructed.newLayout           = present_layout;
+			to_present_reconstructed.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			to_present_reconstructed.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			to_present_reconstructed.image               = m_images[m_image_index];
+			to_present_reconstructed.subresourceRange    = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+			vk::DependencyInfo reconstructed_dependency {};
+			reconstructed_dependency.imageMemoryBarrierCount  = 1;
+			reconstructed_dependency.pImageMemoryBarriers     = &to_present_reconstructed;
+			vk_command.pipelineBarrier2(reconstructed_dependency);
+		}
+	} else {
+		vk::ImageMemoryBarrier to_transfer {};
+		to_transfer.sType                           = vk::StructureType::eImageMemoryBarrier;
+		to_transfer.dstAccessMask                   = vk::AccessFlagBits::eTransferWrite;
+		to_transfer.oldLayout                       = vk::ImageLayout::eUndefined;
+		to_transfer.newLayout                       = vk::ImageLayout::eTransferDstOptimal;
+		to_transfer.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+		to_transfer.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+		to_transfer.image                           = m_images[m_image_index];
+		to_transfer.subresourceRange.aspectMask     = vk::ImageAspectFlagBits::eColor;
+		to_transfer.subresourceRange.baseMipLevel   = 0;
+		to_transfer.subresourceRange.levelCount     = 1;
+		to_transfer.subresourceRange.baseArrayLayer = 0;
+		to_transfer.subresourceRange.layerCount     = 1;
+		// Match the acquire wait stage so the layout transition cannot precede acquisition.
+		vk_command.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+		                           vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags {}, 0,
+		                           nullptr, 0, nullptr, 1, &to_transfer);
+
+		if (source != nullptr) {
+			// v0.0.9proQ1: when the frame already matches the swapchain exactly, a 1:1 copy
+			// replaces the scaled blit — no sampler pass on the way out, cheaper on every GPU,
+			// identical pixels (native-resolution output at a 100% scale).
+			const bool exact_copy = source->image.extent.width == m_extent.width &&
+			                      source->image.extent.height == m_extent.height &&
+			                      source->image.format == m_format && source->image.samples == 1;
+			if (exact_copy) {
+				vk::ImageCopy region {};
+				region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+				region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+				region.extent         = {m_extent.width, m_extent.height, 1};
+				vk_command.copyImage(source->image.image, vk::ImageLayout::eTransferSrcOptimal,
+				                     m_images[m_image_index], vk::ImageLayout::eTransferDstOptimal, 1,
+				                     &region);
+			} else {
+				vk::ImageBlit region {};
+				region.srcSubresource.aspectMask     = vk::ImageAspectFlagBits::eColor;
+				region.srcSubresource.mipLevel       = 0;
+				region.srcSubresource.baseArrayLayer = 0;
+				region.srcSubresource.layerCount     = 1;
+				region.srcOffsets[1].x               = static_cast<int>(source->image.extent.width);
+				region.srcOffsets[1].y               = static_cast<int>(source->image.extent.height);
+				region.srcOffsets[1].z               = 1;
+				region.dstSubresource.aspectMask     = vk::ImageAspectFlagBits::eColor;
+				region.dstSubresource.mipLevel       = 0;
+				region.dstSubresource.baseArrayLayer = 0;
+				region.dstSubresource.layerCount     = 1;
+				region.dstOffsets[1].x               = static_cast<int>(m_extent.width);
+				region.dstOffsets[1].y               = static_cast<int>(m_extent.height);
+				region.dstOffsets[1].z               = 1;
+					vk_command.blitImage(source->image.image, vk::ImageLayout::eTransferSrcOptimal,
+					                     m_images[m_image_index], vk::ImageLayout::eTransferDstOptimal, 1,
+					                     &region, vk::Filter::eLinear);
+			}
+		} else {
+			const vk::ClearColorValue black {};
+			vk_command.clearColorImage(m_images[m_image_index], vk::ImageLayout::eTransferDstOptimal,
+			                           &black, 1, &to_transfer.subresourceRange);
+		}
+
+		to_present.srcAccessMask       = vk::AccessFlagBits::eTransferWrite;
+		to_present.dstAccessMask       = draw_attachment ? vk::AccessFlagBits::eColorAttachmentRead |
+		                                                       vk::AccessFlagBits::eColorAttachmentWrite
+		                                                 : vk::AccessFlagBits::eMemoryRead;
+		to_present.oldLayout           = vk::ImageLayout::eTransferDstOptimal;
+		to_present.newLayout           = draw_attachment ? vk::ImageLayout::eColorAttachmentOptimal
+		                                                 : present_layout;
+		to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		to_present.image               = m_images[m_image_index];
+		to_present.subresourceRange.aspectMask     = vk::ImageAspectFlagBits::eColor;
+		to_present.subresourceRange.baseMipLevel   = 0;
+		to_present.subresourceRange.levelCount     = 1;
+		to_present.subresourceRange.baseArrayLayer = 0;
+		to_present.subresourceRange.layerCount     = 1;
+		vk_command.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+		                           draw_attachment ? vk::PipelineStageFlagBits::eColorAttachmentOutput
+		                                           : vk::PipelineStageFlagBits::eAllCommands,
+		                           vk::DependencyFlagBits::eByRegion, 0, nullptr, 0, nullptr, 1,
+		                           &to_present);
+	}
 	if (draw_attachment) {
 		if (draw_overlay) {
 			DrawOverlay(vk_command, overlay);
@@ -1385,10 +1500,10 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, Presenter::Frame* 
 	}
 }
 
-
 // v0.0.10pro phase 5: the frame generator's lazy pipeline. Two samplers - the newest
-// game frame and the one before it - and one float push constant, the motion weight the
-// shader extends the newest frame by. Built on first use, exactly like the overlay
+// game frame and the one before it - and the shared CFP present control block
+// (motion weight + acutance strength + extent + flags). Built on first use, exactly
+// like the overlay
 // pipeline, so devices that never generate (setting off, GL backend) pay nothing.
 bool Swapchain::PrepareFrameGen() {
 	if (m_framegen_pipeline != nullptr) {
@@ -1415,7 +1530,10 @@ bool Swapchain::PrepareFrameGen() {
 	RequireVulkanSuccess(
 		device.createDescriptorSetLayout(&descriptors, nullptr, &m_framegen_descriptors),
 		"create frame-generator descriptor layout");
-	const vk::PushConstantRange weight {vk::ShaderStageFlagBits::eFragment, 0, sizeof(float)};
+	// CFP MAX 40: the frame generator pushes the shared present control
+	// block (weight + acutance strength + source extent + flags).
+	const vk::PushConstantRange weight {vk::ShaderStageFlagBits::eFragment, 0,
+	                                     sizeof(CfpPresentControl)};
 	vk::PipelineLayoutCreateInfo layout {};
 	layout.setLayoutCount         = 1;
 	layout.pSetLayouts            = &m_framegen_descriptors;
@@ -1480,6 +1598,211 @@ bool Swapchain::PrepareFrameGen() {
 	return true;
 }
 
+// CFP MAX 40 (v0.0.10pro): when the present path reconstructs. Magnification
+// only - the exact 1:1 copy and minifications (a window smaller than the
+// frame) stay on the hardware blit - and only for the 8-bit RGBA families the
+// kernel is written for; the GL compatibility backend keeps its own
+// composition. `debug.capy.cfp_sharp 0` turns the whole pass off (A/B).
+bool Swapchain::CfpPresentActive(const Presenter::Frame& source) const {
+	if (m_gl_mode || !CfpSharpEnabled()) {
+		return false;
+	}
+	if (source.image.extent.width >= m_extent.width ||
+	    source.image.extent.height >= m_extent.height) {
+		return false;
+	}
+	const auto format = source.image.format;
+	if (format != vk::Format::eB8G8R8A8Unorm && format != vk::Format::eR8G8B8A8Unorm &&
+	    format != vk::Format::eB8G8R8A8Srgb && format != vk::Format::eR8G8B8A8Srgb) {
+		return false;
+	}
+	return true;
+}
+
+// The shared push-control block for every CFP present shader (see
+// gpu_video_out_cfp.inc): the source extent for the texel grid, the kernel
+// flags, and the sRGB bookkeeping - the source view decodes sRGB to linear,
+// an sRGB attachment re-encodes on store, and a UNORM attachment (the surface
+// offered no sRGB format) gets the manual encode so the fallback stays
+// byte-exact with the hardware blit it replaces.
+CfpPresentControl Swapchain::MakePresentControl(const Presenter::Frame& source, float weight,
+                                                float sharpness, uint32_t extra_flags) const {
+	CfpPresentControl control {};
+	control.weight     = weight;
+	control.sharpness  = sharpness;
+	control.src_width  = source.image.extent.width;
+	control.src_height = source.image.extent.height;
+	const bool encode  = CfpIsSrgbFormat(source.image.format) && !CfpIsSrgbFormat(m_format);
+	control.flags      = extra_flags | (encode ? 1u : 0u) | (CfpSharpEnabled() ? 2u : 0u);
+	return control;
+}
+
+// CFP MAX 40 (v0.0.10pro): the present-reconstruction pipeline. One sampler -
+// the scaled game frame - and the shared present control block (weight,
+// acutance strength, source extent, flags). Built on first use like the
+// overlay and frame-generator pipelines, so devices that never magnify
+// (native working set, GL backend, cfp_sharp off) pay nothing.
+bool Swapchain::PrepareCfpUpscale() {
+	if (m_cfp_pipeline != nullptr) {
+		return true;
+	}
+	auto device = m_window.graphic_ctx.device;
+	vk::SamplerCreateInfo sampler {};
+	sampler.magFilter    = vk::Filter::eLinear;
+	sampler.minFilter    = vk::Filter::eLinear;
+	sampler.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+	sampler.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+	sampler.addressModeW = vk::SamplerAddressMode::eClampToEdge;
+	RequireVulkanSuccess(device.createSampler(&sampler, nullptr, &m_cfp_sampler),
+	                     "create CFP reconstruction sampler");
+	const vk::DescriptorSetLayoutBinding binding {0, vk::DescriptorType::eCombinedImageSampler,
+	                                              1, vk::ShaderStageFlagBits::eFragment};
+	vk::DescriptorSetLayoutCreateInfo    descriptors {};
+	descriptors.flags        = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR;
+	descriptors.bindingCount = 1;
+	descriptors.pBindings    = &binding;
+	RequireVulkanSuccess(
+	    device.createDescriptorSetLayout(&descriptors, nullptr, &m_cfp_descriptors),
+	    "create CFP reconstruction descriptor layout");
+	const vk::PushConstantRange control {vk::ShaderStageFlagBits::eFragment, 0,
+	                                     sizeof(CfpPresentControl)};
+	vk::PipelineLayoutCreateInfo layout {};
+	layout.setLayoutCount         = 1;
+	layout.pSetLayouts            = &m_cfp_descriptors;
+	layout.pushConstantRangeCount = 1;
+	layout.pPushConstantRanges    = &control;
+	RequireVulkanSuccess(device.createPipelineLayout(&layout, nullptr, &m_cfp_layout),
+	                     "create CFP reconstruction pipeline layout");
+	const auto vertex   = CompileSPV(GPU_BLIT_FS_TRIANGLE_SPV, device);
+	const auto fragment = CompileSPV(GPU_VIDEO_OUT_CFP_SPV, device);
+	std::array<vk::PipelineShaderStageCreateInfo, 2> stages {};
+	stages[0].stage  = vk::ShaderStageFlagBits::eVertex;
+	stages[0].module = vertex;
+	stages[0].pName  = "main";
+	stages[1].stage  = vk::ShaderStageFlagBits::eFragment;
+	stages[1].module = fragment;
+	stages[1].pName  = "main";
+	vk::PipelineVertexInputStateCreateInfo   vertex_input {};
+	vk::PipelineInputAssemblyStateCreateInfo assembly {};
+	assembly.topology = vk::PrimitiveTopology::eTriangleList;
+	vk::PipelineViewportStateCreateInfo viewport {};
+	viewport.viewportCount = 1;
+	viewport.scissorCount  = 1;
+	vk::PipelineRasterizationStateCreateInfo rasterization {};
+	rasterization.lineWidth = 1.0f;
+	vk::PipelineMultisampleStateCreateInfo multisample {};
+	multisample.rasterizationSamples = vk::SampleCountFlagBits::e1;
+	// The reconstructed frame is the base layer: opaque, no blending. The guest
+	// overlay (bus 1) and the system overlay draw on top with their own
+	// pipelines, exactly like they draw on top of the normal blit.
+	vk::PipelineColorBlendAttachmentState attachment {};
+	attachment.colorWriteMask = vk::ColorComponentFlagBits::eR |
+	                            vk::ColorComponentFlagBits::eG |
+	                            vk::ColorComponentFlagBits::eB |
+	                            vk::ColorComponentFlagBits::eA;
+	vk::PipelineColorBlendStateCreateInfo blend {};
+	blend.attachmentCount = 1;
+	blend.pAttachments    = &attachment;
+	const std::array dynamic_states {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+	vk::PipelineDynamicStateCreateInfo dynamic {};
+	dynamic.dynamicStateCount = static_cast<uint32_t>(dynamic_states.size());
+	dynamic.pDynamicStates    = dynamic_states.data();
+	vk::PipelineRenderingCreateInfo rendering {};
+	rendering.colorAttachmentCount    = 1;
+	rendering.pColorAttachmentFormats = &m_format;
+	vk::GraphicsPipelineCreateInfo create {};
+	create.pNext               = &rendering;
+	create.stageCount          = static_cast<uint32_t>(stages.size());
+	create.pStages             = stages.data();
+	create.pVertexInputState   = &vertex_input;
+	create.pInputAssemblyState = &assembly;
+	create.pViewportState      = &viewport;
+	create.pRasterizationState = &rasterization;
+	create.pMultisampleState   = &multisample;
+	create.pColorBlendState    = &blend;
+	create.pDynamicState       = &dynamic;
+	create.layout              = m_cfp_layout;
+	RequireVulkanSuccess(
+	    device.createGraphicsPipelines(nullptr, 1, &create, nullptr, &m_cfp_pipeline),
+	    "create CFP reconstruction pipeline");
+	device.destroyShaderModule(fragment, nullptr);
+	device.destroyShaderModule(vertex, nullptr);
+	return true;
+}
+
+// CFP MAX 40 (v0.0.10pro): magnify the scaled game frame into the acquired
+// swapchain image through the shared CFP kernel - Catmull-Rom resample plus
+// range-clamped acutance restoration (gpu_video_out_cfp.frag). One fullscreen
+// pass, no history: the frame presents the moment it is ready, exactly like
+// the blit it replaces. The bus-1 overlay and the system overlay draw on top
+// through their own pipelines, the same layering the blit path produces.
+void Swapchain::RecordCfpUpscale(vk::CommandBuffer command, Presenter::Frame& source) {
+	auto device = m_window.graphic_ctx.device;
+	if (source.view == nullptr) {
+		vk::ImageViewCreateInfo view {};
+		view.image            = source.image.image;
+		view.viewType         = vk::ImageViewType::e2D;
+		view.format           = source.image.format;
+		view.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+		RequireVulkanSuccess(device.createImageView(&view, nullptr, &source.view),
+		                     "create CFP presentation image view");
+	}
+	// The swapchain image is written for the first time this present: Undefined
+	// straight into the color-attachment layout; the render pass clears what
+	// the previous image held. Same v2 sync pattern the frame generator uses
+	// for its first write.
+	vk::ImageMemoryBarrier2 to_attachment {};
+	to_attachment.srcStageMask             = vk::PipelineStageFlagBits2::eAllCommands;
+	to_attachment.dstStageMask             = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+	to_attachment.srcAccessMask            = {};
+	to_attachment.dstAccessMask            = vk::AccessFlagBits2::eColorAttachmentRead |
+	                                           vk::AccessFlagBits2::eColorAttachmentWrite;
+	to_attachment.oldLayout                = vk::ImageLayout::eUndefined;
+	to_attachment.newLayout                = vk::ImageLayout::eColorAttachmentOptimal;
+	to_attachment.srcQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
+	to_attachment.dstQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
+	to_attachment.image                    = m_images[m_image_index];
+	to_attachment.subresourceRange         = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+	vk::DependencyInfo attachment_dependency {};
+	attachment_dependency.imageMemoryBarrierCount = 1;
+	attachment_dependency.pImageMemoryBarriers    = &to_attachment;
+	command.pipelineBarrier2(attachment_dependency);
+	const vk::DescriptorImageInfo image {m_cfp_sampler, source.view,
+	                                     vk::ImageLayout::eShaderReadOnlyOptimal};
+	vk::WriteDescriptorSet        write {};
+	write.dstBinding      = 0;
+	write.descriptorCount = 1;
+	write.descriptorType  = vk::DescriptorType::eCombinedImageSampler;
+	write.pImageInfo      = &image;
+	command.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, m_cfp_layout, 0, 1, &write);
+	const auto control = MakePresentControl(source, 0.0f, kCfpSharpness, 0);
+	command.pushConstants(m_cfp_layout, vk::ShaderStageFlagBits::eFragment, 0, sizeof(control),
+	                      &control);
+	command.bindPipeline(vk::PipelineBindPoint::eGraphics, m_cfp_pipeline);
+	vk::RenderingAttachmentInfo attachment {};
+	attachment.imageView   = m_image_views[m_image_index];
+	attachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+	attachment.loadOp      = vk::AttachmentLoadOp::eClear;
+	attachment.storeOp     = vk::AttachmentStoreOp::eStore;
+	vk::RenderingInfo rendering {};
+	rendering.renderArea.extent    = m_extent;
+	rendering.layerCount           = 1;
+	rendering.colorAttachmentCount = 1;
+	rendering.pColorAttachments    = &attachment;
+	command.beginRendering(&rendering);
+	const vk::Viewport viewport {
+	    0.0f, 0.0f, static_cast<float>(m_extent.width), static_cast<float>(m_extent.height),
+	    0.0f, 1.0f};
+	const vk::Rect2D scissor {{0, 0}, m_extent};
+	command.setViewport(0, 1, &viewport);
+	command.setScissor(0, 1, &scissor);
+	command.draw(3, 1, 0, 0);
+	command.endRendering();
+	Common::DebugFlags::NoteOnce("CapyPS5-Cfp", 0x43465052u,
+	                             "cfp: present reconstruction %ux%u -> %ux%u (sharpness %.2f)",
+	                             source.image.extent.width, source.image.extent.height,
+	                             m_extent.width, m_extent.height, kCfpSharpness);
+}
 // v0.0.10pro phase 5: compose one generated frame into the acquired swapchain image: the
 // newest game frame with its motion extended by `weight` of the frame-to-frame delta
 // (gpu_video_out_framegen.frag), then the bus-1 overlay and the system overlay on top -
@@ -1545,8 +1868,13 @@ void Swapchain::RecordFrameGenCommands(CommandBuffer& command, Presenter::Frame*
 	}
 	vk_command.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, m_framegen_layout, 0,
 						 static_cast<uint32_t>(writes.size()), writes.data());
+	// CFP MAX 40: the generated frame magnifies with the same kernel the
+	// real frame's pass uses, or the cadence would alternate sharp and soft
+	// ticks; the acutance restoration runs damped on extrapolated input.
+	const auto control =
+	    MakePresentControl(*newest, weight, kCfpSharpness * kFrameGenSharpnessDamp, 0);
 	vk_command.pushConstants(m_framegen_layout, vk::ShaderStageFlagBits::eFragment, 0,
-					sizeof(weight), &weight);
+	                         sizeof(control), &control);
 	vk_command.bindPipeline(vk::PipelineBindPoint::eGraphics, m_framegen_pipeline);
 	vk::RenderingAttachmentInfo attachment {};
 	attachment.imageView   = m_image_views[m_image_index];
