@@ -352,14 +352,26 @@ void VisitInstruction(Pass& pass, Block* block, Inst& inst) {
 } // namespace
 
 void RewriteToSsa(const BlockList& blocks) {
-	Pass pass;
+	// Seal blocks the moment their last immediate predecessor has been walked instead of
+	// after the whole program (on-the-fly sealing, Braun et al.). Two effects: pending-phi
+	// records leave `incomplete_phis` while they are still hot in cache instead of piling
+	// up for the entire run, and every phi a block needs is finalized before the block's
+	// own users can read it, so late reads never re-open a record. Entry blocks (no
+	// predecessors) seal up front.
+	Pass                               pass;
+	std::unordered_map<Block*, size_t> sealed_predecessors;
 	for (auto* block: blocks) {
+		if (block->ImmPredecessors().empty()) {
+			pass.Seal(block);
+		}
 		for (auto& inst: *block) {
 			VisitInstruction(pass, block, inst);
 		}
-	}
-	for (auto* block: blocks) {
-		pass.Seal(block);
+		for (auto* successor: block->ImmSuccessors()) {
+			if (++sealed_predecessors[successor] == successor->ImmPredecessors().size()) {
+				pass.Seal(successor);
+			}
+		}
 	}
 }
 
