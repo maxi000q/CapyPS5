@@ -260,11 +260,9 @@ void Inst::Invalidate() {
 }
 
 void Inst::AddUse(Inst* used, size_t operand) {
-	// No duplicate scan: it made every argument bind O(uses of the definition), so a
-	// value used N times cost O(N^2) in scans across the program. The (user, operand)
-	// pair is unique by construction - SetArg and AddPhiOperand remove the old use of
-	// the slot before binding the new one - and a caller that bound one slot twice
-	// would corrupt the counts whatever the scan did.
+	const auto found = std::ranges::find_if(
+	    used->uses, [&](const Use& use) { return use.user == this && use.operand == operand; });
+	EXIT_IF(found != used->uses.end());
 	used->uses.push_back({this, operand});
 }
 
