@@ -3841,6 +3841,28 @@ static int MapDirectMemoryUnfolded(void** addr, size_t len, int prot, int flags,
 				                    static_cast<unsigned long long>(len));
 #endif
 			}
+			if (reserved_target && !adopted_target && in_addr + len <= (1ull << 48u) &&
+			    !g_guest_address_space->Owns(in_addr, len) &&
+			    g_guest_address_space->AdoptHostRange(in_addr, len)) {
+				// Console Five Pro fix (v0.0.9pro): the span above is Reserved at the guest
+				// level, but the folded target can still sit in a host band no startup
+				// reservation owns - guest 0xd000000000 folds past HOST_USER_MAX to
+				// 0x5000000000, so MapBacking's Consume fails with
+				// address-range-unavailable and the game's guaranteed MAP_FIXED dies as
+				// ENOMEM (Elliot's UE fatal at GenericPlatformMemory.cpp:263, "Ran out
+				// of memory allocating 33554432"). Adopt exactly the window the folded
+				// address names; the JIT folds guest data accesses the same way, so the
+				// backing view placed here is what the game touches. The publish step
+				// below still runs ReplaceSpan over the Reserved span, so adopted_target
+				// stays false.
+				UnmapGpuRange(in_addr, len, true);
+#if defined(__ANDROID__)
+				__android_log_print(ANDROID_LOG_INFO, "CapyPS5-Mem",
+						    "adopted host window 0x%llx size 0x%llx for reserved fixed mapping",
+						    static_cast<unsigned long long>(in_addr),
+						    static_cast<unsigned long long>(len));
+#endif
+			}
 			if (!reserved_target) {
 #if defined(__ANDROID__)
 				{
