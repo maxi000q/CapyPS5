@@ -518,6 +518,23 @@ void GameController::CheckActive() {
 }
 
 void GameController::AddState() {
+	// Sticks, triggers and sensors can fire far more often than the game reads the pad.
+	// If a burst of such samples holds no button or touch-contact change, fold it into
+	// the newest still-unread sample instead of pushing fresh ring slots - a full ring
+	// evicts the oldest unread entry, and a quick stick flick could otherwise shove a
+	// genuine button press out before the game ever sees it. The newest axes always win
+	// (each merge overwrites), so latency of the analog path is unchanged.
+	if (m_states_num != 0) {
+		const auto newest = (m_first_state + m_states_num - 1) % STATES_MAX;
+		auto&      last   = m_states[newest];
+		if (!m_obtained[newest] && last.buttons == m_state.buttons &&
+		    last.touch[0].down == m_state.touch[0].down &&
+		    last.touch[1].down == m_state.touch[1].down) {
+			last = m_state;
+			return;
+		}
+	}
+
 	if (m_states_num >= STATES_MAX) {
 		m_states_num  = STATES_MAX - 1;
 		m_first_state = (m_first_state + 1) % STATES_MAX;
