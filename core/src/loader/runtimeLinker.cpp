@@ -23,7 +23,6 @@
 #include "kernel/memory.h"
 #include "kernel/pthread.h"
 #include "loader/elf.h"
-#include "loader/fexInstructionFixups.h"
 #include "loader/gamePatch.h"
 #include "loader/guestInstructionPatcher.h"
 #include "loader/jit.h"
@@ -2045,12 +2044,6 @@ void RuntimeLinker::LoadProgramToMemory(Program* program) {
 	const bool protect_memory_faults = false;
 #endif
 	const bool patch_guest_instructions = protect_memory_faults || emulate_amd;
-	// FEX hint fixups (MONITORX/MWAITX) only matter where the F JIT runs: ARM hosts.
-#if defined(__x86_64__) || defined(_M_X64)
-	constexpr bool patch_fex_hints = false;
-#else
-	constexpr bool patch_fex_hints = true;
-#endif
 
 	constexpr uint64_t INSTRUCTION_TRAMPOLINE_SIZE = 8u * 1024u * 1024u;
 	if (patch_guest_instructions) {
@@ -2172,8 +2165,7 @@ void RuntimeLinker::LoadProgramToMemory(Program* program) {
 			program->proc_param_vaddr = phdr[i].p_vaddr + program->base_vaddr;
 		}
 
-		if ((patch_guest_instructions || patch_fex_hints) &&
-		    phdr[i].p_type == PT_GNU_EH_FRAME) {
+		if (patch_guest_instructions && phdr[i].p_type == PT_GNU_EH_FRAME) {
 			eh_frame_header_addr = phdr[i].p_vaddr + program->base_vaddr;
 			eh_frame_header_size = phdr[i].p_memsz;
 		}
@@ -2235,28 +2227,6 @@ void RuntimeLinker::LoadProgramToMemory(Program* program) {
 			                                         : "patched";
 			Log::WriteToConsoleAndLog(
 			    fmt::format("AMD CPU compatibility: {} {} ({})\n", module_name, status, details));
-		}
-	}
-
-	if (patch_fex_hints && eh_frame_header_size != 0) {
-		std::vector<uintptr_t> fex_function_starts;
-		if (DecodeEhFrameFunctionStarts(eh_frame_header_addr, eh_frame_header_size,
-		                                &fex_function_starts)) {
-			uint64_t hints_rewritten = 0;
-			for (const auto& [segment_addr, segment_size]: executable_segments) {
-				const auto count =
-				    RewriteFexPrivilegedHints(segment_addr, segment_size, fex_function_starts);
-				if (count != 0) {
-					Common::VirtualMemory::FlushInstructionCache(segment_addr, segment_size);
-				}
-				hints_rewritten += count;
-			}
-			if (hints_rewritten != 0) {
-				Log::WriteToConsoleAndLog(
-				    fmt::format("{}: {} MONITORX/MWAITX spin hints rewritten as NOPs\n",
-				                Common::PathToString(program->file_name.filename()),
-				                hints_rewritten));
-			}
 		}
 	}
 
