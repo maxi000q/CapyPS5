@@ -574,6 +574,13 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 		image_atomic_int64.pNext = supported_features2.pNext;
 		supported_features2.pNext = &image_atomic_int64;
 	}
+	const bool conditional_rendering_extension =
+	    HasExtension(device_extensions, VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME);
+	vk::PhysicalDeviceConditionalRenderingFeaturesEXT conditional_rendering {};
+	if (conditional_rendering_extension) {
+		conditional_rendering.pNext = supported_features2.pNext;
+		supported_features2.pNext   = &conditional_rendering;
+	}
 	const bool shader_clock_extension = HasExtension(device_extensions, VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
 	vk::PhysicalDeviceShaderClockFeaturesKHR shader_clock {};
 	if (shader_clock_extension) {
@@ -679,6 +686,10 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	    feedback_extensions && feedback_layout.attachmentFeedbackLoopLayout &&
 	    feedback_dynamic.attachmentFeedbackLoopDynamicState;
 	graphics.depth_color_copy_enabled = maintenance8_extension && maintenance8.maintenance8;
+	graphics.conditional_rendering_enabled =
+	    conditional_rendering_extension && conditional_rendering.conditionalRendering;
+	LOGF("Vulkan conditional rendering support: %s\n",
+	     graphics.conditional_rendering_enabled ? "true" : "false");
 	LOGF("Vulkan depth/color copy support: %s\n",
 	     graphics.depth_color_copy_enabled ? "true" : "false");
 	LOGF("Vulkan depth feedback support: %s\n",
@@ -839,6 +850,10 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	if (graphics.depth_color_copy_enabled) {
 		maintenance8.pNext = const_cast<void*>(create_info.pNext);
 		create_info.pNext = &maintenance8;
+	}
+	if (graphics.conditional_rendering_enabled) {
+		conditional_rendering.pNext = const_cast<void*>(create_info.pNext);
+		create_info.pNext           = &conditional_rendering;
 	}
 	if (ShaderRecompiler::g_host_features.device_clock_period_ps != 0u) {
 		shader_clock.shaderSubgroupClock = VK_FALSE;
@@ -1433,6 +1448,7 @@ void WindowContext::CreateVulkan() {
 		                             VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME,
 		                             VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME,
 		                             VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME,
+		                             VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME,
 		                             VK_EXT_IMAGE_VIEW_MIN_LOD_EXTENSION_NAME,
 		                             VK_EXT_COLOR_WRITE_ENABLE_EXTENSION_NAME,
 		                             VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME,

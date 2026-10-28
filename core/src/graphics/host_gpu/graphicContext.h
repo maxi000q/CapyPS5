@@ -88,6 +88,7 @@ struct GraphicContext {
 	bool                               pipeline_statistics_enabled           = false;
 	bool                               occlusion_queries_enabled             = false;
 	bool                               occlusion_query_precise_enabled       = false;
+	bool                               conditional_rendering_enabled         = false;
 	bool                               pipeline_executable_info_enabled      = false;
 	// 8-bit storage buffer access: false on Adreno 6xx + Turnip; the texture tiler then
 	// uses compute pipelines compiled without VK_KHR_8bit_storage.

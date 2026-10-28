@@ -58,6 +58,13 @@ public:
 	                                const D16Layout& layout);
 	[[nodiscard]] Result TransformColor(Result input, ColorTransform transform, bool to_host);
 	void TransformColor(Result input, Result output, ColorTransform transform, bool to_host);
+	// Color-clear keys are multiples of 0x20, so key >> 5 selects one of these slots.
+	static constexpr uint32_t ColorClearSlots = 8;
+	// Returns the buffer whose dword slice * ColorClearSlots + (key >> 5) is set when every byte
+	// of that metadata slice equals a key whose bit `keys` selects; a hit expands to 0xff when
+	// `expand` is set.
+	[[nodiscard]] vk::Buffer CheckColorClear(Result metadata, uint32_t slices, uint32_t keys,
+	                                         bool expand);
 
 private:
 	friend struct TileManagerTestAccess;
@@ -134,6 +141,8 @@ private:
 	vk::Pipeline                            m_d24_to_d16      = nullptr;
 	vk::Pipeline                            m_d32_to_d16      = nullptr;
 	vk::Pipeline                            m_color_transform = nullptr;
+	vk::Pipeline                            m_color_clear     = nullptr;
+	std::unique_ptr<Buffer>                 m_clear_predicates;
 };
 
 } // namespace Libs::Graphics

@@ -15,6 +15,7 @@
 #include "graphics/host_gpu/renderer/cache/multiLevelPageTable.h"
 #include "graphics/host_gpu/renderer/cache/streamBuffer.h"
 
+#include <array>
 #include <map>
 #include <unordered_map>
 #include <mutex>
@@ -91,6 +92,11 @@ public:
 	[[nodiscard]] bool HasGpuDirtyBytes(uint64_t vaddr, uint64_t size);
 	[[nodiscard]] bool IsRegionCpuModified(uint64_t vaddr, uint64_t size);
 	[[nodiscard]] bool IsRegionGpuModified(uint64_t vaddr, uint64_t size);
+	// Color metadata the GPU found free of the clear keys in `keys` (bits of code >> 5) stays so
+	// until a GPU write or download.
+	void               MarkColorMetadataChecked(uint64_t vaddr, uint64_t size, uint32_t keys);
+	[[nodiscard]] bool IsColorMetadataChecked(uint64_t vaddr, uint64_t size, uint32_t keys) const;
+	void               ForgetColorMetadataChecks(uint64_t vaddr, uint64_t size);
 	/** Forgets GPU writes to a range whose contents are gone, so nothing is read back. */
 	void               DiscardGpuWrites(uint64_t vaddr, uint64_t size);
 	/** Whether an asynchronous download (still to be published) writes into the range. */
@@ -150,6 +156,7 @@ private:
 	BufferMap                                         m_buffers;
 	PageTable                                         m_page_table;
 	RangeSet                                          m_gpu_modified_ranges;
+	std::array<RangeSet, 8>                           m_checked_color_metadata;
 	// GPU-written bytes whose download is in flight (a CPU fault elsewhere on their page did not
 	// wait for it). Their guest copy is stale until then, so uploads must not send it back.
 	RangeSet                                          m_async_download_ranges;

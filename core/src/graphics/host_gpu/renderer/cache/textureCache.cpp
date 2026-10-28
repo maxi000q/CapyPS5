@@ -475,12 +475,6 @@ TextureCache::ImageIds TextureCache::FindImagesInRegion(uint64_t address, uint64
 		return {};
 	}
 
-	uint32_t query_epoch = ++m_image_query_epoch;
-	if (query_epoch == 0) {
-		m_slot_images.ForEach([](ImageId, const Image& image) { image.query_epoch = 0; });
-		query_epoch = ++m_image_query_epoch;
-	}
-
 	ImageIds result;
 	ForEachPage(address, size, [&](uint64_t page) {
 		const auto* owners = m_image_page_table.Find(page);
@@ -492,15 +486,16 @@ TextureCache::ImageIds TextureCache::FindImagesInRegion(uint64_t address, uint64
 			if (image == nullptr) {
 				return;
 			}
-			if (image->query_epoch == query_epoch) {
+			if (image->picked || !image->Overlaps(address, size, page_overlap)) {
 				return;
 			}
-			image->query_epoch = query_epoch;
-			if (image->Overlaps(address, size, page_overlap)) {
-				result.push_back(id);
-			}
+			image->picked = true;
+			result.push_back(id);
 		});
 	});
+	for (const auto id: result) {
+		m_slot_images[id].picked = false;
+	}
 	return result;
 }
 
@@ -1096,12 +1091,99 @@ void TextureCache::MaterializeColorClear(ImageId id, const ImageDesc& desc,
 	if (first >= layers || count > layers - first) {
 		EXIT("TextureCache: color view exceeds its native metadata slices\n");
 	}
-	// Finish native metadata writes before reading backing bytes. This can submit the scheduler,
-	// so discovery runs before final draw uploads and never holds the texture lock across it.
-	if (m_buffer_cache.IsRegionGpuModified(range.address, range.size)) {
-		m_buffer_cache.ReadMemory(range.address, range.size, false);
+	const auto       slice_size = range.size / layers;
+	const GuestRange viewed {range.address + slice_size * first, slice_size * count};
+	if (m_buffer_cache.IsRegionGpuModified(viewed.address, viewed.size)) {
+		std::array<vk::ClearAttachment, TileManager::ColorClearSlots> clears {};
+		uint32_t keys = 0;
+		for (uint32_t key = 0; key < clears.size(); key++) {
+			clears[key].aspectMask = vk::ImageAspectFlagBits::eColor;
+			if (DecodeColorClear(desc, static_cast<uint8_t>(key << 5u),
+			                     clears[key].clearValue.color)) {
+				keys |= 1u << key;
+			}
+		}
+		// No selected key to clear, or none left since the last check.
+		if (m_buffer_cache.IsColorMetadataChecked(viewed.address, viewed.size, keys)) {
+			return;
+		}
+		{
+			std::scoped_lock lock {m_lock};
+			auto&            image = m_slot_images[id];
+			// Compressed images cannot upload, so they must already hold native contents.
+			const bool native_current = (image.usage.render_target || image.IsGpuModified()) &&
+			                            !image.IsBufferModified() && !image.IsCpuDirty();
+			// 2D-array attachment views select 2D layers or, of a volume, depth slices.
+			if (m_graphics.conditional_rendering_enabled &&
+			    image.backing.image_type != vk::ImageType::e1D &&
+			    count <= m_graphics.GetPhysicalDeviceProperties().limits.maxFramebufferLayers &&
+			    (image.backing.usage & vk::ImageUsageFlagBits::eColorAttachment) &&
+			    (m_graphics.GetFormatProperties(view.format).optimalTilingFeatures &
+			     vk::FormatFeatureFlagBits::eColorAttachment) &&
+			    (desc.info.metadata.compression == VideoOutCompression::Uncompressed ||
+			     native_current)) {
+				// The GPU selects each slice's clear, so the CPU never waits for the metadata.
+				InitializeImage(id);
+				const bool expand = desc.type != BindingType::VideoOut;
+				const auto [buffer, offset] =
+				    m_buffer_cache.ObtainBuffer(viewed.address, viewed.size, expand);
+				const auto predicates = m_tiler.CheckColorClear(
+				    {buffer->Handle(), offset, viewed.size}, count, keys, expand);
+				if (expand) {
+					m_buffer_cache.MarkColorMetadataChecked(viewed.address, viewed.size, keys);
+				}
+				const auto command = m_scheduler.Current().Handle();
+				// One color-attachment pass over the viewed slices; a predicate buffer word per
+				// (slice, key) selects which clears the GPU executes.
+				ImageViewInfo clear_view {};
+				clear_view.format      = view.format;
+				clear_view.type =
+				    count == 1 ? vk::ImageViewType::e2D : vk::ImageViewType::e2DArray;
+				clear_view.base_level  = view.base_level;
+				clear_view.base_layer  = image_first;
+				clear_view.layer_count = count;
+				clear_view.usage       = vk::ImageUsageFlagBits::eColorAttachment;
+				image.Transit(vk::ImageLayout::eColorAttachmentOptimal,
+				              vk::AccessFlagBits2::eColorAttachmentRead |
+				                  vk::AccessFlagBits2::eColorAttachmentWrite,
+				              {}, command);
+				vk::RenderingAttachmentInfo attachment {};
+				attachment.imageView   = image.FindView(clear_view);
+				attachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+				attachment.loadOp      = vk::AttachmentLoadOp::eLoad;
+				attachment.storeOp     = vk::AttachmentStoreOp::eStore;
+				vk::RenderingInfo rendering {};
+				rendering.renderArea.extent = {
+				    std::max(image.backing.extent.width >> view.base_level, 1u),
+				    std::max(image.backing.extent.height >> view.base_level, 1u)};
+				rendering.layerCount           = count;
+				rendering.colorAttachmentCount = 1;
+				rendering.pColorAttachments    = &attachment;
+				command.beginRendering(&rendering);
+				vk::ClearRect rect {.rect = rendering.renderArea, .layerCount = 1};
+				for (uint32_t slice = 0; slice < count; slice++) {
+					rect.baseArrayLayer = slice;
+					for (uint32_t key = 0; key < clears.size(); key++) {
+						if ((keys & (1u << key)) != 0) {
+							const vk::ConditionalRenderingBeginInfoEXT predicate {
+							    .buffer = predicates,
+							    .offset = (slice * clears.size() + key) * sizeof(uint32_t)};
+							command.beginConditionalRenderingEXT(&predicate);
+							command.clearAttachments(1, &clears[key], 1, &rect);
+							command.endConditionalRenderingEXT();
+						}
+					}
+				}
+				command.endRendering();
+				CommitGpuWrite(image);
+				return;
+			}
+		}
+		// Finish native metadata writes before reading backing bytes. This can submit the
+		// scheduler, so discovery runs before final draw uploads and never holds the texture
+		// lock across it.
+		m_buffer_cache.ReadMemory(viewed.address, viewed.size, false);
 	}
-	const auto slice_size = range.size / layers;
 	for (uint32_t slice = 0; slice < count; slice++) {
 		const auto address = range.address + slice_size * (first + slice);
 		uint8_t code = 0;
