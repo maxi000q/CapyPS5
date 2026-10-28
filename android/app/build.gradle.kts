@@ -26,11 +26,12 @@ android {
         applicationId = "com.consolefivepro"
         minSdk = 31
         targetSdk = 34
-        // versionCode 17: the first v0.0.9proQ4 build (16) briefly shipped and was
-        // pulled; 17 replaces it with the frame-generator round so existing
-        // installs update cleanly over it.
-        versionCode = 17
-        versionName = "0.0.9proQ4"
+        // versionCode 18: v0.1.0pro - the first beta. The CFP MAX v2 performance
+        // mode, the windowed-flicker and language-switch fixes, the redesigned
+        // controls editor, the occlusion-query and ZArchive rounds, and the
+        // improved Kurdish translation.
+        versionCode = 18
+        versionName = "0.1.0pro"
 
         ndk {
             abiFilters.add("arm64-v8a")
