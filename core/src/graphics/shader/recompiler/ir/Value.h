@@ -145,10 +145,6 @@ public:
 	void AddPhiOperand(Block* predecessor, Value value);
 	void ReplaceUsesWith(Value replacement, bool preserve = true);
 	void Invalidate();
-	// Drops the argument storage without touching any use list - for teardown paths
-	// that destroy the definitions and their users together, where unlinking would
-	// walk lists that are about to die anyway.
-	void DropArgs();
 
 	template <typename T>
 	requires(sizeof(T) <= sizeof(uint64_t) && std::is_trivially_copyable_v<T>)
@@ -168,11 +164,6 @@ public:
 private:
 	friend void EliminateDeadCode(const std::vector<Block*>& blocks);
 
-	// Reference to the index-th argument slot, shared between the const reader (Arg)
-	// and the writers (SetArg, ReplaceUsesWith) so the three-way arity dispatch
-	// (inline / large / phi) lives in exactly one place.
-	template <typename Self>
-	static auto& ArgSlot(Self& self, size_t index);
 	void AddUse(Inst* used, size_t operand);
 	void RemoveUse(Inst* used, size_t operand);
 	void ClearArgs();
