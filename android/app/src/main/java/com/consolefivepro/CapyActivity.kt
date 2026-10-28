@@ -4,6 +4,7 @@
 package com.consolefivepro
 
 import android.os.Bundle
+import android.content.Context
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -31,6 +32,14 @@ object InputRouter {
 
 /** Full-screen activity whose physical controller drives the UI or, in game, the emulated pad. */
 abstract class CapyActivity : ComponentActivity() {
+
+    // Every activity of the app (launcher and game) wraps its base context here: the wrapper
+    // carries the selected language's locale and layout direction and answers string lookups
+    // from the engine's lang/ files (see Localization). attachBaseContext runs before any
+    // resource is touched, so onCreate and Compose see the language from the very start.
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(Localization.wrap(base))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

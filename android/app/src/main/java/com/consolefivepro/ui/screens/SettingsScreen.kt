@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import com.consolefivepro.ButtonLayout
+import com.consolefivepro.Localization
 import androidx.compose.ui.res.stringResource
 import com.consolefivepro.GpuDrivers
 import com.consolefivepro.GpuInfo
@@ -369,6 +370,18 @@ fun SettingsScreen(
             },
             SettingsCategory(context.getString(R.string.category_system), Icons.Outlined.Settings) {
                 listOf(
+                    // v0.0.10pro: the interface language. Every string comes from the engine
+                    // tree's lang/ folder; switching restarts the screens in the new language
+                    // (Arabic and Kurdish mirrored right-to-left).
+                    SettingItem(
+                        context.getString(R.string.language),
+                        context.getString(R.string.language_desc),
+                        Localization.currentLanguage(context).label,
+                        onStep = { step ->
+                            val current = Localization.currentLanguage(context)
+                            Localization.setLanguage(context, cycle(Localization.languages, current, step))
+                        },
+                    ),
                     SettingItem(
                         context.getString(R.string.update_checks), context.getString(R.string.update_checks_desc),
                         context.getString(if (settings.updateChecks) R.string.enabled else R.string.disabled),

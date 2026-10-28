@@ -43,10 +43,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import com.consolefivepro.Localization
 import com.consolefivepro.R
 import com.consolefivepro.Release
 import com.consolefivepro.Updater
@@ -258,10 +258,12 @@ fun SupportDialog(onClose: () -> Unit) {
     }
 }
 
-/** First start after an update: what changed in [version], from the whats_new_items list. */
+/** First start after an update: what changed in [version]. The items come from the
+ *  whats_new_items array of the engine's lang/ files (English file for languages that keep
+ *  their changelog untranslated). */
 @Composable
 fun WhatsNewDialog(version: String, onClose: () -> Unit) {
-    val items = stringArrayResource(R.array.whats_new_items)
+    val items = Localization.stringArray("whats_new_items")
     NoticeDialog(
         title = stringResource(R.string.whats_new_title, version),
         icon = Icons.Outlined.NewReleases,

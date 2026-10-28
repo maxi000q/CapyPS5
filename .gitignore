@@ -59,3 +59,7 @@ AGENTS.md
 GEMINI.md
 .cursorrules
 .clinerules
+
+# Interface translations are edited in the engine tree's lang/ folder; the build copies
+# them into the APK assets (syncLangFiles task), so the copy below is generated.
+android/app/src/main/assets/lang/

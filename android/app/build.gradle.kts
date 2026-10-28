@@ -7,6 +7,17 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// The engine's lang/ folder (repository root) is the single source of the interface
+// translations; every build copies its JSON files into the APK assets, where the
+// Localization object reads them. assets/lang is generated - edit the root folder.
+val syncLangFiles = tasks.register<Copy>("syncLangFiles") {
+    from(rootProject.projectDir.parentFile.resolve("lang")) {
+        include("*.json")
+    }
+    into(layout.projectDirectory.dir("src/main/assets/lang"))
+}
+tasks.named("preBuild") { dependsOn(syncLangFiles) }
+
 android {
     namespace = "com.consolefivepro"
     compileSdk = 35
@@ -25,9 +36,10 @@ android {
             abiFilters.add("arm64-v8a")
         }
 
-        // The app ships English and Spanish; keep locale resources from
-        // androidx/Compose out of the APK for every other language.
-        resourceConfigurations += listOf("en", "es")
+        // The app's interface strings live in the engine tree's lang/ folder as JSON (one
+        // file per language, English the default); the Android resources stay English-only
+        // as the final fallback. Keep locale resources from androidx/Compose out of the APK.
+        resourceConfigurations += listOf("en")
     }
 
     lint {
