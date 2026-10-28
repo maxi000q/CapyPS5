@@ -128,8 +128,9 @@ private:
 public:
 	// Scale of every downscaled image (debug.capy.res_scale), 1 when scaling is off.
 	[[nodiscard]] static float ResolutionScale();
-	// CFP MAX (debug.capy.cfp_max): 0.5 when the half-size high-quality mode is
-	// on, 1 otherwise (see ChooseScale).
+	// CFP MAX (debug.capy.cfp_max): 0.4 when the deep high-quality mode is on
+	// (40% working resolution, alias-free prefilter + present-path
+	// reconstruction), 1 otherwise (see ChooseScale).
 	[[nodiscard]] static float CfpMaxScale();
 
 private:

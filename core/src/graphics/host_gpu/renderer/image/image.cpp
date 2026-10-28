@@ -853,12 +853,42 @@ void Image::UploadScaled(std::span<const vk::BufferImageCopy> copies, vk::Buffer
 	                     vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferWrite,
 	                     vk::AccessFlagBits2::eTransferRead);
 	Transit(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite, {}, command);
-	BlitLevels(m_graphics, command, full->image, info.extent, backing.image, backing.extent,
-	           backing.format, aspect, backing.mip_levels, backing.layers);
+	// CFP MAX 40 (v0.0.10pro): at 40% the fold is a 2.5x minification, and a
+	// single linear blit averages only a 2x2 footprint - high frequencies fold
+	// into shimmering aliases exactly where players look (fine detail, text,
+	// foliage). Fold through an exact-half image first (a true 2x box average -
+	// what a linear blit computes at an integer 2x step) and then take the mild
+	// <=1.25x step down to the backing: an effective ~6-tap area prefilter at
+	// 2.5x, still pure hardware blitter work (two plane blits on mobile
+	// tilers), no shaders, and the intermediate lives only for this upload.
+	std::unique_ptr<VulkanImage> half;
+	if (backing.extent.width * 2 < info.extent.width ||
+	    backing.extent.height * 2 < info.extent.height) {
+		const auto half_extent = ScaledExtent(info.extent, 0.5f);
+		half                  = CreateTransferImage(m_graphics, backing, half_extent);
+		TransferImageBarrier(command, half->image, aspect, vk::ImageLayout::eUndefined,
+		                     vk::ImageLayout::eTransferDstOptimal, {},
+		                     vk::AccessFlagBits2::eTransferWrite);
+		BlitLevels(m_graphics, command, full->image, info.extent, half->image, half_extent,
+		           backing.format, aspect, backing.mip_levels, backing.layers);
+		TransferImageBarrier(command, half->image, aspect, vk::ImageLayout::eTransferDstOptimal,
+		                     vk::ImageLayout::eTransferSrcOptimal,
+		                     vk::AccessFlagBits2::eTransferWrite,
+		                     vk::AccessFlagBits2::eTransferRead);
+		BlitLevels(m_graphics, command, half->image, half_extent, backing.image, backing.extent,
+		           backing.format, aspect, backing.mip_levels, backing.layers);
+	} else {
+		BlitLevels(m_graphics, command, full->image, info.extent, backing.image, backing.extent,
+		           backing.format, aspect, backing.mip_levels, backing.layers);
+	}
 	Transit(vk::ImageLayout::eGeneral,
 	        vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eTransferRead, {}, command);
-	m_scheduler.DeferOperation([graphics = &m_graphics, full = std::move(full)]() mutable {
+	m_scheduler.DeferOperation([graphics = &m_graphics, full = std::move(full),
+	                           half = std::move(half)]() mutable {
 		graphics->DeleteImage(*full);
+		if (half) {
+			graphics->DeleteImage(*half);
+		}
 	});
 }
 
