@@ -123,15 +123,17 @@ ResourcePlan& ResourcePlan::operator=(ResourcePlan&& other) noexcept {
 }
 
 Program::~Program() {
-	// Planning expressions can refer to block values but outlive block storage in the base class.
+	// Teardown only - DropArgs, not Invalidate: the definitions and every user of them
+	// die together in this one pass, so unlinking use lists would walk lists that are
+	// about to be destroyed anyway. Planning expressions can refer to block values but
+	// outlive block storage in the base class, and values cross block boundaries; both
+	// storages release their arguments here before either side outlives the other.
 	for (auto& inst: value_storage) {
-		inst.Invalidate();
+		inst.DropArgs();
 	}
-	// Values may cross block boundaries. Detach all arguments before any block starts destroying
-	// its instruction storage so reverse-use links always point to live definitions.
 	for (auto* block: blocks) {
 		for (auto& inst: *block) {
-			inst.Invalidate();
+			inst.DropArgs();
 		}
 	}
 }
