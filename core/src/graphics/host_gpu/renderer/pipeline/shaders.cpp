@@ -493,6 +493,17 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 		}
 	}
 
+	vk::CullModeFlags cull_mode = vk::CullModeFlagBits::eNone;
+	if (static_params.cull_back) {
+		cull_mode |= vk::CullModeFlagBits::eBack;
+	}
+	if (static_params.cull_front) {
+		cull_mode |= vk::CullModeFlagBits::eFront;
+	}
+
+	vk::FrontFace front_face =
+	    (static_params.face ? vk::FrontFace::eClockwise : vk::FrontFace::eCounterClockwise);
+
 	vk::PipelineRasterizationDepthClipStateCreateInfoEXT clip_ext {};
 	clip_ext.depthClipEnable = static_params.depth_clip_enable ? VK_TRUE : VK_FALSE;
 
@@ -513,8 +524,8 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 		provoking_vertex.pNext = rasterizer.pNext;
 		rasterizer.pNext = &provoking_vertex;
 	}
-	// Cull mode and front face are set per-draw through dynamic state; the rasterizer
-	// state here only carries the polygon mode.
+	rasterizer.cullMode  = cull_mode;
+	rasterizer.frontFace = front_face;
 	rasterizer.polygonMode = static_params.polygon_mode;
 	rasterizer.lineWidth = 1.0f;
 
@@ -617,8 +628,6 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 	    vk::DynamicState::eViewportWithCount,
 	    vk::DynamicState::eScissorWithCount,
 	    vk::DynamicState::eLineWidth,
-	    vk::DynamicState::eCullMode,
-	    vk::DynamicState::eFrontFace,
 	    vk::DynamicState::eDepthTestEnable,
 	    vk::DynamicState::eDepthWriteEnable,
 	    vk::DynamicState::eDepthCompareOp,

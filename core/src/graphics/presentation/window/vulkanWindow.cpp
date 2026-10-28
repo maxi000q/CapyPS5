@@ -314,10 +314,6 @@ static void VulkanFindPhysicalDevice(vk::Instance instance, vk::SurfaceKHR surfa
 		              "shaderSampledImageArrayNonUniformIndexing",
 		              required_features12.shaderSampledImageArrayNonUniformIndexing);
 		check_feature(features13.robustImageAccess, "robustImageAccess");
-		// Every graphics pipeline records the extended-dynamic-state set (viewport and
-		// scissor with count, depth, stencil) and cull mode / front face join it; a device
-		// without the bit cannot run a single draw.
-		check_feature(features13.extendedDynamicState, "extendedDynamicState");
 		check_feature(features13.dynamicRendering, "dynamicRendering",
 		              required_features13.dynamicRendering);
 		check_feature(features13.synchronization2, "synchronization2",
