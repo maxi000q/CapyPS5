@@ -40,6 +40,13 @@ JNIEXPORT jstring JNICALL Java_com_consolefivepro_NativeBridge_nativeGetVersion(
 
 ANativeWindow* AndroidGetNativeWindow();
 
+// Windowed-mode resize support: every real surface attach/detach bumps a
+// revision and re-records the change time; the presenter coalesces resize
+// storms by waiting for the window to settle before rebuilding.
+uint64_t AndroidSurfaceRevision();
+// Milliseconds since the last surface change (saturates at UINT64_MAX).
+uint64_t AndroidSurfaceAgeMs();
+
 #ifdef __cplusplus
 }
 

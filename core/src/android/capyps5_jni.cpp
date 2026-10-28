@@ -27,6 +27,7 @@
 #include <cstring>
 #include <android/log.h>
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -84,18 +85,58 @@ JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeInit(
 	      g_files_dir.c_str(), g_cache_dir.c_str());
 }
 
+static std::atomic<uint64_t> g_surface_revision {0};
+static std::atomic<uint64_t> g_surface_change_ns {0};
+
+static void NoteSurfaceChanged() {
+	g_surface_revision.fetch_add(1, std::memory_order_release);
+	const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+		std::chrono::steady_clock::now().time_since_epoch())
+		.count();
+	g_surface_change_ns.store(static_cast<uint64_t>(now_ns), std::memory_order_release);
+}
+
+uint64_t AndroidSurfaceRevision() {
+	return g_surface_revision.load(std::memory_order_acquire);
+}
+
+uint64_t AndroidSurfaceAgeMs() {
+	const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+		std::chrono::steady_clock::now().time_since_epoch())
+		.count();
+	const auto changed_ns = g_surface_change_ns.load(std::memory_order_acquire);
+	if (changed_ns == 0 || now_ns <= static_cast<int64_t>(changed_ns)) {
+		return 0;
+	}
+	return static_cast<uint64_t>(now_ns - static_cast<int64_t>(changed_ns)) / 1000000u;
+}
+
 JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeSetSurface(
     JNIEnv* env, jclass /*clazz*/, jobject surface) {
 	std::lock_guard lock(g_window_mutex);
 
-	if (g_native_window != nullptr) {
-		ANativeWindow_release(g_native_window);
-		g_native_window = nullptr;
-	}
 	if (surface != nullptr) {
-		g_native_window = ANativeWindow_fromSurface(env, surface);
+		auto* window = ANativeWindow_fromSurface(env, surface);
+		// Repeated surfaceChanged callbacks hand us the SAME underlying window
+		// (windowed resizes fire them in bursts). Swapping refs and bumping the
+		// revision for each would make the presenter rebuild the Vulkan surface
+		// over and over - the windowed flicker. Same window means nothing changed.
+		if (window == g_native_window) {
+			ANativeWindow_release(window); // drop the extra reference
+			return;
+		}
+		if (g_native_window != nullptr) {
+			ANativeWindow_release(g_native_window);
+		}
+		g_native_window = window;
+		NoteSurfaceChanged();
 		ALOGI("nativeSetSurface: Native window attached %p", g_native_window);
 	} else {
+		if (g_native_window != nullptr) {
+			ANativeWindow_release(g_native_window);
+			g_native_window = nullptr;
+		}
+		NoteSurfaceChanged();
 		ALOGI("nativeSetSurface: Surface detached");
 	}
 }
@@ -107,6 +148,7 @@ JNIEXPORT void JNICALL Java_com_consolefivepro_NativeBridge_nativeDestroySurface
 	if (g_native_window != nullptr) {
 		ANativeWindow_release(g_native_window);
 		g_native_window = nullptr;
+		NoteSurfaceChanged();
 		ALOGI("nativeDestroySurface: Native window released");
 	}
 }

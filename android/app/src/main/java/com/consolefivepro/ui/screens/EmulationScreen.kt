@@ -86,6 +86,41 @@ import androidx.compose.ui.res.stringResource
 
 private const val AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000L
 
+// Console Five Pro (v0.0.10pro): windowed resizes (freeform windows, split screen) fire
+// surfaceDestroyed + surfaceCreated pairs for every drag step. Detaching the native
+// surface inside each callback rebuilt the presentation path per step - the windowed
+// flicker with stale frames flashing through. The detach is deferred by a grace period:
+// a resize that brings a new surface cancels it, so only a real teardown (backgrounded,
+// view gone) detaches. The native side coalesces what still gets through (see
+// SurfaceStable in swapchain.cpp).
+private const val SURFACE_DETACH_GRACE_MS = 50L
+
+/** Deferred native-surface detach: canceled when the next surface arrives first. */
+private class DeferredSurfaceDetach {
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pending: Runnable? = null
+
+    fun deferDetach() {
+        cancel()
+        val task = Runnable {
+            pending = null
+            NativeBridge.nativeDestroySurface()
+        }
+        pending = task
+        handler.postDelayed(task, SURFACE_DETACH_GRACE_MS)
+    }
+
+    fun cancel() {
+        pending?.let(handler::removeCallbacks)
+        pending = null
+    }
+
+    fun detachNow() {
+        cancel()
+        NativeBridge.nativeDestroySurface()
+    }
+}
+
 private fun hasPhysicalGamepad(): Boolean = InputDevice.getDeviceIds().any { id ->
     val device = InputDevice.getDevice(id) ?: return@any false
     !device.isVirtual && (device.sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
@@ -222,6 +257,9 @@ fun EmulationScreen(
             ScreenAspect.R16_9 -> Modifier.align(Alignment.Center).aspectRatio(16f / 9f)
             ScreenAspect.R5_4 -> Modifier.align(Alignment.Center).aspectRatio(5f / 4f)
         }
+        // Console Five Pro (v0.0.10pro): resize storms must not detach the native surface per
+        // step - see DeferredSurfaceDetach above.
+        val surfaceDetach = remember { DeferredSurfaceDetach() }
         AndroidView(
             modifier = surfaceModifier,
             factory = { ctx ->
@@ -230,6 +268,9 @@ fun EmulationScreen(
                         private var started = false
 
                         override fun surfaceCreated(holder: SurfaceHolder) {
+                            // The resize that destroyed the old surface brought a new one:
+                            // cancel the deferred detach, the window is simply swapped.
+                            surfaceDetach.cancel()
                             // v0.0.10pro phase 2: the surface adds its own vote for the chosen
                             // display rate (some vendors listen to the surface, not the window).
                             if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -253,14 +294,20 @@ fun EmulationScreen(
                         }
 
                         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                            // Repeated callbacks for the same window are deduped natively; the
+                            // core rebuilds once the windowed resize settles.
                             if (holder.surface.isValid) NativeBridge.nativeSetSurface(holder.surface)
                         }
 
                         override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            NativeBridge.nativeDestroySurface()
+                            surfaceDetach.deferDetach()
                         }
                     })
                 }
+            },
+            onRelease = {
+                // The view left composition (activity teardown): detach now, no grace period.
+                surfaceDetach.detachNow()
             },
         )
 

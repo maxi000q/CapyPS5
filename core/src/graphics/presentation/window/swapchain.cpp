@@ -25,6 +25,7 @@
 #if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
 // v0.0.9proQ3: OpenGL compatibility backend (see eglCompat.h).
 #include "graphics/presentation/window/eglCompat.h"
+#include "android/capyps5_jni.h"
 #include <android/hardware_buffer.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -340,6 +341,8 @@ public:
 
 private:
 	void Destroy();
+	// Teardown of the overlay + frame-generator pipelines (format change or shutdown).
+	void DestroyPipelines();
 	void DrawOverlay(vk::CommandBuffer command, const Presenter::Layer& layer,
 	                 bool clear_attachment = false);
 
@@ -366,6 +369,11 @@ private:
 	vk::PipelineLayout             m_framegen_layout      = nullptr;
 	vk::Pipeline                   m_framegen_pipeline    = nullptr;
 	vk::Sampler                    m_framegen_sampler     = nullptr;
+	// Console Five Pro (v0.0.10pro): the presentation pipelines are format-keyed,
+	// not swapchain-keyed - they survive a recreation with an unchanged format
+	// (windowed resizes rebuild the swapchain repeatedly and would otherwise
+	// recompile the shaders every step).
+	vk::Format                      m_pipelines_format     = vk::Format::eUndefined;
 	uint32_t                       m_image_index         = static_cast<uint32_t>(-1);
 	uint32_t                       m_frame_index         = 0;
 	// v0.0.9proQ3: OpenGL compatibility backend ("Graphics API: OpenGL").
@@ -393,6 +401,43 @@ struct Presenter::Impl {
 		if (swapchain.ImageCount() > 0 && swapchain.Format() != vk::Format::eUndefined) {
 			frames.Initialize(swapchain.ImageCount(), swapchain.Format());
 		}
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+		// The constructor already built this presentation path from the current window;
+		// record its revision so the first Present does not take the settle path.
+		if (swapchain.IsReady()) {
+			surface_revision = AndroidSurfaceRevision();
+		}
+#endif
+	}
+
+	// Console Five Pro (v0.0.10pro): Android fires surfaceDestroyed + surfaceCreated
+	// pairs for EVERY step of a windowed resize (freeform windows, DeX, split
+	// screen). Recovering per step tore down and rebuilt the whole presentation
+	// path - swapchain, Vulkan surface, presentation pipelines - which showed as
+	// heavy flicker with stale frames flashing through. Instead: while the window
+	// keeps changing (see AndroidSurfaceRevision/AgeMs), skip presenting entirely -
+	// SurfaceFlinger keeps scaling the last presented buffer, so the picture stays
+	// on screen - and rebuild exactly once, after the window has been quiet for a
+	// moment. A swapchain that does not exist yet still builds immediately (game
+	// start, return from background).
+	[[nodiscard]] bool SurfaceStable() {
+#if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
+		constexpr uint64_t kSurfaceSettleMs = 150;
+		const uint64_t     revision         = AndroidSurfaceRevision();
+		if (revision == surface_revision) {
+			return true;
+		}
+		if (swapchain.IsReady() && AndroidSurfaceAgeMs() < kSurfaceSettleMs) {
+			return false;
+		}
+		RecoverSwapchain(Swapchain::Status::SurfaceLost);
+		if (swapchain.IsReady()) {
+			surface_revision = revision;
+		}
+		return swapchain.IsReady();
+#else
+		return true;
+#endif
 	}
 
 	void RecoverSwapchain(Swapchain::Status status) {
@@ -443,6 +488,9 @@ struct Presenter::Impl {
 	// v0.0.10pro phase 5: bus 0's previous frame, retained for the frame generator
 	// (the image the newest frame's motion is extended from).
 	Frame*                framegen_history = nullptr;
+	// Console Five Pro (v0.0.10pro): the window revision this presentation path was
+	// (last) built for; see SurfaceStable for the resize-storm coalescing.
+	uint64_t              surface_revision = 0;
 };
 
 void Swapchain::Create() {
@@ -618,10 +666,18 @@ void Swapchain::Create() {
 	}
 	m_image_index = static_cast<uint32_t>(-1);
 	m_frame_index = 0;
+	// Console Five Pro (v0.0.10pro): keep the presentation pipelines across a
+	// recreation when the format is unchanged - a windowed resize used to destroy
+	// and lazily recompile them (shader compile + driver upload) on every step.
+	if (m_pipelines_format != m_format) {
+		DestroyPipelines();
+		m_pipelines_format = m_format;
+	}
 }
 
 Swapchain::~Swapchain() {
 	Destroy();
+	DestroyPipelines();
 }
 
 #if defined(__ANDROID__) || defined(ANDROID) || defined(KYTY_PLATFORM_ANDROID)
@@ -922,22 +978,8 @@ void Swapchain::Destroy() {
 	if (m_system_overlay != nullptr) {
 		m_system_overlay->ReleaseVulkan();
 	}
-	graphics.device.destroyPipeline(m_overlay_pipeline, nullptr);
-	graphics.device.destroyPipelineLayout(m_overlay_layout, nullptr);
-	graphics.device.destroyDescriptorSetLayout(m_overlay_descriptors, nullptr);
-	graphics.device.destroySampler(m_overlay_sampler, nullptr);
-	m_overlay_pipeline    = nullptr;
-	m_overlay_layout      = nullptr;
-	m_overlay_descriptors = nullptr;
-	m_overlay_sampler     = nullptr;
-	graphics.device.destroyPipeline(m_framegen_pipeline, nullptr);
-	graphics.device.destroyPipelineLayout(m_framegen_layout, nullptr);
-	graphics.device.destroyDescriptorSetLayout(m_framegen_descriptors, nullptr);
-	graphics.device.destroySampler(m_framegen_sampler, nullptr);
-	m_framegen_pipeline    = nullptr;
-	m_framegen_layout      = nullptr;
-	m_framegen_descriptors = nullptr;
-	m_framegen_sampler     = nullptr;
+	// The presentation pipelines stay alive: they only depend on the swapchain
+	// format (see DestroyPipelines / Create).
 
 	for (const auto semaphore: m_image_acquired) {
 		if (semaphore != nullptr) {
@@ -969,6 +1011,27 @@ void Swapchain::Destroy() {
 	m_image_views.clear();
 	m_image_acquired.clear();
 	m_render_complete.clear();
+}
+
+void Swapchain::DestroyPipelines() {
+	auto& graphics = m_window.graphic_ctx;
+	graphics.device.destroyPipeline(m_overlay_pipeline, nullptr);
+	graphics.device.destroyPipelineLayout(m_overlay_layout, nullptr);
+	graphics.device.destroyDescriptorSetLayout(m_overlay_descriptors, nullptr);
+	graphics.device.destroySampler(m_overlay_sampler, nullptr);
+	m_overlay_pipeline    = nullptr;
+	m_overlay_layout      = nullptr;
+	m_overlay_descriptors = nullptr;
+	m_overlay_sampler     = nullptr;
+	graphics.device.destroyPipeline(m_framegen_pipeline, nullptr);
+	graphics.device.destroyPipelineLayout(m_framegen_layout, nullptr);
+	graphics.device.destroyDescriptorSetLayout(m_framegen_descriptors, nullptr);
+	graphics.device.destroySampler(m_framegen_sampler, nullptr);
+	m_framegen_pipeline    = nullptr;
+	m_framegen_layout      = nullptr;
+	m_framegen_descriptors = nullptr;
+	m_framegen_sampler     = nullptr;
+	m_pipelines_format     = vk::Format::eUndefined;
 }
 
 void Swapchain::Recreate(bool surface_lost) {
@@ -1719,6 +1782,9 @@ bool Presenter::Impl::PresentGenerated(float weight) {
 	if (layers[0].frame == nullptr || framegen_history == nullptr) {
 		return false;
 	}
+	if (!SurfaceStable()) {
+		return false;
+	}
 	auto* const newest   = layers[0].frame;
 	auto* const previous = framegen_history;
 	// A generated frame is only meaningful between two frames of the same geometry.
@@ -1850,6 +1916,9 @@ void Presenter::ClearLayer(int bus) {
 void Presenter::Impl::Present() {
 	KYTY_PROFILER_FUNCTION();
 
+	if (!SurfaceStable()) {
+		return;
+	}
 	const auto overlay_visual = GetSystemOverlayVisualState();
 	if (Common::DebugFlags::Enabled(Common::DebugFlags::IdleBeforePresent)) {
 		Common::LockGuard queue_lock(window.graphic_ctx.queue_mutex);
