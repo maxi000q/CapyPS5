@@ -229,7 +229,10 @@ static void CreateDescriptorLayout(GraphicContext& graphics, PipelineCache::Pipe
 }
 
 ScaledImageSpecialization::ScaledImageSpecialization(uint32_t mask) {
-	data.scale = TextureCache::ResolutionScale();
+	// One scale constant per stage: shadow maps carry their own scale, everything else the
+	// target scale.
+	data.scale = (mask & ShaderRecompiler::IR::ShadowScaleBit) != 0 ? TextureCache::ShadowScale()
+	                                                                : TextureCache::ResolutionScale();
 	data.mask  = mask;
 	entries[0] = {ShaderRecompiler::IR::ResolutionScaleSpecId, offsetof(Data, scale), sizeof(float)};
 	entries[1] = {ShaderRecompiler::IR::ScaledImageMaskSpecId, offsetof(Data, mask), sizeof(uint32_t)};
