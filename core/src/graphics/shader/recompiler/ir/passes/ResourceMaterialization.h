@@ -56,6 +56,9 @@ struct ResourceSpecialization {
 // Extracts the descriptor/SRT value graph before resource specialization. The returned plan owns
 // its values and is independent of the translated shader CFG.
 ResourcePlan ExtractResourcePlan(const Program& program);
+// Persisted shader-cache forms of a resource plan.
+std::vector<uint8_t> SaveResourcePlan(const ResourcePlan& plan);
+bool                 LoadResourcePlan(std::span<const uint8_t> bytes, ResourcePlan& plan);
 
 // Refreshes cached resources and specialization in place. A failed refresh must not be used.
 bool MaterializeResources(const ResourcePlan& program, const SrtRuntime& runtime,

@@ -8,6 +8,8 @@
 #include "graphics/guest_gpu/gpu_format.h"
 #include "graphics/shader/recompiler/BufferFormat.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
+#include "graphics/shader/recompiler/ir/Serialize.h"
+#include "graphics/shader/recompiler/ir/passes/SrtWalker.h"
 #include "graphics/shader/shaderBindings.h"
 
 #include <algorithm>
@@ -2067,6 +2069,99 @@ void ApplyResourceSpecialization(Program& program, const ResourceSpecialization&
 		}
 	}
 	image_remap.Apply(images);
+}
+
+namespace {
+
+using ControlPhis = decltype(ResourcePlan::control_phi_predecessors);
+
+// Instructions come first, so that any value can refer to them by index, then their arguments.
+// Plan Phis have no blocks; a control Phi lists the plan blocks of its arguments after them.
+void IoValues(Writer& writer, const std::list<Inst>& values, const ControlPhis& phis) {
+	IoAll(writer, static_cast<uint32_t>(values.size()));
+	for (const auto& inst: values) {
+		writer.index.emplace(&inst, static_cast<uint32_t>(writer.index.size()));
+		IoAll(writer, inst.GetOpcode(), inst.Flags<uint64_t>());
+	}
+	for (const auto& inst: values) {
+		if (inst.GetOpcode() != ValueOpcode::Phi) {
+			for (size_t index = 0; index < inst.NumArgs(); ++index) IoAll(writer, inst.Arg(index));
+			continue;
+		}
+		std::vector<Value> args;
+		for (size_t index = 0; index < inst.NumArgs(); ++index) {
+			EXIT_IF(inst.PhiBlock(index) != nullptr);
+			args.push_back(inst.Arg(index));
+		}
+		const auto found = phis.find(&inst);
+		IoAll(writer, args, found != phis.end() ? found->second : std::vector<uint32_t> {});
+	}
+}
+
+void IoValues(Reader& reader, std::list<Inst>& values, ControlPhis& phis) {
+	uint32_t count = 0;
+	Io(reader, count);
+	count = reader.Count(count);
+	for (uint32_t index = 0; index < count && reader.ok; ++index) {
+		ValueOpcode opcode {};
+		uint64_t    flags = 0;
+		IoAll(reader, opcode, flags);
+		reader.ok = reader.ok && opcode < ValueOpcode::Count;
+		if (reader.ok) reader.insts.push_back(&values.emplace_back(opcode, flags));
+	}
+	for (auto* inst: reader.insts) {
+		if (inst->GetOpcode() != ValueOpcode::Phi) {
+			for (size_t index = 0; index < inst->NumArgs(); ++index) {
+				Value arg;
+				Io(reader, arg);
+				inst->SetArg(index, arg);
+			}
+			continue;
+		}
+		std::vector<Value>    args;
+		std::vector<uint32_t> predecessors;
+		IoAll(reader, args, predecessors);
+		for (const auto arg: args) inst->AddPhiOperand(nullptr, arg);
+		if (!predecessors.empty()) phis.emplace(inst, std::move(predecessors));
+	}
+}
+
+bool DerivePlanState(ResourcePlan& plan) {
+	for (const auto group: plan.selector_groups) {
+		if (group != UINT32_MAX && group > plan.descriptor_sources.size()) return false;
+	}
+	if (plan.srt_plan_complete && plan.resource_tracking_complete) CompileSrtWalker(plan);
+	return true;
+}
+
+// Binds every plan field: one added later fails to compile here until it is stored or derived.
+template <class S, class P> void IoPlan(S& io, P& plan) {
+	auto& [stage, shader_hash, user_data_base, user_data_count, value_storage, memory_info,
+	       descriptor_sources, selector_groups, control_flow, control_phi_predecessors, srt_reads,
+	       requires_specialization_memory, source_reads, capture_specialization_reads,
+	       srt_plan_complete, resource_tracking_complete, info, uniform_fill,
+	       // Derived on load.
+	       srt_code, evaluation_contexts, evaluation_value_count, active_sources, visited_blocks,
+	       reachable_blocks, pending_blocks, material_keys, selector_keys] = plan;
+	IoValues(io, value_storage, control_phi_predecessors);
+	IoAll(io, stage, shader_hash, user_data_base, user_data_count, memory_info,
+	       descriptor_sources, selector_groups, control_flow, srt_reads,
+	       requires_specialization_memory, source_reads, capture_specialization_reads,
+	       srt_plan_complete, resource_tracking_complete, info, uniform_fill);
+}
+
+} // namespace
+
+std::vector<uint8_t> SaveResourcePlan(const ResourcePlan& plan) {
+	Writer writer;
+	IoPlan(writer, plan);
+	return std::move(writer.bytes);
+}
+
+bool LoadResourcePlan(std::span<const uint8_t> bytes, ResourcePlan& plan) {
+	Reader reader {bytes};
+	IoPlan(reader, plan);
+	return reader.ok && reader.bytes.empty() && DerivePlanState(plan);
 }
 
 } // namespace Libs::Graphics::ShaderRecompiler::IR

@@ -24,6 +24,8 @@
 #include <span>
 #include <type_traits>
 #include <unordered_map>
+#include "common/file.h"
+#include "common/uniqueFunction.h"
 
 namespace Libs::Graphics {
 
@@ -115,6 +117,36 @@ struct ShaderProgram {
 	vk::ShaderModule module = nullptr;
 
 	explicit operator bool() const { return id != 0 && module != nullptr; }
+};
+
+enum class ShaderStoreRecord : uint8_t { Module, GraphicsPipeline, ComputePipeline };
+
+// Precedes each store record's zstd frame.
+struct ShaderStoreFrame {
+	uint32_t compressed_size = 0;
+	uint32_t raw_size        = 0;
+	uint64_t checksum        = 0; // XXH3 of the compressed bytes.
+};
+
+[[nodiscard]] std::vector<uint8_t> ShaderStoreHeader(const GraphicContext& graphics);
+
+// Appends compressed shader-store records on a dedicated thread; a record torn by a crash
+// only loses itself and everything after it.
+class ShaderStoreWriter {
+public:
+	void Open(const std::filesystem::path& path, std::span<const uint8_t> header, uint64_t kept);
+	void Append(std::vector<uint8_t>&& record);
+	explicit operator bool() const { return !m_file.IsInvalid(); }
+	~ShaderStoreWriter();
+
+private:
+	void Post(Common::UniqueFunction<void>&& job);
+
+	Common::File          m_file;
+	std::mutex            m_mutex;
+	std::condition_variable_any m_ready;
+	std::deque<Common::UniqueFunction<void>> m_jobs;
+	std::jthread          m_thread;
 };
 
 // The owning renderer serializes access, including saves while the GPU is running.
@@ -216,6 +248,12 @@ private:
 
 	GraphicContext&               m_graphics;
 	ShaderRecompiler::IR::ImageHeapSource* m_image_heap = nullptr;
+	ShaderStoreWriter m_store;
+	// Emulator-side shader store: final SPIR-V plus pipeline keys, warmed up on start.
+	void WarmUp();
+	[[nodiscard]] bool LoadRecord(std::span<const uint8_t>& records);
+	void StorePipeline(const GraphicsPipelineKey& key);
+	void StoreComputePipeline(uint64_t key);
 	std::unique_ptr<ProgramCache> m_program_cache;
 	vk::PipelineCache             m_driver_cache = nullptr;
 	std::filesystem::path         m_driver_cache_path;

@@ -9,6 +9,11 @@
 #include <sys/resource.h>
 #endif
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
+
+#include "graphics/shader/recompiler/ir/Serialize.h"
+#include <zstd.h>
+
+#include <ranges>
 // v0.0.9proQ3: per-vendor spirv-opt pass lists over translated shaders.
 #include "graphics/host_gpu/renderer/pipeline/spirvOptimizer.h"
 
@@ -121,6 +126,12 @@ std::string PipelineCacheTitleId() {
 		return {};
 	}
 	return title_id;
+}
+
+// Record fields shared by writing and reading: a program cache key.
+template <class S, class T> void IoProgramKey(S& io, T& key) {
+	auto& [stage, hash, user_data_count, code_size, static_state] = key;
+	ShaderRecompiler::IR::IoAll(io, stage, hash, user_data_count, code_size, static_state);
 }
 
 template <typename... Args>
@@ -316,6 +327,11 @@ struct PipelineCache::ProgramCache {
 		ShaderRecompiler::IR::ResourceSpecialization specialization;
 		ShaderRecompiler::IR::CompiledShaderInfo     program;
 		ShaderProgram                                handle;
+		// The shader-store record of this permutation: the stage input info it was
+		// compiled from (raw bytes; `stage` is rebuilt on load) and its final SPIR-V.
+		uint8_t                stage_kind = 0; // 0 vertex family, 1 pixel, 2 compute
+		ShaderVertexInputInfo  vertex_info;
+		ShaderPixelInputInfo   pixel_info;
 	};
 
 	struct SourceEntry {
@@ -388,7 +404,8 @@ struct PipelineCache::ProgramCache {
 	                               ShaderRecompiler::TranslateResult            translated,
 	                               ShaderRecompiler::IR::ResourceSpecialization specialization,
 	                               uint32_t push_data_start_dword,
-	                               std::span<const uint32_t> function_code) {
+	                               std::span<const uint32_t> function_code,
+	                               std::vector<uint32_t>& spirv_out) {
 		auto result = ShaderRecompiler::CompileProgram(std::move(translated), options,
 		                                               specialization, push_data_start_dword);
 		if (!ValidateShaderSpirv(options.dump_label, options.shader_hash, result.spirv)) {
@@ -407,6 +424,7 @@ struct PipelineCache::ProgramCache {
 			LOGF("%s SPIR-V words=%" PRIu64 " wave_size=%u\n", options.dump_label,
 			     static_cast<uint64_t>(result.spirv.size()), options.wave_size);
 		}
+		spirv_out = std::move(result.spirv);
 		return {
 		    .function_code  = {function_code.begin(), function_code.end()},
 		    .specialization = std::move(specialization),
@@ -533,9 +551,22 @@ struct PipelineCache::ProgramCache {
 				return permutation->handle;
 			}
 		}
+		std::vector<uint32_t> stored_spirv;
 		entry->second.permutations.push_back(CompilePermutation(
-		    stage_name, options, std::move(translated), entry->second.specialization, push_data_cursor,
-		    entry->second.FunctionCode()));
+		    stage_name, options, std::move(translated), entry->second.specialization,
+		    push_data_cursor, entry->second.FunctionCode(), stored_spirv));
+		if constexpr (std::is_same_v<InputInfo, ShaderVertexInputInfo>) {
+			entry->second.permutations.back().stage_kind  = 0;
+			entry->second.permutations.back().vertex_info = input_info;
+		} else if constexpr (std::is_same_v<InputInfo, ShaderPixelInputInfo>) {
+			entry->second.permutations.back().stage_kind = 1;
+			entry->second.permutations.back().pixel_info = input_info;
+		} else {
+			entry->second.permutations.back().stage_kind = 2;
+		}
+		if (store != nullptr) {
+			Store(lookup_key, entry->second.permutations.back(), stored_spirv);
+		}
 		if constexpr (std::is_same_v<InputInfo, ShaderVertexInputInfo>) {
 			entry->second.permutations.back().program.mesh_compute =
 			    stage == ShaderType::Mesh && input_info.mesh.emulate;
@@ -572,8 +603,9 @@ struct PipelineCache::ProgramCache {
 	}
 
 	explicit ProgramCache(vk::Device device,
-	                     ShaderRecompiler::IR::ImageHeapSource* image_heap)
-	    : device(device), image_heap(image_heap) {
+	                     ShaderRecompiler::IR::ImageHeapSource* image_heap,
+	                     ShaderStoreWriter* shader_store)
+	    : device(device), image_heap(image_heap), store(shader_store) {
 		lookup_key.static_state.reserve(MaxStaticKeyWords);
 	}
 	~ProgramCache() {
@@ -589,15 +621,296 @@ struct PipelineCache::ProgramCache {
 	ProgramKey                                                  lookup_key;
 	vk::Device                                                  device;
 	ShaderRecompiler::IR::ImageHeapSource* image_heap = nullptr;
+	ShaderStoreWriter*                   store  = nullptr;
+
+	// Persists a first-run permutation and its final SPIR-V.
+	void Store(const ProgramKey& key, const Permutation& permutation,
+	          const std::vector<uint32_t>& spirv);
 	uint64_t                                                    next_shader_id = 0;
 };
+
+void PipelineCache::ProgramCache::Store(const ProgramKey& key, const Permutation& permutation,
+                                       const std::vector<uint32_t>& spirv) {
+	if (store == nullptr || !*store) {
+		return;
+	}
+	using ShaderRecompiler::IR::Io;
+	using ShaderRecompiler::IR::IoAll;
+	using ShaderRecompiler::IR::Writer;
+	Writer record;
+	IoAll(record, ShaderStoreRecord::Module);
+	IoProgramKey(record, key);
+	const auto found = programs.find(key);
+	if (found == programs.end()) {
+		return;
+	}
+	const auto stored_plan =
+	    ShaderRecompiler::IR::SaveResourcePlan(found->second.resource_plan);
+	Io(record, stored_plan);
+	Io(record, permutation.function_code);
+	Io(record, permutation.specialization);
+	Io(record, permutation.program);
+	Io(record, permutation.stage_kind);
+	if (permutation.stage_kind == 0) record.Raw(&permutation.vertex_info,
+	                                         sizeof(permutation.vertex_info));
+	if (permutation.stage_kind == 1) record.Raw(&permutation.pixel_info,
+	                                        sizeof(permutation.pixel_info));
+	Io(record, spirv);
+	store->Append(std::move(record.bytes));
+}
+
+void PipelineCache::WarmUp() {
+	const auto title_id = PipelineCacheTitleId();
+	if (title_id.empty()) {
+		return;
+	}
+	std::filesystem::path path;
+#if defined(__ANDROID__)
+	// The working directory is not writable on Android; keep the store in the app's files.
+	path = std::filesystem::path(AndroidGetFilesDir()) / "_ShaderStore" / (title_id + ".bin");
+#else
+	if (KYTY_BUILD != KYTY_BUILD_RELEASE) {
+		PipelineCacheLog("Shader store: disabled (non-Release build)");
+		return;
+	}
+	path = std::filesystem::path("_ShaderStore") / (title_id + ".bin");
+#endif
+	const auto header = ShaderStoreHeader(m_graphics);
+	const auto start   = std::chrono::steady_clock::now();
+	std::vector<uint8_t> bytes;
+	if (Common::File file; Common::File::IsFileExisting(path) &&
+	                       file.Open(path, Common::File::Mode::Read)) {
+		bytes.resize(file.Size());
+		uint32_t read = 0;
+		file.Read(bytes.data(), static_cast<uint32_t>(bytes.size()), &read);
+		bytes.resize(read);
+	}
+	auto       records = std::span<const uint8_t>(bytes);
+	const bool reusable =
+	    records.size() >= header.size() &&
+	    std::ranges::equal(records.first(header.size()), header);
+	if (reusable) {
+		PipelineCacheLog("Shader store: warming up from {} ({:.1f} MB)",
+		                Common::PathToString(path),
+		                static_cast<double>(bytes.size()) / 1'000'000.0);
+		records = records.subspan(header.size());
+		while (LoadRecord(records)) {
+		}
+	} else {
+		PipelineCacheLog("Shader store: starting fresh {}", Common::PathToString(path));
+	}
+	// A damaged record ends the store; the records before it stay.
+	m_store.Open(path, header, reusable ? bytes.size() - records.size() : 0);
+
+	// Rebuild every stored pipeline against the loaded permutations.
+	struct StoredStage {
+		ProgramCache::SourceEntry*  entry       = nullptr;
+		ProgramCache::Permutation*  permutation = nullptr;
+	};
+	auto FindStage = [this](uint64_t id) -> StoredStage {
+		for (auto& [key, entry]: m_program_cache->programs) {
+			for (auto& permutation: entry.permutations) {
+				if (permutation.handle.id == id) return {&entry, &permutation};
+			}
+		}
+		return {};
+	};
+	uint32_t graphics_created = 0;
+	for (const auto& [key, job]: m_pending_pipelines) {
+		(void)job;
+		std::array<ShaderVertexInputInfo, 3> vertex_infos {};
+		uint32_t stage_count = 0;
+		bool     valid       = true;
+		for (uint32_t index = 0; index < 3 && key.vertex_shader_ids[index] != 0; index++) {
+			const auto stage = FindStage(key.vertex_shader_ids[index]);
+			if (stage.permutation == nullptr || stage.permutation->stage_kind != 0) {
+				valid = false;
+				break;
+			}
+			vertex_infos[stage_count]    = stage.permutation->vertex_info;
+			vertex_infos[stage_count].stage = {&stage.permutation->program,
+			                                  &stage.entry->resources};
+			stage_count++;
+		}
+		if (!valid) continue;
+		ShaderPixelInputInfo pixel_info;
+		const ShaderPixelInputInfo* ps_info = nullptr;
+		if (key.ps_shader_id != 0) {
+			const auto stage = FindStage(key.ps_shader_id);
+			if (stage.permutation == nullptr || stage.permutation->stage_kind != 1) continue;
+			pixel_info       = stage.permutation->pixel_info;
+			pixel_info.stage = {&stage.permutation->program, &stage.entry->resources};
+			ps_info          = &pixel_info;
+		}
+		GraphicsPrograms programs;
+		for (uint32_t index = 0; index < stage_count; index++) {
+			const auto stage = FindStage(key.vertex_shader_ids[index]);
+			programs.vertex[index] = stage.permutation->handle;
+		}
+		if (key.ps_shader_id != 0) {
+			programs.pixel = FindStage(key.ps_shader_id).permutation->handle;
+		}
+		Pipeline pipeline;
+		CreatePipelineInternal(m_graphics, pipeline, key.rendering, key.vertex_input,
+		                       std::span<const ShaderVertexInputInfo>(vertex_infos.data(),
+		                                                              stage_count),
+		                       ps_info, programs, key.static_params, m_driver_cache);
+		if (pipeline.pipeline != nullptr) {
+			m_graphics_pipelines.emplace(key,
+			                          std::make_unique<Pipeline>(std::move(pipeline)));
+			graphics_created++;
+		}
+	}
+	uint32_t compute_created = 0;
+	for (const auto& [id, job]: m_pending_compute) {
+		(void)job;
+		const auto stage = FindStage(id >> 32);
+		if (stage.permutation == nullptr) continue;
+		Pipeline pipeline;
+		CreatePipelineInternal(m_graphics, pipeline,
+		                       {&stage.permutation->program, &stage.entry->resources},
+		                       stage.permutation->handle.module, m_driver_cache,
+		                       static_cast<uint32_t>(id));
+		if (pipeline.pipeline != nullptr) {
+			m_compute_pipelines.emplace(id,
+			                         std::make_unique<Pipeline>(std::move(pipeline)));
+			compute_created++;
+		}
+	}
+	m_pending_pipelines.clear();
+	m_pending_compute.clear();
+	if (graphics_created + compute_created != 0) {
+		SavePeriodically();
+	}
+	PipelineCacheLog("Shader store: loaded {} programs, {} graphics + {} compute pipelines in {}"
+	                " ms",
+	                m_program_cache->programs.size(), graphics_created, compute_created,
+	                std::chrono::duration_cast<std::chrono::milliseconds>(
+	                    std::chrono::steady_clock::now() - start)
+	                    .count());
+}
+
+bool PipelineCache::LoadRecord(std::span<const uint8_t>& records) {
+	ShaderStoreFrame frame;
+	if (records.size() < sizeof(frame)) {
+		return false;
+	}
+	std::memcpy(&frame, records.data(), sizeof(frame));
+	if (records.size() - sizeof(frame) < frame.compressed_size) {
+		return false;
+	}
+	const auto compressed = records.subspan(sizeof(frame), frame.compressed_size);
+	if (XXH3_64bits(compressed.data(), compressed.size()) != frame.checksum ||
+	    ZSTD_getFrameContentSize(compressed.data(), compressed.size()) != frame.raw_size) {
+		return false;
+	}
+	std::vector<uint8_t> raw(frame.raw_size);
+	if (ZSTD_decompress(raw.data(), raw.size(), compressed.data(), compressed.size()) !=
+	    raw.size()) {
+		return false;
+	}
+	using ShaderRecompiler::IR::Io;
+	using ShaderRecompiler::IR::IoAll;
+	using ShaderRecompiler::IR::Reader;
+	using ShaderRecompiler::IR::Writer;
+	Reader     reader {raw};
+	auto       type     = ShaderStoreRecord::Module;
+	const auto complete = [&] { return reader.ok && reader.bytes.empty(); };
+	IoAll(reader, type);
+	switch (type) {
+		case ShaderStoreRecord::Module: {
+			ProgramCache::ProgramKey   key;
+			std::vector<uint8_t>      plan;
+			ProgramCache::Permutation permutation;
+			std::vector<uint32_t>     spirv;
+			IoProgramKey(reader, key);
+			Io(reader, plan);
+			Io(reader, permutation.function_code);
+			Io(reader, permutation.specialization);
+			Io(reader, permutation.program);
+			Io(reader, permutation.stage_kind);
+			if (permutation.stage_kind == 0) reader.Raw(&permutation.vertex_info,
+			                                        sizeof(permutation.vertex_info));
+			if (permutation.stage_kind == 1) reader.Raw(&permutation.pixel_info,
+			                                       sizeof(permutation.pixel_info));
+			Io(reader, spirv);
+			if (!complete()) {
+				return false;
+			}
+			auto entry = m_program_cache->programs.find(key);
+			if (entry == m_program_cache->programs.end()) {
+				entry = m_program_cache->programs
+				             .try_emplace(key, ShaderRecompiler::IR::ResourcePlan(), nullptr)
+				             .first;
+				if (!ShaderRecompiler::IR::LoadResourcePlan(
+				        plan, entry->second.resource_plan)) {
+					m_program_cache->programs.erase(entry);
+					return false;
+				}
+			}
+			permutation.handle = {.id = ++m_program_cache->next_shader_id,
+			                      .module = CompileSPV(spirv, m_graphics.device)};
+			if (permutation.handle.module == nullptr) {
+				return false;
+			}
+			entry->second.permutations.push_back(std::move(permutation));
+			break;
+		}
+		case ShaderStoreRecord::GraphicsPipeline: {
+			GraphicsPipelineKey key;
+			reader.Raw(&key, sizeof(key));
+			if (!complete()) {
+				return false;
+			}
+			m_pending_pipelines.emplace(std::move(key), std::make_shared<AsyncCompile>());
+			break;
+		}
+		case ShaderStoreRecord::ComputePipeline: {
+			uint64_t key = 0;
+			Io(reader, key);
+			if (!complete()) {
+				return false;
+			}
+			m_pending_compute.emplace(key, std::make_shared<AsyncCompile>());
+			break;
+		}
+		default: return false;
+	}
+	records = records.subspan(sizeof(frame) + compressed.size());
+	return true;
+}
+
+void PipelineCache::StorePipeline(const GraphicsPipelineKey& key) {
+	if (!m_store) {
+		return;
+	}
+	using ShaderRecompiler::IR::IoAll;
+	using ShaderRecompiler::IR::Writer;
+	Writer record;
+	IoAll(record, ShaderStoreRecord::GraphicsPipeline);
+	record.Raw(&key, sizeof(key));
+	m_store.Append(std::move(record.bytes));
+}
+
+void PipelineCache::StoreComputePipeline(uint64_t key) {
+	if (!m_store) {
+		return;
+	}
+	using ShaderRecompiler::IR::IoAll;
+	using ShaderRecompiler::IR::Writer;
+	Writer record;
+	IoAll(record, ShaderStoreRecord::ComputePipeline, key);
+	m_store.Append(std::move(record.bytes));
+}
 
 PipelineCache::PipelineCache(GraphicContext& graphics,
                                ShaderRecompiler::IR::ImageHeapSource* image_heap)
     : m_graphics(graphics), m_image_heap(image_heap),
-      m_program_cache(std::make_unique<ProgramCache>(graphics.device, image_heap)) {
+      m_program_cache(std::make_unique<ProgramCache>(graphics.device, image_heap,
+	                                               &m_store)) {
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 	InitializeDriverCache();
+	WarmUp();
 	// Background PSO compilation workers. Two on smaller SoCs, two more on 8+-core devices
 	// (Snapdragon 8/Dimensity class) and two more on 12+-core devices (big mid-range SoCs
 	// ship 4x A7x + 8x A5x), so shader warm-up during material streaming finishes sooner,
@@ -1325,6 +1638,7 @@ PipelineCache::Pipeline* PipelineCache::GetGraphicsPipeline(
 		}
 	}
 #endif
+	StorePipeline(key);
 	// `setprop debug.capy.async_pipelines 0` compiles every pipeline on the GPU thread.
 	static Common::DebugFlags::CachedValue async_pipelines("debug.capy.async_pipelines", 1);
 	// Console Five Pro (v0.0.9proQ4): the first miss is queued for EVERY draw, not only
@@ -1540,6 +1854,7 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 		}
 		if (AwaitPending(job, std::max<int64_t>(compute_wait_ms.Get(), 0))) {
 			auto [iter, inserted] = m_compute_pipelines.emplace(key, std::move(job->pipeline));
+	if (inserted) StoreComputePipeline(key);
 			EXIT_IF(!inserted);
 			m_pending_compute.erase(key);
 			return iter->second.get();
@@ -1569,6 +1884,7 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 	EXIT_NOT_IMPLEMENTED(cached->pipeline_layout == nullptr);
 
 	auto [iter, inserted] = m_compute_pipelines.emplace(key, std::move(cached));
+	if (inserted) StoreComputePipeline(key);
 	EXIT_IF(!inserted);
 
 	return iter->second.get();
@@ -1604,6 +1920,7 @@ PipelineCache::GetMeshComputePipeline(const ShaderVertexInputInfo& input_info,
 			return nullptr;
 		}
 		auto [iter, inserted] = m_compute_pipelines.emplace(key, std::move(job->pipeline));
+	if (inserted) StoreComputePipeline(key);
 		EXIT_IF(!inserted);
 		m_pending_compute.erase(pending);
 		return iter->second.get();
@@ -1628,6 +1945,7 @@ PipelineCache::GetMeshComputePipeline(const ShaderVertexInputInfo& input_info,
 	CreatePipelineInternal(m_graphics, *cached, input_info.stage, mesh_program.module,
 	                       m_driver_cache, scaled_images);
 	auto [iter, inserted] = m_compute_pipelines.emplace(key, std::move(cached));
+	if (inserted) StoreComputePipeline(key);
 	EXIT_IF(!inserted);
 	return iter->second.get();
 }
