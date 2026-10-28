@@ -271,13 +271,6 @@ static AudioOut2Submission& audioout2_submission(const AudioOut2ContextState& co
 	return g_audioout2_submissions[&context - g_audioout2_contexts.data()];
 }
 
-// The drain clock ticks in sixths of a microsecond, where one 48 kHz sample lasts
-// exactly 125 ticks - integer arithmetic all the way down, no rounding drift between
-// grains of different sizes.
-static uint64_t audioout2_clock() {
-	return LibKernel::KernelGetProcessTime() * 6;
-}
-
 static uint32_t audioout2_grain_micros(uint32_t grains) {
 	const auto sample_count = (grains == 0 ? 512u : grains);
 	return std::max<uint32_t>((sample_count * 1000000u) / 48000u, 1000u);
@@ -347,27 +340,25 @@ static void audioout2_update_context_locked(AudioOut2ContextState* state) {
 		return;
 	}
 
-	const auto now = audioout2_clock();
+	const auto now = LibKernel::KernelGetProcessTime();
 	if (state->last_update == 0 || state->queued == 0) {
 		state->last_update = now;
 		return;
 	}
-	if (now <= state->last_update) {
+
+	const auto grain_micros = static_cast<uint64_t>(audioout2_grain_micros(state->num_grains));
+	if (now <= state->last_update || grain_micros == 0) {
 		return;
 	}
 
-	// A grain of N samples lasts exactly N * 125 sixth-microseconds; the queue drains at
-	// the true PCM rate instead of the old microsecond-rounded rate, which over-reported
-	// small grains (512 samples = 10666.67 us rounded to 10667) and slowly accumulated a
-	// queue-drain bias.
-	const auto grain   = uint64_t {state->num_grains} * 125;
-	const auto drained = std::min<uint64_t>(state->queued, (now - state->last_update) / grain);
+	const auto elapsed = now - state->last_update;
+	const auto drained = std::min<uint64_t>(state->queued, elapsed / grain_micros);
 	if (drained == 0) {
 		return;
 	}
 
 	state->queued -= static_cast<uint32_t>(drained);
-	state->last_update += drained * grain;
+	state->last_update += drained * grain_micros;
 	if (state->queued == 0) {
 		state->last_update = now;
 	}
@@ -445,10 +436,7 @@ static void audioout2_queue_context_audio(AudioOut2ContextHandle ctx, AudioOut2S
 	out.object_mix.clear();
 	std::vector<AudioInternal::OutputParam> params;
 	params.reserve(AudioInternal::OUT_PORTS_MAX);
-	// A port's PCM buffer holds exactly one grain and the push plays it: take the buffer
-	// (the swap keeps the vector storage) and clear the port, so a port the game stops
-	// feeding goes silent on the very next grain instead of replaying stale samples.
-	for (auto& state: g_audioout2_ports) {
+	for (const auto& state: g_audioout2_ports) {
 		if (!state.used || state.context != ctx || state.pcm_data.empty()) {
 			continue;
 		}
@@ -456,11 +444,10 @@ static void audioout2_queue_context_audio(AudioOut2ContextHandle ctx, AudioOut2S
 			audioout2_mix_object(out.object_mix, context->num_grains, state);
 		} else if (state.audio_handle > 0 && params.size() < AudioInternal::OUT_PORTS_MAX) {
 			const auto i = params.size();
-			out.pcm[i].swap(state.pcm_data);
+			out.pcm[i]   = state.pcm_data;
 			out.gains[i] = state.gains;
 			params.push_back({state.audio_handle, out.pcm[i].data(), out.gains[i].data()});
 		}
-		state.pcm_data.clear();
 	}
 	if (!out.object_mix.empty() && params.size() < AudioInternal::OUT_PORTS_MAX) {
 		params.push_back({context->object_audio_handle, out.object_mix.data()});
@@ -546,7 +533,7 @@ int KYTY_SYSV_ABI AudioOut2ContextCreate(const AudioOut2ContextParam* params, vo
 	state->handle              = *ctx;
 	state->queue_depth         = params->queue_depth == 0 ? 4u : params->queue_depth;
 	state->num_grains          = num_grains;
-	state->last_update         = audioout2_clock();
+	state->last_update         = LibKernel::KernelGetProcessTime();
 	state->object_audio_handle = object_audio_handle;
 	g_audioout2_state_mutex.Unlock();
 
@@ -634,7 +621,7 @@ int KYTY_SYSV_ABI AudioOut2ContextPush(AudioOut2ContextHandle ctx, uint32_t bloc
 			sleep_micros = audioout2_grain_micros(state->num_grains);
 			if (state->queued < state->queue_depth || use_device_clock) {
 				if (state->queued == 0) {
-					state->last_update = audioout2_clock();
+					state->last_update = LibKernel::KernelGetProcessTime();
 				}
 				if (state->queued < state->queue_depth) {
 					state->queued++;
