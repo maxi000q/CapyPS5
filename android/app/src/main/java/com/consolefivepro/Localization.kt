@@ -7,7 +7,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.res.Configuration
-import android.view.View
+import android.content.res.Resources
 import org.json.JSONObject
 import java.util.Locale
 
@@ -93,10 +93,10 @@ object Localization {
 
         val config = Configuration(base.resources.configuration)
         config.setLocale(Locale.forLanguageTag(language.code))
-        // setLocale derives the direction from the locale table; the explicit assignment makes
-        // right-to-left independent of whether the system knows this particular tag.
-        config.layoutDirection =
-            if (language.rtl) View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
+        // setLocale derives the layout direction from the system's locale table (Arabic and
+        // Central Kurdish both read RTL there), so no separate direction write is needed -
+        // Configuration's field is read-only on this SDK anyway. The per-language rtl flag
+        // stays on the table for any future per-view use.
         return LocalizedContext(base.createConfigurationContext(config))
     }
 
@@ -126,19 +126,29 @@ object Localization {
 }
 
 /**
- * Delegates everything to the configured base context except string lookups: those answer from
- * the selected language file first, then the English file, then the base resources. Every
- * getString in the app - Compose's stringResource, Context.getString, the settings labels -
- * lands here, so no call site needs to know the language system exists.
+ * Carries the selected locale and answers string lookups one level down from the context:
+ * its getResources returns [LocalizedResources], whose getString/getText answer from the
+ * selected language file first, then the English file, then the base resources. Context's
+ * own getString is final on this SDK, but its implementation dispatches through
+ * getResources(), so Compose's stringResource, Context.getString and the settings labels all
+ * land here without any call site knowing the language system exists.
  */
-private class LocalizedContext(base: Context) : ContextWrapper(base) {
+private class LocalizedContext(private val base: Context) : ContextWrapper(base) {
+
+    private val localized = LocalizedResources(base.resources)
+
+    override fun getResources(): Resources = localized
+}
+
+private class LocalizedResources(private val base: Resources) :
+    Resources(base.assets, base.displayMetrics, base.configuration) {
 
     // Resource id -> entry name (the JSON key). Lookups hit the map; ids outside this
     // package (framework and library strings) fall straight through to the base.
     private val entryNames = HashMap<Int, String?>()
 
     private fun entryName(resId: Int): String? = entryNames.getOrPut(resId) {
-        runCatching { base.resources.getResourceEntryName(resId) }.getOrNull()
+        runCatching { base.getResourceEntryName(resId) }.getOrNull()
     }
 
     private fun raw(resId: Int): String? {
@@ -152,4 +162,6 @@ private class LocalizedContext(base: Context) : ContextWrapper(base) {
         val pattern = raw(resId) ?: return base.getString(resId, *formatArgs)
         return String.format(pattern, *formatArgs)
     }
+
+    override fun getText(resId: Int): CharSequence = raw(resId) ?: base.getText(resId)
 }
